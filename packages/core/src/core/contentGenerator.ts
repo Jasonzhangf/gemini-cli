@@ -139,11 +139,11 @@ export async function createContentGeneratorConfig(
   if (hijackConfig?.enabled) {
     const hijackRule = hijackConfig.hijackRules.find(rule => rule.targetModel === effectiveModel);
     if (hijackRule) {
-      // Show hijack notification but don't actually hijack yet (OpenAI implementation pending)
-      // hijackedAuthType = AuthType.OPENAI_COMPATIBLE;
-      // hijackedApiKey = hijackRule.apiKey;
-      // hijackedApiEndpoint = hijackRule.apiEndpoint;
-      // actualModel = hijackRule.actualModel;
+      // Enable actual hijacking
+      hijackedAuthType = AuthType.OPENAI_COMPATIBLE;
+      hijackedApiKey = hijackRule.apiKey;
+      hijackedApiEndpoint = hijackRule.apiEndpoint;
+      actualModel = hijackRule.actualModel;
       
       // Enhanced success notification
       console.log('');
@@ -152,8 +152,8 @@ export async function createContentGeneratorConfig(
       console.log(`✨ Configured To: ${hijackRule.actualModel}`);
       console.log(`🔗 Endpoint: ${hijackRule.apiEndpoint}`);
       console.log(`🔑 Using API Key: ${hijackRule.apiKey.substring(0, 8)}...`);
-      console.log('⚠️  OpenAI compatible implementation pending');
-      console.log('📝 For now, using regular Gemini API');
+      console.log('✅ OpenAI compatible implementation active');
+      console.log('🚀 Requests will be sent to configured endpoint');
       console.log('========================================');
       console.log('');
     }
@@ -224,7 +224,11 @@ export async function createContentGenerator(
   }
 
   if (config.authType === AuthType.OPENAI_COMPATIBLE) {
-    throw new Error('OpenAI compatible mode is not yet implemented. Please use regular Gemini models.');
+    const { OpenAICompatibleContentGenerator } = await import('./openaiCompatibleContentGenerator.js');
+    if (!config.apiKey || !config.apiEndpoint || !config.actualModel) {
+      throw new Error('OpenAI compatible mode requires apiKey, apiEndpoint, and actualModel');
+    }
+    return new OpenAICompatibleContentGenerator(config.apiKey, config.apiEndpoint, config.actualModel);
   }
 
   if (

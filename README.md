@@ -138,8 +138,8 @@ When hijacking is active, you'll see:
    ✨ Configured To: blacktooth-ab-test
    🔗 Endpoint: http://127.0.0.1:2048/v1
    🔑 Using API Key: 12345678...
-   ⚠️  OpenAI compatible implementation pending
-   📝 For now, using regular Gemini API
+   ✅ OpenAI compatible implementation active
+   🚀 Requests will be sent to configured endpoint
    ========================================
    ```
 
