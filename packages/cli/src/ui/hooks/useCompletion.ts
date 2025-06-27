@@ -15,7 +15,7 @@ import {
   getErrorMessage,
   Config,
   FileDiscoveryService,
-} from '@google/gemini-cli-core';
+} from '@fanzhang/gemini-cli-core-hijack';
 import {
   MAX_SUGGESTIONS_TO_SHOW,
   Suggestion,

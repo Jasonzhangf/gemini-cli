@@ -9,7 +9,7 @@ import * as os from 'os';
 import { loadCliConfig } from './config.js';
 import { Settings } from './settings.js';
 import { Extension } from './extension.js';
-import * as ServerConfig from '@google/gemini-cli-core';
+import * as ServerConfig from '@fanzhang/gemini-cli-core-hijack';
 
 vi.mock('os', async (importOriginal) => {
   const actualOs = await importOriginal<typeof os>();
@@ -29,9 +29,9 @@ vi.mock('read-package-up', () => ({
   ),
 }));
 
-vi.mock('@google/gemini-cli-core', async () => {
+vi.mock('@fanzhang/gemini-cli-core-hijack', async () => {
   const actualServer = await vi.importActual<typeof ServerConfig>(
-    '@google/gemini-cli-core',
+    '@fanzhang/gemini-cli-core-hijack',
   );
   return {
     ...actualServer,

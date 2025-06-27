@@ -90,6 +90,26 @@ having issues.
 For details on the terms of service and privacy notice applicable to your use of Gemini CLI, see the [Terms of Service and Privacy Notice](./docs/tos-privacy.md).
 
 
+## Local Installation with Hijack Feature
+
+This repository includes a custom version with OpenAI-compatible model hijacking capabilities. To install the local version:
+
+```bash
+# Quick installation
+./install-local.sh
+
+# Manual installation
+npm run build
+npm install -g .
+```
+
+For detailed instructions, see [LOCAL_INSTALLATION_GUIDE.md](./LOCAL_INSTALLATION_GUIDE.md).
+
+### Package Information
+- **Local Package**: `@fanzhang/gemini-cli-hijack`
+- **Version**: `0.1.5-hijack.1`
+- **Features**: Model hijacking, OpenAI compatibility, configurable targets
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for details on how to contribute to the Gemini CLI.

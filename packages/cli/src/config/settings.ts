@@ -13,7 +13,7 @@ import {
   BugCommandSettings,
   TelemetrySettings,
   AuthType,
-} from '@google/gemini-cli-core';
+} from '@fanzhang/gemini-cli-core-hijack';
 import stripJsonComments from 'strip-json-comments';
 import { DefaultLight } from '../ui/themes/default-light.js';
 import { DefaultDark } from '../ui/themes/default.js';

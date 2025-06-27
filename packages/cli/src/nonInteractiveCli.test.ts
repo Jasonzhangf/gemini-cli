@@ -7,14 +7,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runNonInteractive } from './nonInteractiveCli.js';
-import { Config, GeminiClient, ToolRegistry } from '@google/gemini-cli-core';
+import { Config, GeminiClient, ToolRegistry } from '@fanzhang/gemini-cli-core-hijack';
 import { GenerateContentResponse, Part, FunctionCall } from '@google/genai';
 
 // Mock dependencies
-vi.mock('@google/gemini-cli-core', async () => {
+vi.mock('@fanzhang/gemini-cli-core-hijack', async () => {
   const actualCore = await vi.importActual<
-    typeof import('@google/gemini-cli-core')
-  >('@google/gemini-cli-core');
+    typeof import('@fanzhang/gemini-cli-core-hijack')
+  >('@fanzhang/gemini-cli-core-hijack');
   return {
     ...actualCore,
     GeminiClient: vi.fn(),
@@ -109,7 +109,7 @@ describe('runNonInteractive', () => {
     };
 
     const { executeToolCall: mockCoreExecuteToolCall } = await import(
-      '@google/gemini-cli-core'
+      '@fanzhang/gemini-cli-core-hijack'
     );
     vi.mocked(mockCoreExecuteToolCall).mockResolvedValue({
       callId: 'fc1',
@@ -162,7 +162,7 @@ describe('runNonInteractive', () => {
     };
 
     const { executeToolCall: mockCoreExecuteToolCall } = await import(
-      '@google/gemini-cli-core'
+      '@fanzhang/gemini-cli-core-hijack'
     );
     vi.mocked(mockCoreExecuteToolCall).mockResolvedValue({
       callId: 'fcError',

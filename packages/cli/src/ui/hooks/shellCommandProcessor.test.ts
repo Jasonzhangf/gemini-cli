@@ -7,7 +7,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { vi } from 'vitest';
 import { useShellCommandProcessor } from './shellCommandProcessor';
-import { Config, GeminiClient } from '@google/gemini-cli-core';
+import { Config, GeminiClient } from '@fanzhang/gemini-cli-core-hijack';
 import * as fs from 'fs';
 import EventEmitter from 'events';
 
@@ -22,7 +22,7 @@ vi.mock('os', () => ({
   platform: () => 'linux',
   tmpdir: () => '/tmp',
 }));
-vi.mock('@google/gemini-cli-core');
+vi.mock('@fanzhang/gemini-cli-core-hijack');
 vi.mock('../utils/textUtils.js', () => ({
   isBinary: vi.fn(),
 }));

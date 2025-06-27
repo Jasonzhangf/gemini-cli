@@ -1,6 +1,6 @@
 {
-  "name": "@google/gemini-cli",
-  "version": "0.1.5",
+  "name": "@fanzhang/gemini-cli-hijack",
+  "version": "0.1.5-hijack.1",
   "description": "Gemini CLI",
   "repository": "google-gemini/gemini-cli",
   "type": "module",
@@ -30,7 +30,7 @@
     "sandboxImageUri": "gemini-cli-sandbox"
   },
   "dependencies": {
-    "@google/gemini-cli-core": "*",
+    "@fanzhang/gemini-cli-core-hijack": "*",
     "@types/update-notifier": "^6.0.8",
     "command-exists": "^1.2.9",
     "diff": "^7.0.0",

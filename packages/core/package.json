@@ -1,6 +1,6 @@
 {
-  "name": "@google/gemini-cli-core",
-  "version": "0.1.5",
+  "name": "@fanzhang/gemini-cli-core-hijack",
+  "version": "0.1.5-hijack.1",
   "description": "Gemini CLI Server",
   "repository": "google-gemini/gemini-cli",
   "type": "module",

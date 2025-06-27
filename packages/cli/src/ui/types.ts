@@ -7,7 +7,7 @@
 import {
   ToolCallConfirmationDetails,
   ToolResultDisplay,
-} from '@google/gemini-cli-core';
+} from '@fanzhang/gemini-cli-core-hijack';
 import { CumulativeStats } from './contexts/SessionContext.js';
 
 // Only defining the state enum needed by the UI
