@@ -39,14 +39,17 @@ function loadHijackConfigFromEnv(): HijackConfig | null {
     const hijackEnabled = process.env.HIJACK_ENABLED === 'true';
     if (!hijackEnabled) return null;
 
-    const targetModel = process.env.HIJACK_TARGET_MODEL;
+    // Use configurable target model with default fallback
+    const targetModel = process.env.HIJACK_TARGET_MODEL || 'gemini-2.5-flash';
     const provider = process.env.HIJACK_PROVIDER;
     const actualModel = process.env.HIJACK_ACTUAL_MODEL;
     const apiKey = process.env.HIJACK_API_KEY;
     const apiEndpoint = process.env.HIJACK_API_ENDPOINT;
 
-    if (!targetModel || !provider || !actualModel || !apiKey || !apiEndpoint) {
+    if (!provider || !actualModel || !apiKey || !apiEndpoint) {
       console.warn('🚨 Hijack enabled but missing required environment variables');
+      console.warn('   Required: HIJACK_PROVIDER, HIJACK_ACTUAL_MODEL, HIJACK_API_KEY, HIJACK_API_ENDPOINT');
+      console.warn(`   Target model will default to: ${targetModel}`);
       return null;
     }
 

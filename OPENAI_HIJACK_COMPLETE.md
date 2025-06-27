@@ -46,12 +46,18 @@ OpenAI 兼容 API 实际调用功能已完全实现！用户现在可以透明�
 ```bash
 # ~/.gemini/.env
 HIJACK_ENABLED=true
-HIJACK_TARGET_MODEL=gemini-2.5-pro
+# 可选：指定要劫持的模型，默认为 gemini-2.5-flash
+HIJACK_TARGET_MODEL=gemini-2.5-flash  
 HIJACK_PROVIDER=OPENAI_COMPATIBLE
 HIJACK_ACTUAL_MODEL=blacktooth-ab-test
 HIJACK_API_KEY=1234567890
 HIJACK_API_ENDPOINT=http://127.0.0.1:2048/v1
 ```
+
+### 可配置目标模型
+- **默认劫持模型**: `gemini-2.5-flash`
+- **可自定义**: 通过 `HIJACK_TARGET_MODEL` 环境变量指定任何模型
+- **灵活配置**: 可以劫持 `gemini-2.5-pro`、`gemini-2.0-flash` 等任意模型
 
 ## 🎮 使用体验
 
@@ -59,7 +65,7 @@ HIJACK_API_ENDPOINT=http://127.0.0.1:2048/v1
 ```
 ╭─────────────────────────────────────────────╮
 │ 🔄 Model Hijack Active                     │
-│ 📍 gemini-2.5-pro → blacktooth-ab-test     │
+│ 📍 gemini-2.5-flash → blacktooth-ab-test   │
 │ 🔗 Endpoint: http://127.0.0.1:2048/v1      │
 │ ✅ Configuration loaded from ~/.gemini/.env │
 ╰─────────────────────────────────────────────╯
@@ -68,7 +74,7 @@ HIJACK_API_ENDPOINT=http://127.0.0.1:2048/v1
 ### 调用时提示
 ```
 🔄 ===== MODEL HIJACK CONFIGURED ===== 🔄
-🎯 Target Model: gemini-2.5-pro
+🎯 Target Model: gemini-2.5-flash
 ✨ Configured To: blacktooth-ab-test
 🔗 Endpoint: http://127.0.0.1:2048/v1
 🔑 Using API Key: 12345678...
@@ -87,7 +93,7 @@ HIJACK_API_ENDPOINT=http://127.0.0.1:2048/v1
 
 ### 测试命令
 ```bash
-echo "hello" | gemini -m gemini-2.5-pro
+echo "hello" | gemini -m gemini-2.5-flash
 ```
 
 ### 预期行为
