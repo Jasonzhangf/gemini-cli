@@ -58,6 +58,10 @@ This project uses **Vitest** as its primary testing framework. When writing test
 
 The main branch for this project is called "main"
 
+## Architecture
+
+For a detailed explanation of the system architecture, please see the [architecture overview](./docs/architecture.md).
+
 ## JavaScript/TypeScript
 
 When contributing to this React, Node, and TypeScript codebase, please prioritize the use of plain JavaScript objects with accompanying TypeScript interface or type declarations over JavaScript class syntax. This approach offers significant advantages, especially concerning interoperability with React and overall code maintainability.

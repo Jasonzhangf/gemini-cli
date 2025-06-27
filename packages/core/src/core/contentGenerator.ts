@@ -16,6 +16,73 @@ import {
 import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
 import { DEFAULT_GEMINI_MODEL } from '../config/models.js';
 import { getEffectiveModel } from './modelCheck.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+
+interface HijackRule {
+  targetModel: string;
+  provider: string;
+  actualModel: string;
+  apiKey: string;
+  apiEndpoint: string;
+}
+
+interface HijackConfig {
+  enabled: boolean;
+  hijackRules: HijackRule[];
+}
+
+function loadHijackConfigFromEnv(): HijackConfig | null {
+  try {
+    // Check if hijacking is enabled via environment variable
+    const hijackEnabled = process.env.HIJACK_ENABLED === 'true';
+    if (!hijackEnabled) return null;
+
+    const targetModel = process.env.HIJACK_TARGET_MODEL;
+    const provider = process.env.HIJACK_PROVIDER;
+    const actualModel = process.env.HIJACK_ACTUAL_MODEL;
+    const apiKey = process.env.HIJACK_API_KEY;
+    const apiEndpoint = process.env.HIJACK_API_ENDPOINT;
+
+    if (!targetModel || !provider || !actualModel || !apiKey || !apiEndpoint) {
+      console.warn('🚨 Hijack enabled but missing required environment variables');
+      return null;
+    }
+
+    return {
+      enabled: true,
+      hijackRules: [{
+        targetModel,
+        provider,
+        actualModel,
+        apiKey,
+        apiEndpoint
+      }]
+    };
+  } catch (error) {
+    console.warn('❌ Failed to load hijack config from environment:', error);
+  }
+  return null;
+}
+
+/**
+ * Check if hijacking is configured for startup display
+ */
+export function getHijackInfo(): { enabled: boolean; targetModel?: string; actualModel?: string; endpoint?: string } {
+  const config = loadHijackConfigFromEnv();
+  if (!config?.enabled || !config.hijackRules.length) {
+    return { enabled: false };
+  }
+  
+  const rule = config.hijackRules[0];
+  return {
+    enabled: true,
+    targetModel: rule.targetModel,
+    actualModel: rule.actualModel,
+    endpoint: rule.apiEndpoint
+  };
+}
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
@@ -38,11 +105,14 @@ export enum AuthType {
   LOGIN_WITH_GOOGLE_PERSONAL = 'oauth-personal',
   USE_GEMINI = 'gemini-api-key',
   USE_VERTEX_AI = 'vertex-ai',
+  OPENAI_COMPATIBLE = 'openai-compatible',
 }
 
 export type ContentGeneratorConfig = {
   model: string;
+  actualModel?: string;
   apiKey?: string;
+  apiEndpoint?: string;
   vertexai?: boolean;
   authType?: AuthType | undefined;
 };
@@ -58,20 +128,60 @@ export async function createContentGeneratorConfig(
   const googleCloudLocation = process.env.GOOGLE_CLOUD_LOCATION;
 
   // Use runtime model from config if available, otherwise fallback to parameter or default
-  const effectiveModel = config?.getModel?.() || model || DEFAULT_GEMINI_MODEL;
+  let effectiveModel = config?.getModel?.() || model || DEFAULT_GEMINI_MODEL;
+  let hijackedAuthType = authType;
+  let hijackedApiKey: string | undefined;
+  let hijackedApiEndpoint: string | undefined;
+  let actualModel: string | undefined;
+
+  // Check for model hijacking from environment variables
+  const hijackConfig = loadHijackConfigFromEnv();
+  if (hijackConfig?.enabled) {
+    const hijackRule = hijackConfig.hijackRules.find(rule => rule.targetModel === effectiveModel);
+    if (hijackRule) {
+      // Show hijack notification but don't actually hijack yet (OpenAI implementation pending)
+      // hijackedAuthType = AuthType.OPENAI_COMPATIBLE;
+      // hijackedApiKey = hijackRule.apiKey;
+      // hijackedApiEndpoint = hijackRule.apiEndpoint;
+      // actualModel = hijackRule.actualModel;
+      
+      // Enhanced success notification
+      console.log('');
+      console.log('🔄 ===== MODEL HIJACK CONFIGURED ===== 🔄');
+      console.log(`🎯 Target Model: ${effectiveModel}`);
+      console.log(`✨ Configured To: ${hijackRule.actualModel}`);
+      console.log(`🔗 Endpoint: ${hijackRule.apiEndpoint}`);
+      console.log(`🔑 Using API Key: ${hijackRule.apiKey.substring(0, 8)}...`);
+      console.log('⚠️  OpenAI compatible implementation pending');
+      console.log('📝 For now, using regular Gemini API');
+      console.log('========================================');
+      console.log('');
+    }
+  }
 
   const contentGeneratorConfig: ContentGeneratorConfig = {
     model: effectiveModel,
-    authType,
+    actualModel,
+    authType: hijackedAuthType,
+    apiKey: hijackedApiKey,
+    apiEndpoint: hijackedApiEndpoint,
   };
 
   // if we are using google auth nothing else to validate for now
-  if (authType === AuthType.LOGIN_WITH_GOOGLE_PERSONAL) {
+  if (hijackedAuthType === AuthType.LOGIN_WITH_GOOGLE_PERSONAL) {
+    return contentGeneratorConfig;
+  }
+
+  // Handle OpenAI compatible API (including hijacked calls)
+  if (hijackedAuthType === AuthType.OPENAI_COMPATIBLE) {
+    // Use hijacked credentials if available, otherwise fall back to environment
+    contentGeneratorConfig.apiKey = hijackedApiKey || process.env.OPENAI_API_KEY;
+    contentGeneratorConfig.apiEndpoint = hijackedApiEndpoint || process.env.OPENAI_API_ENDPOINT;
     return contentGeneratorConfig;
   }
 
   //
-  if (authType === AuthType.USE_GEMINI && geminiApiKey) {
+  if (hijackedAuthType === AuthType.USE_GEMINI && geminiApiKey) {
     contentGeneratorConfig.apiKey = geminiApiKey;
     contentGeneratorConfig.model = await getEffectiveModel(
       contentGeneratorConfig.apiKey,
@@ -82,7 +192,7 @@ export async function createContentGeneratorConfig(
   }
 
   if (
-    authType === AuthType.USE_VERTEX_AI &&
+    hijackedAuthType === AuthType.USE_VERTEX_AI &&
     !!googleApiKey &&
     googleCloudProject &&
     googleCloudLocation
@@ -111,6 +221,10 @@ export async function createContentGenerator(
   };
   if (config.authType === AuthType.LOGIN_WITH_GOOGLE_PERSONAL) {
     return createCodeAssistContentGenerator(httpOptions, config.authType);
+  }
+
+  if (config.authType === AuthType.OPENAI_COMPATIBLE) {
+    throw new Error('OpenAI compatible mode is not yet implemented. Please use regular Gemini models.');
   }
 
   if (
