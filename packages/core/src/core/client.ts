@@ -299,20 +299,36 @@ export class GeminiClient {
         throw error;
       }
       try {
+        // First try to parse as-is
         return JSON.parse(text);
       } catch (parseError) {
-        await reportError(
-          parseError,
-          'Failed to parse JSON response from generateJson.',
-          {
-            responseTextFailedToParse: text,
-            originalRequestContents: contents,
-          },
-          'generateJson-parse',
-        );
-        throw new Error(
-          `Failed to parse API response as JSON: ${getErrorMessage(parseError)}`,
-        );
+        // If that fails, try to extract JSON from markdown code blocks
+        try {
+          const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+          if (jsonMatch && jsonMatch[1]) {
+            return JSON.parse(jsonMatch[1].trim());
+          }
+          // If no code blocks, try to find JSON-like content between braces
+          const bracesMatch = text.match(/\{[\s\S]*\}/);
+          if (bracesMatch) {
+            return JSON.parse(bracesMatch[0]);
+          }
+          throw parseError; // Re-throw original error if extraction fails
+        } catch (extractionError) {
+          // Fall back to original error
+          await reportError(
+            parseError,
+            'Failed to parse JSON response from generateJson.',
+            {
+              responseTextFailedToParse: text,
+              originalRequestContents: contents,
+            },
+            'generateJson-parse',
+          );
+          throw new Error(
+            `Failed to parse API response as JSON: ${getErrorMessage(parseError)}`,
+          );
+        }
       }
     } catch (error) {
       if (abortSignal.aborted) {

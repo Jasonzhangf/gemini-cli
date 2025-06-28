@@ -158,9 +158,8 @@ export async function createContentGeneratorConfig(
       hijackedApiEndpoint = hijackRule.apiEndpoint;
       actualModel = hijackRule.actualModel;
 
-      // IMPORTANT: When hijacking, the model used by the content generator
-      // should be the actual hijacked model, not the effectiveModel.
-      effectiveModel = actualModel;
+      // IMPORTANT: Keep the effective model as the target model for display purposes
+      // The actual model will be passed separately to the content generator
 
       // Enhanced success notification
       console.log('');

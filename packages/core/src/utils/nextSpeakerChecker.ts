@@ -11,9 +11,10 @@ import { isFunctionResponse } from './messageInspectors.js';
 
 const CHECK_PROMPT = `Analyze *only* the content and structure of your immediately preceding response (your last turn in the conversation history). Based *strictly* on that response, determine who should logically speak next: the 'user' or the 'model' (you).
 **Decision Rules (apply in order):**
-1.  **Model Continues:** If your last response explicitly states an immediate next action *you* intend to take (e.g., "Next, I will...", "Now I'll process...", "Moving on to analyze...", indicates an intended tool call that didn't execute), OR if the response seems clearly incomplete (cut off mid-thought without a natural conclusion), then the **'model'** should speak next.
-2.  **Question to User:** If your last response ends with a direct question specifically addressed *to the user*, then the **'user'** should speak next.
-3.  **Waiting for User:** If your last response completed a thought, statement, or task *and* does not meet the criteria for Rule 1 (Model Continues) or Rule 2 (Question to User), it implies a pause expecting user input or reaction. In this case, the **'user'** should speak next.
+1.  **After Tool Execution:** If the conversation history shows that a tool was just executed and provided results (tool output, file content, command results, etc.), then the **'model'** should speak next to process and respond to that information, regardless of what your last response said about next_speaker.
+2.  **Model Continues:** If your last response explicitly states an immediate next action *you* intend to take (e.g., "I'll help you...", "Let me...", "I will...", "Now I'll process...", "Moving on to analyze...", indicates a commitment to perform a task that requires tool execution), OR if the response seems clearly incomplete (cut off mid-thought without a natural conclusion), then the **'model'** should speak next.
+3.  **Question to User:** If your last response ends with a direct question specifically addressed *to the user*, then the **'user'** should speak next.
+4.  **Waiting for User:** If your last response completed a thought, statement, or task *and* does not meet the criteria for Rules 1-3, it implies a pause expecting user input or reaction. In this case, the **'user'** should speak next.
 **Output Format:**
 Respond *only* in JSON format according to the following schema. Do not include any text outside the JSON structure.
 \`\`\`json
@@ -96,6 +97,31 @@ export async function checkNextSpeaker(
         'The last message was a function response, so the model should speak next.',
       next_speaker: 'model',
     };
+  }
+
+  // Additional check: if the last few messages show a tool execution pattern
+  // (model with function call followed by user with function response), force model to continue
+  if (comprehensiveHistory.length >= 2) {
+    const lastMessage = comprehensiveHistory[comprehensiveHistory.length - 1];
+    const secondLastMessage = comprehensiveHistory[comprehensiveHistory.length - 2];
+    
+    // Check if we have a pattern: model -> tool call -> user -> tool response
+    if (
+      secondLastMessage &&
+      secondLastMessage.role === 'model' &&
+      secondLastMessage.parts &&
+      secondLastMessage.parts.some(part => part.functionCall) &&
+      lastMessage &&
+      lastMessage.role === 'user' &&
+      lastMessage.parts &&
+      lastMessage.parts.some(part => part.functionResponse)
+    ) {
+      return {
+        reasoning:
+          'Tool execution pattern detected: model made function call, then user provided function response. Model should continue.',
+        next_speaker: 'model',
+      };
+    }
   }
 
   if (

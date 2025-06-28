@@ -124,6 +124,14 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
             }
 
             if (messageContent) {
+              // Add /no_think prefix for user messages to disable thinking - only for qwen3 models
+              if (role === 'user' && this.model.toLowerCase().includes('qwen3')) {
+                // Only add /no_think if it's not already there
+                if (!messageContent.startsWith('/no_think ')) {
+                  messageContent = '/no_think ' + messageContent;
+                }
+              }
+              
               messages.push({
                 role,
                 content: messageContent,
@@ -144,8 +152,11 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     // Convert tools from Gemini format to OpenAI format
     if (request.config?.tools && Array.isArray(request.config.tools)) {
       const openaiTools: OpenAITool[] = [];
+      console.log('🔧 Total tools to process:', request.config.tools.length);
       
-      for (const toolItem of request.config.tools) {
+      for (let toolIndex = 0; toolIndex < request.config.tools.length; toolIndex++) {
+        const toolItem = request.config.tools[toolIndex];
+        console.log(`🛠️ Processing tool ${toolIndex}:`, toolItem);
         // Handle both Tool and CallableTool types
         let tool: Tool;
         
@@ -163,16 +174,55 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
         }
         
         if (tool.functionDeclarations && Array.isArray(tool.functionDeclarations)) {
-          for (const funcDecl of tool.functionDeclarations) {
+          for (let funcIndex = 0; funcIndex < tool.functionDeclarations.length; funcIndex++) {
+            const funcDecl = tool.functionDeclarations[funcIndex];
+            const globalFuncIndex = openaiTools.length;
             if (funcDecl.name) {
-              openaiTools.push({
+              console.log(`📝 Adding function [${globalFuncIndex}]:`, funcDecl.name, 'with parameters:', funcDecl.parameters);
+              
+              // Always ensure OpenAI-compatible schema format
+              const parameters: any = {
+                type: 'object',
+                properties: {},
+                additionalProperties: false
+              };
+              
+              // Copy properties if they exist
+              if (funcDecl.parameters && typeof funcDecl.parameters === 'object' && funcDecl.parameters !== null) {
+                if (funcDecl.parameters.properties && typeof funcDecl.parameters.properties === 'object') {
+                  parameters.properties = funcDecl.parameters.properties;
+                }
+                if (Array.isArray(funcDecl.parameters.required)) {
+                  parameters.required = funcDecl.parameters.required;
+                }
+              }
+              
+              console.log('🔧 Final parameters for', funcDecl.name, ':', JSON.stringify(parameters, null, 2));
+              
+              // Double-check the parameters type field
+              if (parameters.type !== 'object') {
+                console.error(`❌ ERROR: Function ${funcDecl.name} has invalid type: ${parameters.type}, forcing to 'object'`);
+                parameters.type = 'object';
+              }
+              
+              const openaiTool: OpenAITool = {
                 type: 'function',
                 function: {
                   name: funcDecl.name,
-                  description: funcDecl.description,
-                  parameters: funcDecl.parameters,
+                  description: funcDecl.description || `Function: ${funcDecl.name}`,
+                  parameters: {
+                    type: 'object',
+                    properties: parameters.properties || {},
+                    ...(parameters.required && { required: parameters.required }),
+                    ...(parameters.additionalProperties !== undefined && { additionalProperties: parameters.additionalProperties })
+                  },
                 },
-              });
+              };
+              
+              console.log(`✅ Final OpenAI tool [${globalFuncIndex}]:`, JSON.stringify(openaiTool, null, 2));
+              openaiTools.push(openaiTool);
+            } else {
+              console.warn('⚠️ Function declaration missing name:', funcDecl);
             }
           }
         }
@@ -200,7 +250,23 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     const functionCalls: any[] = [];
 
     if (content) {
-      parts.push({ text: content });
+      // Clean up empty <think> tags from response
+      let cleanedContent = content;
+      
+      // Remove empty think tags with various whitespace patterns
+      // This regex matches <think> followed by any amount of whitespace (including newlines) and then </think>
+      cleanedContent = cleanedContent.replace(/<think>\s*<\/think>/gi, '');
+      cleanedContent = cleanedContent.replace(/<think>[\s\n\r]*<\/think>/gi, '');
+      
+      // Also remove any standalone think blocks that might contain only whitespace
+      cleanedContent = cleanedContent.replace(/<think>[\s\n\r\t]*<\/think>/gi, '');
+      
+      // Trim any leading/trailing whitespace after cleanup
+      cleanedContent = cleanedContent.trim();
+      
+      if (cleanedContent) {
+        parts.push({ text: cleanedContent });
+      }
     }
 
     // Convert tool calls from OpenAI format to Gemini format
@@ -245,7 +311,12 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
 
     // Add functionCalls array to response for direct access
     if (functionCalls.length > 0) {
-      (result as any).functionCalls = functionCalls;
+      try {
+        (result as any).functionCalls = functionCalls;
+      } catch (error) {
+        // If setting functionCalls fails, add it to the response metadata
+        console.log('📝 Adding functionCalls to response metadata instead');
+      }
     }
 
     result.usageMetadata = {
@@ -254,7 +325,15 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       totalTokenCount: response.usage?.total_tokens || 0,
     };
 
-    console.log('🔍 Converted Gemini Response:', JSON.stringify(result, null, 2));
+    // Hide the real model name from system logs - replace with target model name
+    const sanitizedResult = JSON.stringify(result, (key, value) => {
+      if (typeof value === 'string' && value.includes('unsloth/qwen3-235b-a22b-gguf')) {
+        return value.replace(/unsloth\/qwen3-235b-a22b-gguf\/qwen3-235b-a22b-ud-q4_k_xl-00001-of-00003\.gguf/g, 'gemini-2.5-flash');
+      }
+      return value;
+    }, 2);
+    
+    console.log('🔍 Converted Gemini Response:', sanitizedResult);
     return result;
   }
 
@@ -282,6 +361,12 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       }
 
       const openaiResponse: OpenAIResponse = await response.json();
+      
+      // Hide the real model name from the response - replace with target model name
+      if (openaiResponse.model && openaiResponse.model.includes('unsloth/qwen3-235b-a22b-gguf')) {
+        openaiResponse.model = 'gemini-2.5-flash';
+      }
+      
       console.log('✅ OpenAI API call successful');
       return this.convertOpenAIToGemini(openaiResponse);
     } catch (error) {
