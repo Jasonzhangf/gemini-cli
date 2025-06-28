@@ -12,17 +12,40 @@ import {
   EmbedContentResponse,
   EmbedContentParameters,
   FinishReason,
+  Tool,
+  FunctionDeclaration,
 } from '@google/genai';
 import { ContentGenerator } from './contentGenerator.js';
+
+interface OpenAIFunction {
+  name: string;
+  description?: string;
+  parameters?: any;
+}
+
+interface OpenAITool {
+  type: 'function';
+  function: OpenAIFunction;
+}
 
 interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
 }
 
 interface OpenAIRequest {
   model: string;
   messages: OpenAIMessage[];
+  tools?: OpenAITool[];
+  tool_choice?: string | { type: string; function?: { name: string } };
   stream?: boolean;
   max_tokens?: number;
   temperature?: number;
@@ -33,6 +56,14 @@ interface OpenAIChoice {
   message: {
     role: string;
     content: string;
+    tool_calls?: Array<{
+      id: string;
+      type: 'function';
+      function: {
+        name: string;
+        arguments: string;
+      };
+    }>;
   };
   finish_reason: string;
 }
@@ -61,9 +92,9 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     this.model = model;
   }
 
-  private convertGeminiToOpenAI(
+  private async convertGeminiToOpenAI(
     request: GenerateContentParameters,
-  ): OpenAIRequest {
+  ): Promise<OpenAIRequest> {
     const messages: OpenAIMessage[] = [];
 
     // Handle different content formats
@@ -103,37 +134,127 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       }
     }
 
-    return {
+    const openaiRequest: OpenAIRequest = {
       model: this.model,
       messages,
       max_tokens: 4096,
       temperature: 0.7,
     };
+
+    // Convert tools from Gemini format to OpenAI format
+    if (request.config?.tools && Array.isArray(request.config.tools)) {
+      const openaiTools: OpenAITool[] = [];
+      
+      for (const toolItem of request.config.tools) {
+        // Handle both Tool and CallableTool types
+        let tool: Tool;
+        
+        if ('tool' in toolItem && typeof toolItem.tool === 'function') {
+          // CallableTool - get the tool definition
+          try {
+            tool = await toolItem.tool();
+          } catch (error) {
+            console.warn('Failed to get tool definition from CallableTool:', error);
+            continue;
+          }
+        } else {
+          // Regular Tool
+          tool = toolItem as Tool;
+        }
+        
+        if (tool.functionDeclarations && Array.isArray(tool.functionDeclarations)) {
+          for (const funcDecl of tool.functionDeclarations) {
+            if (funcDecl.name) {
+              openaiTools.push({
+                type: 'function',
+                function: {
+                  name: funcDecl.name,
+                  description: funcDecl.description,
+                  parameters: funcDecl.parameters,
+                },
+              });
+            }
+          }
+        }
+      }
+      
+      if (openaiTools.length > 0) {
+        openaiRequest.tools = openaiTools;
+        // Set tool_choice to auto to enable function calling
+        openaiRequest.tool_choice = 'auto';
+      }
+    }
+
+    return openaiRequest;
   }
 
   private convertOpenAIToGemini(
     response: OpenAIResponse,
   ): GenerateContentResponse {
-    const content = response.choices[0]?.message?.content || '';
+    const choice = response.choices[0];
+    const content = choice?.message?.content || '';
+    const toolCalls = choice?.message?.tool_calls;
+
+    // Create parts array starting with text content
+    const parts: any[] = [];
+    const functionCalls: any[] = [];
+
+    if (content) {
+      parts.push({ text: content });
+    }
+
+    // Convert tool calls from OpenAI format to Gemini format
+    if (toolCalls && Array.isArray(toolCalls)) {
+      for (const toolCall of toolCalls) {
+        if (toolCall.type === 'function') {
+          // Generate unique ID for function call
+          const callId = toolCall.id || `${toolCall.function.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          const functionCallArgs = JSON.parse(toolCall.function.arguments || '{}');
+
+          // Add to parts array for content
+          parts.push({
+            functionCall: {
+              name: toolCall.function.name,
+              args: functionCallArgs,
+              id: callId,
+            },
+          });
+
+          // Add to functionCalls array for direct access
+          functionCalls.push({
+            name: toolCall.function.name,
+            args: functionCallArgs,
+            id: callId,
+          });
+        }
+      }
+    }
 
     // Create a proper GenerateContentResponse structure with all required properties
     const result = new GenerateContentResponse();
     result.candidates = [
       {
         content: {
-          parts: [{ text: content }],
+          parts,
           role: 'model',
         },
         finishReason: FinishReason.STOP,
         index: 0,
       },
     ];
+
+    // Add functionCalls array to response for direct access
+    if (functionCalls.length > 0) {
+      (result as any).functionCalls = functionCalls;
+    }
+
     result.usageMetadata = {
       promptTokenCount: response.usage?.prompt_tokens || 0,
       candidatesTokenCount: response.usage?.completion_tokens || 0,
       totalTokenCount: response.usage?.total_tokens || 0,
     };
 
+    console.log('🔍 Converted Gemini Response:', JSON.stringify(result, null, 2));
     return result;
   }
 
@@ -142,7 +263,7 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   ): Promise<GenerateContentResponse> {
     try {
       console.log('🚀 Making OpenAI compatible API call...');
-      const openaiRequest = this.convertGeminiToOpenAI(request);
+      const openaiRequest = await this.convertGeminiToOpenAI(request);
 
       const response = await fetch(`${this.apiEndpoint}/chat/completions`, {
         method: 'POST',
@@ -177,7 +298,7 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     return (async function* () {
       try {
         console.log('🚀 Making OpenAI compatible streaming API call...');
-        const openaiRequest = self.convertGeminiToOpenAI(request);
+        const openaiRequest = await self.convertGeminiToOpenAI(request);
         openaiRequest.stream = true;
 
         const response = await fetch(`${self.apiEndpoint}/chat/completions`, {
