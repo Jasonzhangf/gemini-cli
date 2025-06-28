@@ -172,16 +172,18 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   async generateContentStream(
     request: GenerateContentParameters,
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
+    const self = this; // Capture 'this'
+    
     return (async function* () {
       try {
         console.log('🚀 Making OpenAI compatible streaming API call...');
-        const openaiRequest = this.convertGeminiToOpenAI(request);
+        const openaiRequest = self.convertGeminiToOpenAI(request);
         openaiRequest.stream = true;
 
-        const response = await fetch(`${this.apiEndpoint}/chat/completions`, {
+        const response = await fetch(`${self.apiEndpoint}/chat/completions`, {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${this.apiKey}`,
+            Authorization: `Bearer ${self.apiKey}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(openaiRequest),

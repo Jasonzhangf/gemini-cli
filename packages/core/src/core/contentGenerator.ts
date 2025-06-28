@@ -139,7 +139,7 @@ export async function createContentGeneratorConfig(
   const googleCloudLocation = process.env.GOOGLE_CLOUD_LOCATION;
 
   // Use runtime model from config if available, otherwise fallback to parameter or default
-  const effectiveModel = config?.getModel?.() || model || DEFAULT_GEMINI_MODEL;
+  let effectiveModel = config?.getModel?.() || model || DEFAULT_GEMINI_MODEL;
   let hijackedAuthType = authType;
   let hijackedApiKey: string | undefined;
   let hijackedApiEndpoint: string | undefined;
