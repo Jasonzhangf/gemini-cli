@@ -69,6 +69,9 @@ export class GeminiClient {
     this.contentGenerator = await createContentGenerator(
       contentGeneratorConfig,
     );
+    // Update the client's model to reflect the actual model being used
+    // (e.g., if hijacking occurred).
+    this.model = contentGeneratorConfig.model;
     this.chat = await this.startChat();
   }
   private getContentGenerator(): ContentGenerator {
@@ -503,6 +506,9 @@ export class GeminiClient {
    * Uses a fallback handler if provided by the config, otherwise returns null.
    */
   private async handleFlashFallback(authType?: string): Promise<string | null> {
+    if (!this.config.getAutoSwitchToFlashOnQuotaError()) {
+      return null;
+    }
     // Only handle fallback for OAuth users
     if (authType !== AuthType.LOGIN_WITH_GOOGLE_PERSONAL) {
       return null;
