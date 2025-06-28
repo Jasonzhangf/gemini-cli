@@ -10,7 +10,7 @@ function demoHijackMessage() {
   const hijackedModel = 'blacktooth-ab-test';
   const endpoint = 'http://127.0.0.1:2048/v1';
   const apiKey = '1234567890';
-  
+
   console.log('');
   console.log('🎉 ===== MODEL HIJACK SUCCESSFUL ===== 🎉');
   console.log(`🎯 Original Model: ${originalModel}`);
@@ -20,7 +20,7 @@ function demoHijackMessage() {
   console.log('🛡️ Request will be transparently redirected');
   console.log('========================================');
   console.log('');
-  
+
   console.log('💡 This message will appear when you run:');
   console.log('   gemini-cli -m gemini-2.5-pro');
   console.log('');

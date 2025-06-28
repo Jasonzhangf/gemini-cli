@@ -24,14 +24,16 @@ function demoStartupHijack() {
   console.log('│ ✅ Configuration loaded from ~/.gemini/.env │');
   console.log('╰─────────────────────────────────────────────╯');
   console.log('');
-  
+
   console.log('Tips for getting started:');
   console.log('1. Ask questions, edit files, or run commands.');
   console.log('2. Be specific for the best results.');
   console.log('3. /help for more information.');
   console.log('');
-  
-  console.log('💡 The hijack notification will appear in the actual startup screen');
+
+  console.log(
+    '💡 The hijack notification will appear in the actual startup screen',
+  );
   console.log('   when ~/.gemini/.env contains valid hijack configuration.');
 }
 

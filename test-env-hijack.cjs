@@ -10,7 +10,7 @@ const fs = require('fs');
 
 async function testEnvHijack() {
   console.log('🧪 Testing env-based gemini-2.5-pro hijack...\n');
-  
+
   try {
     // 检查 .gemini/.env 文件
     const envPath = '/Users/fanzhang/.gemini/.env';
@@ -23,7 +23,7 @@ async function testEnvHijack() {
       console.log('❌ .gemini/.env file not found');
       return;
     }
-    
+
     // 设置环境变量（模拟加载）
     process.env.HIJACK_ENABLED = 'true';
     process.env.HIJACK_TARGET_MODEL = 'gemini-2.5-pro';
@@ -31,16 +31,16 @@ async function testEnvHijack() {
     process.env.HIJACK_ACTUAL_MODEL = 'blacktooth-ab-test';
     process.env.HIJACK_API_KEY = '1234567890';
     process.env.HIJACK_API_ENDPOINT = 'http://127.0.0.1:2048/v1';
-    
+
     console.log('2. ✅ Environment variables set for testing');
     console.log('');
-    
+
     // 检查是否可以构建项目
     try {
       console.log('3. Building project...');
-      execSync('npm run build', { 
+      execSync('npm run build', {
         cwd: '/Users/fanzhang/Documents/github/gemini-cli',
-        stdio: 'pipe'
+        stdio: 'pipe',
       });
       console.log('✅ Build successful');
       console.log('');
@@ -48,16 +48,16 @@ async function testEnvHijack() {
       console.log('⚠️  Build may have issues, but continuing test...');
       console.log('');
     }
-    
+
     // 模拟劫持检测
     console.log('4. Testing hijack detection logic...');
-    
+
     // 检查生成的文件是否存在
     const generatedFiles = [
       '/Users/fanzhang/Documents/github/gemini-cli/packages/core/dist/core/contentGenerator.js',
-      '/Users/fanzhang/Documents/github/gemini-cli/packages/core/dist/core/openaiCompatibleContentGenerator.js'
+      '/Users/fanzhang/Documents/github/gemini-cli/packages/core/dist/core/openaiCompatibleContentGenerator.js',
     ];
-    
+
     let allFilesExist = true;
     for (const file of generatedFiles) {
       if (fs.existsSync(file)) {
@@ -67,7 +67,7 @@ async function testEnvHijack() {
         allFilesExist = false;
       }
     }
-    
+
     if (allFilesExist) {
       console.log('');
       console.log('🎉 All required files are ready!');
@@ -81,7 +81,6 @@ async function testEnvHijack() {
       console.log('');
       console.log('⚠️  Some files are missing. Run "npm run build" first.');
     }
-    
   } catch (error) {
     console.error('❌ Test failed:', error.message);
   }

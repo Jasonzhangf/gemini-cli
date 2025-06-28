@@ -53,6 +53,7 @@ interface CliArgs {
   telemetryTarget: string | undefined;
   telemetryOtlpEndpoint: string | undefined;
   telemetryLogPrompts: boolean | undefined;
+  autoSwitchToFlashOnQuotaError: boolean | undefined;
 }
 
 async function parseArguments(): Promise<CliArgs> {
@@ -127,6 +128,12 @@ async function parseArguments(): Promise<CliArgs> {
       type: 'boolean',
       description: 'Enables checkpointing of file edits',
       default: false,
+    })
+    .option('auto-switch-to-flash-on-quota-error', {
+      type: 'boolean',
+      description:
+        'Automatically switch to a faster, smaller model when rate limited.',
+      default: true,
     })
     .version(await getCliVersion()) // This will enable the --version flag based on package.json
     .alias('v', 'version')
@@ -245,6 +252,11 @@ export async function loadCliConfig(
     bugCommand: settings.bugCommand,
     model: argv.model!,
     extensionContextFilePaths,
+    autoSwitchToFlashOnQuotaError:
+      process.env.GEMINI_AUTO_SWITCH_TO_FLASH !== undefined
+        ? process.env.GEMINI_AUTO_SWITCH_TO_FLASH === 'true'
+        : (argv.autoSwitchToFlashOnQuotaError ??
+          settings.autoSwitchToFlashOnQuotaError),
   });
 }
 

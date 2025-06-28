@@ -16,9 +16,6 @@ import {
 import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
 import { DEFAULT_GEMINI_MODEL } from '../config/models.js';
 import { getEffectiveModel } from './modelCheck.js';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as os from 'node:os';
 
 interface HijackRule {
   targetModel: string;
@@ -47,21 +44,27 @@ function loadHijackConfigFromEnv(): HijackConfig | null {
     const apiEndpoint = process.env.HIJACK_API_ENDPOINT;
 
     if (!provider || !actualModel || !apiKey || !apiEndpoint) {
-      console.warn('🚨 Hijack enabled but missing required environment variables');
-      console.warn('   Required: HIJACK_PROVIDER, HIJACK_ACTUAL_MODEL, HIJACK_API_KEY, HIJACK_API_ENDPOINT');
+      console.warn(
+        '🚨 Hijack enabled but missing required environment variables',
+      );
+      console.warn(
+        '   Required: HIJACK_PROVIDER, HIJACK_ACTUAL_MODEL, HIJACK_API_KEY, HIJACK_API_ENDPOINT',
+      );
       console.warn(`   Target model will default to: ${targetModel}`);
       return null;
     }
 
     return {
       enabled: true,
-      hijackRules: [{
-        targetModel,
-        provider,
-        actualModel,
-        apiKey,
-        apiEndpoint
-      }]
+      hijackRules: [
+        {
+          targetModel,
+          provider,
+          actualModel,
+          apiKey,
+          apiEndpoint,
+        },
+      ],
     };
   } catch (error) {
     console.warn('❌ Failed to load hijack config from environment:', error);
@@ -72,18 +75,23 @@ function loadHijackConfigFromEnv(): HijackConfig | null {
 /**
  * Check if hijacking is configured for startup display
  */
-export function getHijackInfo(): { enabled: boolean; targetModel?: string; actualModel?: string; endpoint?: string } {
+export function getHijackInfo(): {
+  enabled: boolean;
+  targetModel?: string;
+  actualModel?: string;
+  endpoint?: string;
+} {
   const config = loadHijackConfigFromEnv();
   if (!config?.enabled || !config.hijackRules.length) {
     return { enabled: false };
   }
-  
+
   const rule = config.hijackRules[0];
   return {
     enabled: true,
     targetModel: rule.targetModel,
     actualModel: rule.actualModel,
-    endpoint: rule.apiEndpoint
+    endpoint: rule.apiEndpoint,
   };
 }
 
@@ -131,7 +139,7 @@ export async function createContentGeneratorConfig(
   const googleCloudLocation = process.env.GOOGLE_CLOUD_LOCATION;
 
   // Use runtime model from config if available, otherwise fallback to parameter or default
-  let effectiveModel = config?.getModel?.() || model || DEFAULT_GEMINI_MODEL;
+  const effectiveModel = config?.getModel?.() || model || DEFAULT_GEMINI_MODEL;
   let hijackedAuthType = authType;
   let hijackedApiKey: string | undefined;
   let hijackedApiEndpoint: string | undefined;
@@ -140,14 +148,20 @@ export async function createContentGeneratorConfig(
   // Check for model hijacking from environment variables
   const hijackConfig = loadHijackConfigFromEnv();
   if (hijackConfig?.enabled) {
-    const hijackRule = hijackConfig.hijackRules.find(rule => rule.targetModel === effectiveModel);
+    const hijackRule = hijackConfig.hijackRules.find(
+      (rule) => rule.targetModel === effectiveModel,
+    );
     if (hijackRule) {
       // Enable actual hijacking
       hijackedAuthType = AuthType.OPENAI_COMPATIBLE;
       hijackedApiKey = hijackRule.apiKey;
       hijackedApiEndpoint = hijackRule.apiEndpoint;
       actualModel = hijackRule.actualModel;
-      
+
+      // IMPORTANT: When hijacking, the model used by the content generator
+      // should be the actual hijacked model, not the effectiveModel.
+      effectiveModel = actualModel;
+
       // Enhanced success notification
       console.log('');
       console.log('🔄 ===== MODEL HIJACK CONFIGURED ===== 🔄');
@@ -178,8 +192,10 @@ export async function createContentGeneratorConfig(
   // Handle OpenAI compatible API (including hijacked calls)
   if (hijackedAuthType === AuthType.OPENAI_COMPATIBLE) {
     // Use hijacked credentials if available, otherwise fall back to environment
-    contentGeneratorConfig.apiKey = hijackedApiKey || process.env.OPENAI_API_KEY;
-    contentGeneratorConfig.apiEndpoint = hijackedApiEndpoint || process.env.OPENAI_API_ENDPOINT;
+    contentGeneratorConfig.apiKey =
+      hijackedApiKey || process.env.OPENAI_API_KEY;
+    contentGeneratorConfig.apiEndpoint =
+      hijackedApiEndpoint || process.env.OPENAI_API_ENDPOINT;
     return contentGeneratorConfig;
   }
 
@@ -227,11 +243,19 @@ export async function createContentGenerator(
   }
 
   if (config.authType === AuthType.OPENAI_COMPATIBLE) {
-    const { OpenAICompatibleContentGenerator } = await import('./openaiCompatibleContentGenerator.js');
+    const { OpenAICompatibleContentGenerator } = await import(
+      './openaiCompatibleContentGenerator.js'
+    );
     if (!config.apiKey || !config.apiEndpoint || !config.actualModel) {
-      throw new Error('OpenAI compatible mode requires apiKey, apiEndpoint, and actualModel');
+      throw new Error(
+        'OpenAI compatible mode requires apiKey, apiEndpoint, and actualModel',
+      );
     }
-    return new OpenAICompatibleContentGenerator(config.apiKey, config.apiEndpoint, config.actualModel);
+    return new OpenAICompatibleContentGenerator(
+      config.apiKey,
+      config.apiEndpoint,
+      config.actualModel,
+    );
   }
 
   if (

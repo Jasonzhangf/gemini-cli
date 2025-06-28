@@ -45,7 +45,7 @@ console.log('');
 
 console.log('🚀 功能状态总结:');
 console.log('✅ 环境变量配置读取');
-console.log('✅ 劫持检测和提示');  
+console.log('✅ 劫持检测和提示');
 console.log('✅ 启动界面状态显示');
 console.log('✅ 模型调用拦截');
 console.log('✅ 详细配置信息显示');

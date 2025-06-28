@@ -7,7 +7,11 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Colors } from '../colors.js';
-import { shortenPath, tildeifyPath, tokenLimit } from '@fanzhang/gemini-cli-core-hijack';
+import {
+  shortenPath,
+  tildeifyPath,
+  tokenLimit,
+} from '@fanzhang/gemini-cli-core-hijack';
 import { ConsoleSummaryDisplay } from './ConsoleSummaryDisplay.js';
 import process from 'node:process';
 import { MemoryUsageDisplay } from './MemoryUsageDisplay.js';

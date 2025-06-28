@@ -7,7 +7,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { isNodeError, getProjectTempDir } from '@fanzhang/gemini-cli-core-hijack';
+import {
+  isNodeError,
+  getProjectTempDir,
+} from '@fanzhang/gemini-cli-core-hijack';
 
 const HISTORY_FILE = 'shell_history';
 const MAX_HISTORY_LENGTH = 100;

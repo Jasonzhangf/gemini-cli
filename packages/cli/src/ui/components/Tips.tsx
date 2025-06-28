@@ -16,11 +16,17 @@ interface TipsProps {
 export const Tips: React.FC<TipsProps> = ({ config }) => {
   const geminiMdFileCount = config.getGeminiMdFileCount();
   const hijackInfo = getHijackInfo();
-  
+
   return (
     <Box flexDirection="column" marginBottom={1}>
       {hijackInfo.enabled && (
-        <Box flexDirection="column" marginBottom={1} paddingX={1} borderStyle="round" borderColor="yellow">
+        <Box
+          flexDirection="column"
+          marginBottom={1}
+          paddingX={1}
+          borderStyle="round"
+          borderColor="yellow"
+        >
           <Text color="yellow" bold>
             🔄 Model Hijack Active
           </Text>
@@ -30,12 +36,10 @@ export const Tips: React.FC<TipsProps> = ({ config }) => {
           <Text color={Colors.Foreground}>
             🔗 Endpoint: {hijackInfo.endpoint}
           </Text>
-          <Text color="green">
-            ✅ Configuration loaded from ~/.gemini/.env
-          </Text>
+          <Text color="green">✅ Configuration loaded from ~/.gemini/.env</Text>
         </Box>
       )}
-      
+
       <Text color={Colors.Foreground}>Tips for getting started:</Text>
       <Text color={Colors.Foreground}>
         1. Ask questions, edit files, or run commands.

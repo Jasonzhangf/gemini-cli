@@ -65,6 +65,7 @@ export interface Settings {
   hideWindowTitle?: boolean;
 
   // Add other settings here.
+  autoSwitchToFlashOnQuotaError?: boolean;
 }
 
 export interface SettingsError {

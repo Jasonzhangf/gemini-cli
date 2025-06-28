@@ -1,16 +1,16 @@
-# Gemini CLI
+# Gemini CLI - 模型劫持功能
 
 [![Gemini CLI CI](https://github.com/google-gemini/gemini-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/google-gemini/gemini-cli/actions/workflows/ci.yml)
 
 ![Gemini CLI Screenshot](./docs/assets/gemini-screenshot.png)
 
-## Model Hijacking Feature
+## 模型劫持功能 (Model Hijacking Feature)
 
-The Gemini CLI supports model hijacking functionality, allowing you to transparently redirect specific model calls to user-configured OpenAI-compatible APIs. This feature is particularly useful for A/B testing, using alternative models, or integrating with custom model endpoints.
+Gemini CLI 支持模型劫持功能，允许您将特定的模型调用透明地重定向到用户配置的 OpenAI 兼容 API。此功能对于 A/B 测试、使用替代模型或与自定义模型端点集成非常有用。
 
-### Configuration
+### 配置 (Configuration)
 
-Create a configuration file at `~/.gemini/.env` (or in your project's `.gemini/.env` directory):
+在 `~/.gemini/.env` (或您项目中的 `.gemini/.env` 目录) 创建配置文件：
 
 ```bash
 # Gemini CLI 劫持配置
@@ -24,32 +24,33 @@ HIJACK_API_KEY=your-api-key-here
 HIJACK_API_ENDPOINT=http://127.0.0.1:2048/v1
 ```
 
-### Configuration Parameters
+### 配置参数 (Configuration Parameters)
 
-- `HIJACK_ENABLED`: Set to `true` to enable model hijacking
-- `HIJACK_TARGET_MODEL`: The original model name to intercept (optional, defaults to `gemini-2.5-flash`)
-- `HIJACK_PROVIDER`: Set to `OPENAI_COMPATIBLE` for OpenAI-compatible APIs
-- `HIJACK_ACTUAL_MODEL`: The target model name to use instead
-- `HIJACK_API_KEY`: API key for the target endpoint
-- `HIJACK_API_ENDPOINT`: Base URL for the OpenAI-compatible API endpoint
+- `HIJACK_ENABLED`: 设置为 `true` 以启用模型劫持。
+- `HIJACK_TARGET_MODEL`: 要拦截的原始模型名称 (可选，默认为 `gemini-2.5-flash`)。
+- `HIJACK_PROVIDER`: 对于 OpenAI 兼容 API，设置为 `OPENAI_COMPATIBLE`。
+- `HIJACK_ACTUAL_MODEL`: 实际要使用的目标模型名称。
+- `HIJACK_API_KEY`: 目标端点的 API 密钥。
+- `HIJACK_API_ENDPOINT`: OpenAI 兼容 API 端点的基本 URL。
 
-### Usage
+### 使用方法 (Usage)
 
-Once configured, the hijacking is completely transparent to your workflow:
+配置完成后，劫持对您的工作流程是完全透明的：
 
 ```bash
-# This will be automatically redirected based on your configuration
+# 这将根据您的配置自动重定向
 gemini -m gemini-2.5-flash
 
-# Or specify any configured target model
-gemini -m gemini-2.5-pro  # if HIJACK_TARGET_MODEL=gemini-2.5-pro
+# 或者指定任何已配置的目标模型
+gemini -m gemini-2.5-pro  # 如果 HIJACK_TARGET_MODEL=gemini-2.5-pro
 ```
 
-### Visual Indicators
+### 视觉指示 (Visual Indicators)
 
-When hijacking is active, you'll see:
+当劫持激活时，您将看到：
 
-1. **Startup notification** in the CLI interface:
+1. **CLI 界面中的启动通知**:
+
    ```
    ╭─────────────────────────────────────────────╮
    │ 🔄 Model Hijack Active                     │
@@ -59,7 +60,7 @@ When hijacking is active, you'll see:
    ╰─────────────────────────────────────────────╯
    ```
 
-2. **Model call notification** when the target model is invoked:
+2. **调用目标模型时的通知**:
    ```
    🔄 ===== MODEL HIJACK CONFIGURED ===== 🔄
    🎯 Target Model: gemini-2.5-flash
@@ -71,49 +72,63 @@ When hijacking is active, you'll see:
    ========================================
    ```
 
-### Environment File Priority
+### 环境变量文件优先级 (Environment File Priority)
 
-The CLI searches for `.env` files in the following order:
-1. Current working directory: `./gemini/.env`
-2. Project root: `./.env`
-3. Parent directories (traversing upward)
-4. Home directory: `~/.gemini/.env`
-5. Home directory: `~/.env`
+CLI 按以下顺序搜索 `.env` 文件：
 
-### Troubleshooting
+1. 当前工作目录: `./gemini/.env`
+2. 项目根目录: `./.env`
+3. 父目录 (向上遍历)
+4. 用户家目录: `~/.gemini/.env`
+5. 用户家目录: `~/.env`
 
-Head over to the [troubleshooting](docs/troubleshooting.md) guide if you're
-having issues.
+### 故障排除 (Troubleshooting)
 
-## Terms of Service and Privacy Notice
+如果您遇到问题，请查阅 [故障排除指南](docs/troubleshooting.md)。
 
-For details on the terms of service and privacy notice applicable to your use of Gemini CLI, see the [Terms of Service and Privacy Notice](./docs/tos-privacy.md).
+## 本地安装与劫持功能 (Local Installation with Hijack Feature)
 
+此仓库包含一个带有 OpenAI 兼容模型劫持功能的自定义版本。
 
-## Local Installation with Hijack Feature
+### 安装 (Installation)
 
-This repository includes a custom version with OpenAI-compatible model hijacking capabilities. To install the local version:
+要安装本地版本，请运行以下命令：
 
 ```bash
-# Quick installation
+# 快速安装
 ./install-local.sh
 
-# Manual installation
+# 手动安装
 npm run build
 npm install -g .
 ```
 
-For detailed instructions, see [LOCAL_INSTALLATION_GUIDE.md](./LOCAL_INSTALLATION_GUIDE.md).
+有关详细说明，请参阅 [LOCAL_INSTALLATION_GUIDE.md](./LOCAL_INSTALLATION_GUIDE.md)。
 
-### Package Information
-- **Local Package**: `@fanzhang/gemini-cli-hijack`
-- **Version**: `0.1.5-hijack.1`
-- **Features**: Model hijacking, OpenAI compatibility, configurable targets
+### 卸载 (Uninstallation)
 
-## Contributing
+要卸载本地版本，请运行以下命令：
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for details on how to contribute to the Gemini CLI.
+```bash
+./uninstall-local.sh
+```
 
-## License
+此脚本将移除 `@fanzhang/gemini-cli-hijack` 包。卸载后，您可以选择安装官方的 Gemini CLI。
 
-This project is licensed under the terms of the [Apache 2.0 license](./LICENSE). See `LICENSE` for more information.
+### 包信息 (Package Information)
+
+- **本地包**: `@fanzhang/gemini-cli-hijack`
+- **版本**: `0.1.5-hijack.1`
+- **特性**: 模型劫持、OpenAI 兼容性、可配置目标
+
+## 服务条款和隐私声明 (Terms of Service and Privacy Notice)
+
+有关适用于您使用 Gemini CLI 的服务条款和隐私声明的详细信息，请参阅 [服务条款和隐私声明](./docs/tos-privacy.md)。
+
+## 贡献 (Contributing)
+
+有关如何为 Gemini CLI 做出贡献的详细信息，请参阅 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
+## 许可证 (License)
+
+本项目根据 [Apache 2.0 许可证](./LICENSE) 的条款获得许可。有关更多信息，请参阅 `LICENSE`。

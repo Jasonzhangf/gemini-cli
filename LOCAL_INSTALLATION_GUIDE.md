@@ -5,6 +5,7 @@
 这是一个自定义版本的 Gemini CLI，包含了完整的 OpenAI 兼容模型劫持功能。它与官方版本完全独立，不会产生冲突。
 
 ### 🎯 主要特性
+
 - ✅ **完整的模型劫持功能** - 可以将任何 Gemini 模型调用重定向到 OpenAI 兼容的 API
 - ✅ **独立包名** - `@fanzhang/gemini-cli-hijack` 不与官方版本冲突
 - ✅ **全局安装** - 可以在任意目录使用 `gemini` 命令
@@ -75,16 +76,19 @@ HIJACK_TARGET_MODEL=gemini-2.5-pro
 ## 🧪 测试功能
 
 ### 测试 1: 基本功能
+
 ```bash
 gemini --version
 ```
 
 ### 测试 2: 劫持功能 (需要配置)
+
 ```bash
 echo "hello" | gemini -m gemini-2.5-flash
 ```
 
 预期输出包含劫持配置信息：
+
 ```
 🔄 ===== MODEL HIJACK CONFIGURED ===== 🔄
 🎯 Target Model: gemini-2.5-flash
@@ -97,6 +101,7 @@ echo "hello" | gemini -m gemini-2.5-flash
 ```
 
 ### 测试 3: 任意目录使用
+
 ```bash
 cd /tmp
 echo "test from any directory" | gemini -m gemini-2.5-flash
@@ -105,11 +110,13 @@ echo "test from any directory" | gemini -m gemini-2.5-flash
 ## 🗑️ 卸载
 
 ### 方式 1: 使用卸载脚本
+
 ```bash
 ./uninstall-local.sh
 ```
 
 ### 方式 2: 手动卸载
+
 ```bash
 npm uninstall -g @fanzhang/gemini-cli-hijack
 ```
@@ -125,20 +132,21 @@ npm install -g .
 ```
 
 或者使用脚本：
+
 ```bash
 ./install-local.sh
 ```
 
 ## 📊 与官方版本的区别
 
-| 特性 | 官方版本 | 本地版本 |
-|------|----------|----------|
-| 包名 | `@google/gemini-cli` | `@fanzhang/gemini-cli-hijack` |
-| 版本 | `0.x.x` | `0.1.5-hijack.1` |
-| 模型劫持 | ❌ | ✅ |
-| OpenAI 兼容 | ❌ | ✅ |
-| 可配置目标模型 | ❌ | ✅ |
-| 自定义功能 | ❌ | ✅ |
+| 特性           | 官方版本             | 本地版本                      |
+| -------------- | -------------------- | ----------------------------- |
+| 包名           | `@google/gemini-cli` | `@fanzhang/gemini-cli-hijack` |
+| 版本           | `0.x.x`              | `0.1.5-hijack.1`              |
+| 模型劫持       | ❌                   | ✅                            |
+| OpenAI 兼容    | ❌                   | ✅                            |
+| 可配置目标模型 | ❌                   | ✅                            |
+| 自定义功能     | ❌                   | ✅                            |
 
 ## 🔒 安全说明
 
@@ -150,6 +158,7 @@ npm install -g .
 ## 🐛 问题排查
 
 ### 问题 1: 命令不存在
+
 ```bash
 # 检查全局安装
 npm list -g @fanzhang/gemini-cli-hijack
@@ -159,6 +168,7 @@ npm list -g @fanzhang/gemini-cli-hijack
 ```
 
 ### 问题 2: 劫持不工作
+
 ```bash
 # 检查配置文件
 cat ~/.gemini/.env
@@ -168,6 +178,7 @@ echo $HIJACK_ENABLED
 ```
 
 ### 问题 3: 版本冲突
+
 ```bash
 # 确认当前版本
 gemini --version
@@ -181,6 +192,7 @@ npm uninstall -g @fanzhang/gemini-cli-hijack
 ## 📞 支持
 
 如果遇到问题，请检查：
+
 1. 是否在正确的项目目录运行安装脚本
 2. Node.js 版本是否 >= 18.0.0
 3. npm 权限是否正确

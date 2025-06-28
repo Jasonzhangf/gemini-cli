@@ -61,30 +61,41 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     this.model = model;
   }
 
-  private convertGeminiToOpenAI(request: GenerateContentParameters): OpenAIRequest {
+  private convertGeminiToOpenAI(
+    request: GenerateContentParameters,
+  ): OpenAIRequest {
     const messages: OpenAIMessage[] = [];
-    
+
     // Handle different content formats
     if (request.contents) {
       if (Array.isArray(request.contents)) {
         for (const content of request.contents) {
-          if (typeof content === 'object' && content !== null && 'role' in content) {
+          if (
+            typeof content === 'object' &&
+            content !== null &&
+            'role' in content
+          ) {
             const role = content.role === 'user' ? 'user' : 'assistant';
             let messageContent = '';
-            
+
             // Extract text from parts if available
             if ('parts' in content && Array.isArray(content.parts)) {
               for (const part of content.parts) {
-                if (typeof part === 'object' && part !== null && 'text' in part && typeof part.text === 'string') {
+                if (
+                  typeof part === 'object' &&
+                  part !== null &&
+                  'text' in part &&
+                  typeof part.text === 'string'
+                ) {
                   messageContent += part.text;
                 }
               }
             }
-            
+
             if (messageContent) {
               messages.push({
                 role,
-                content: messageContent
+                content: messageContent,
               });
             }
           }
@@ -96,23 +107,27 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       model: this.model,
       messages,
       max_tokens: 4096,
-      temperature: 0.7
+      temperature: 0.7,
     };
   }
 
-  private convertOpenAIToGemini(response: OpenAIResponse): GenerateContentResponse {
+  private convertOpenAIToGemini(
+    response: OpenAIResponse,
+  ): GenerateContentResponse {
     const content = response.choices[0]?.message?.content || '';
-    
+
     // Create a proper GenerateContentResponse structure with all required properties
     const result = new GenerateContentResponse();
-    result.candidates = [{
-      content: {
-        parts: [{ text: content }],
-        role: 'model'
+    result.candidates = [
+      {
+        content: {
+          parts: [{ text: content }],
+          role: 'model',
+        },
+        finishReason: FinishReason.STOP,
+        index: 0,
       },
-      finishReason: FinishReason.STOP,
-      index: 0
-    }];
+    ];
     result.usageMetadata = {
       promptTokenCount: response.usage?.prompt_tokens || 0,
       candidatesTokenCount: response.usage?.completion_tokens || 0,
@@ -122,23 +137,27 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     return result;
   }
 
-  async generateContent(request: GenerateContentParameters): Promise<GenerateContentResponse> {
+  async generateContent(
+    request: GenerateContentParameters,
+  ): Promise<GenerateContentResponse> {
     try {
       console.log('🚀 Making OpenAI compatible API call...');
       const openaiRequest = this.convertGeminiToOpenAI(request);
-      
+
       const response = await fetch(`${this.apiEndpoint}/chat/completions`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
+          Authorization: `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(openaiRequest)
+        body: JSON.stringify(openaiRequest),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`OpenAI API request failed: ${response.status} ${response.statusText} - ${errorText}`);
+        throw new Error(
+          `OpenAI API request failed: ${response.status} ${response.statusText} - ${errorText}`,
+        );
       }
 
       const openaiResponse: OpenAIResponse = await response.json();
@@ -150,27 +169,29 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     }
   }
 
-  async generateContentStream(request: GenerateContentParameters): Promise<AsyncGenerator<GenerateContentResponse>> {
-    const self = this;
-    
+  async generateContentStream(
+    request: GenerateContentParameters,
+  ): Promise<AsyncGenerator<GenerateContentResponse>> {
     return (async function* () {
       try {
         console.log('🚀 Making OpenAI compatible streaming API call...');
-        const openaiRequest = self.convertGeminiToOpenAI(request);
+        const openaiRequest = this.convertGeminiToOpenAI(request);
         openaiRequest.stream = true;
-        
-        const response = await fetch(`${self.apiEndpoint}/chat/completions`, {
+
+        const response = await fetch(`${this.apiEndpoint}/chat/completions`, {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${self.apiKey}`,
+            Authorization: `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(openaiRequest)
+          body: JSON.stringify(openaiRequest),
         });
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`OpenAI API request failed: ${response.status} ${response.statusText} - ${errorText}`);
+          throw new Error(
+            `OpenAI API request failed: ${response.status} ${response.statusText} - ${errorText}`,
+          );
         }
 
         const reader = response.body?.getReader();
@@ -194,24 +215,26 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
               if (line.startsWith('data: ')) {
                 const data = line.slice(6);
                 if (data === '[DONE]') continue;
-                
+
                 try {
                   const parsed = JSON.parse(data);
                   const content = parsed.choices?.[0]?.delta?.content;
                   if (content) {
                     const result = new GenerateContentResponse();
-                    result.candidates = [{
-                      content: {
-                        parts: [{ text: content }],
-                        role: 'model'
+                    result.candidates = [
+                      {
+                        content: {
+                          parts: [{ text: content }],
+                          role: 'model',
+                        },
+                        finishReason: FinishReason.STOP,
+                        index: 0,
                       },
-                      finishReason: FinishReason.STOP,
-                      index: 0
-                    }];
+                    ];
 
                     yield result;
                   }
-                } catch (parseError) {
+                } catch {
                   // Skip invalid JSON
                   continue;
                 }
@@ -229,16 +252,28 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     })();
   }
 
-  async countTokens(request: CountTokensParameters): Promise<CountTokensResponse> {
+  async countTokens(
+    request: CountTokensParameters,
+  ): Promise<CountTokensResponse> {
     // For OpenAI compatible APIs, we'll estimate token count
     // This is a simple approximation - real implementation would use tiktoken or similar
     let text = '';
     if (request.contents) {
       if (Array.isArray(request.contents)) {
         for (const content of request.contents) {
-          if (typeof content === 'object' && content !== null && 'parts' in content && Array.isArray(content.parts)) {
+          if (
+            typeof content === 'object' &&
+            content !== null &&
+            'parts' in content &&
+            Array.isArray(content.parts)
+          ) {
             for (const part of content.parts) {
-              if (typeof part === 'object' && part !== null && 'text' in part && typeof part.text === 'string') {
+              if (
+                typeof part === 'object' &&
+                part !== null &&
+                'text' in part &&
+                typeof part.text === 'string'
+              ) {
                 text += part.text;
               }
             }
@@ -246,16 +281,18 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
         }
       }
     }
-    
+
     // Rough approximation: 1 token ≈ 4 characters
     const estimatedTokens = Math.ceil(text.length / 4);
-    
+
     return {
-      totalTokens: estimatedTokens
+      totalTokens: estimatedTokens,
     };
   }
 
-  async embedContent(request: EmbedContentParameters): Promise<EmbedContentResponse> {
+  async embedContent(
+    _request: EmbedContentParameters,
+  ): Promise<EmbedContentResponse> {
     // Most OpenAI compatible APIs don't support embeddings in the same endpoint
     // This would need to be implemented separately if needed
     throw new Error('Embedding not supported in OpenAI compatible mode');

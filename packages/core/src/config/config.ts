@@ -126,6 +126,7 @@ export interface ConfigParameters {
   bugCommand?: BugCommandSettings;
   model: string;
   extensionContextFilePaths?: string[];
+  autoSwitchToFlashOnQuotaError?: boolean;
 }
 
 export class Config {
@@ -165,6 +166,7 @@ export class Config {
   private readonly model: string;
   private readonly extensionContextFilePaths: string[];
   private modelSwitchedDuringSession: boolean = false;
+  private readonly autoSwitchToFlashOnQuotaError: boolean;
   flashFallbackHandler?: FlashFallbackHandler;
 
   constructor(params: ConfigParameters) {
@@ -207,6 +209,8 @@ export class Config {
     this.bugCommand = params.bugCommand;
     this.model = params.model;
     this.extensionContextFilePaths = params.extensionContextFilePaths ?? [];
+    this.autoSwitchToFlashOnQuotaError =
+      params.autoSwitchToFlashOnQuotaError ?? true;
 
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
@@ -373,6 +377,10 @@ export class Config {
 
   getShowMemoryUsage(): boolean {
     return this.showMemoryUsage;
+  }
+
+  getAutoSwitchToFlashOnQuotaError(): boolean {
+    return this.autoSwitchToFlashOnQuotaError;
   }
 
   getAccessibility(): AccessibilitySettings {

@@ -7,7 +7,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runNonInteractive } from './nonInteractiveCli.js';
-import { Config, GeminiClient, ToolRegistry } from '@fanzhang/gemini-cli-core-hijack';
+import {
+  Config,
+  GeminiClient,
+  ToolRegistry,
+} from '@fanzhang/gemini-cli-core-hijack';
 import { GenerateContentResponse, Part, FunctionCall } from '@google/genai';
 
 // Mock dependencies
