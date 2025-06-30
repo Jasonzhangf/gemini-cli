@@ -29,8 +29,8 @@ interface OpenAITool {
 }
 
 interface OpenAIMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null;
   tool_calls?: Array<{
     id: string;
     type: 'function';
@@ -39,6 +39,8 @@ interface OpenAIMessage {
       arguments: string;
     };
   }>;
+  tool_call_id?: string;
+  name?: string;
 }
 
 interface OpenAIRequest {
@@ -106,29 +108,73 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
             content !== null &&
             'role' in content
           ) {
-            const role = content.role === 'user' ? 'user' : 'assistant';
             let messageContent = '';
+            let toolCalls: any[] = [];
+            let isToolResponse = false;
+            let toolCallId = '';
+            let functionName = '';
 
-            // Extract text from parts if available
+            // Extract text and function calls from parts if available
             if ('parts' in content && Array.isArray(content.parts)) {
               for (const part of content.parts) {
                 if (
                   typeof part === 'object' &&
-                  part !== null &&
-                  'text' in part &&
-                  typeof part.text === 'string'
+                  part !== null
                 ) {
-                  messageContent += part.text;
+                  // Handle text parts
+                  if ('text' in part && typeof part.text === 'string') {
+                    messageContent += part.text;
+                  }
+                  // Handle function calls (from model)
+                  else if ('functionCall' in part && part.functionCall) {
+                    const funcCall = part.functionCall;
+                    toolCalls.push({
+                      id: funcCall.id || `call_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+                      type: 'function',
+                      function: {
+                        name: funcCall.name,
+                        arguments: JSON.stringify(funcCall.args || {}),
+                      },
+                    });
+                  }
+                  // Handle function responses (from user/tool execution)
+                  else if ('functionResponse' in part && part.functionResponse) {
+                    isToolResponse = true;
+                    const funcResp = part.functionResponse;
+                    toolCallId = funcResp.id || '';
+                    functionName = funcResp.name || '';
+                    messageContent += JSON.stringify(funcResp.response || {});
+                  }
                 }
               }
             }
 
-            if (messageContent) {
+            // Determine message role and structure
+            if (isToolResponse) {
+              // This is a tool response message
+              messages.push({
+                role: 'tool',
+                content: messageContent || 'Tool execution completed',
+                tool_call_id: toolCallId,
+                name: functionName,
+              });
+            } else if (toolCalls.length > 0) {
+              // This is an assistant message with tool calls
+              messages.push({
+                role: 'assistant',
+                content: messageContent || null,
+                tool_calls: toolCalls,
+              });
+            } else if (messageContent) {
+              // Regular user or assistant message
+              const role = content.role === 'user' ? 'user' : 'assistant';
+              
               // Add /no_think prefix for user messages to disable thinking - only for qwen3 models
               if (role === 'user' && this.model.toLowerCase().includes('qwen3')) {
                 // Only add /no_think if it's not already there
                 if (!messageContent.startsWith('/no_think ')) {
                   messageContent = '/no_think ' + messageContent;
+                  console.log('🔧 Added /no_think prefix for qwen3 model');
                 }
               }
               
@@ -149,8 +195,14 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       temperature: 0.7,
     };
 
+    // Check if tools should be disabled based on conversation context
+    const lastMessage = messages[messages.length - 1];
+    const shouldDisableTools = lastMessage?.content?.includes('Do NOT call any more tools') || 
+                              lastMessage?.content?.includes('do not call any more tools') ||
+                              lastMessage?.content?.includes('Tool execution completed');
+
     // Convert tools from Gemini format to OpenAI format
-    if (request.config?.tools && Array.isArray(request.config.tools)) {
+    if (!shouldDisableTools && request.config?.tools && Array.isArray(request.config.tools)) {
       const openaiTools: OpenAITool[] = [];
       console.log('🔧 Total tools to process:', request.config.tools.length);
       
@@ -311,10 +363,30 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
 
     // Add functionCalls array to response for direct access
     if (functionCalls.length > 0) {
+      console.log('🔧 Setting functionCalls on result:', JSON.stringify(functionCalls, null, 2));
+      // Debug: check each function call structure
+      for (let i = 0; i < functionCalls.length; i++) {
+        const fc = functionCalls[i];
+        console.log(`🔍 FunctionCall[${i}]:`, {
+          name: fc.name,
+          args: fc.args,
+          id: fc.id,
+          argsType: typeof fc.args,
+          argsKeys: fc.args ? Object.keys(fc.args) : 'null'
+        });
+      }
       try {
-        (result as any).functionCalls = functionCalls;
+        Object.defineProperty(result, 'functionCalls', {
+          value: functionCalls,
+          writable: true,
+          enumerable: true,
+          configurable: true
+        });
+        console.log('✅ Successfully set functionCalls on result');
+        console.log('🔍 Verification - result.functionCalls:', (result as any).functionCalls);
       } catch (error) {
         // If setting functionCalls fails, add it to the response metadata
+        console.log('❌ Failed to set functionCalls:', error);
         console.log('📝 Adding functionCalls to response metadata instead');
       }
     }
@@ -409,6 +481,9 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
 
         const decoder = new TextDecoder();
         let buffer = '';
+        
+        // Accumulate tool calls across streaming chunks
+        const accumulatedToolCalls = new Map<string, any>();
 
         try {
           while (true) {
@@ -422,11 +497,87 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
             for (const line of lines) {
               if (line.startsWith('data: ')) {
                 const data = line.slice(6);
-                if (data === '[DONE]') continue;
+                if (data === '[DONE]') {
+                  // Process accumulated tool calls when streaming is done
+                  if (accumulatedToolCalls.size > 0) {
+                    const functionCalls: any[] = [];
+                    const parts: any[] = [];
+
+                    for (const [callId, toolCall] of accumulatedToolCalls) {
+                      // Parse final arguments
+                      let functionCallArgs = {};
+                      if (toolCall.function.arguments) {
+                        try {
+                          functionCallArgs = JSON.parse(toolCall.function.arguments);
+                        } catch (e) {
+                          continue;
+                        }
+                      }
+
+                      // Add to parts array for content
+                      parts.push({
+                        functionCall: {
+                          name: toolCall.function.name,
+                          args: functionCallArgs,
+                          id: callId,
+                        },
+                      });
+
+                      // Add to functionCalls array for direct access
+                      functionCalls.push({
+                        name: toolCall.function.name,
+                        args: functionCallArgs,
+                        id: callId,
+                      });
+                    }
+
+                    if (functionCalls.length > 0) {
+                      console.log('🔧 [STREAMING] Setting functionCalls on result:', JSON.stringify(functionCalls, null, 2));
+                      // Debug: check each function call structure
+                      for (let i = 0; i < functionCalls.length; i++) {
+                        const fc = functionCalls[i];
+                        console.log(`🔍 [STREAMING] FunctionCall[${i}]:`, {
+                          name: fc.name,
+                          args: fc.args,
+                          id: fc.id,
+                          argsType: typeof fc.args,
+                          argsKeys: fc.args ? Object.keys(fc.args) : 'null'
+                        });
+                      }
+                      
+                      const result = new GenerateContentResponse();
+                      result.candidates = [
+                        {
+                          content: {
+                            parts,
+                            role: 'model',
+                          },
+                          finishReason: FinishReason.STOP,
+                          index: 0,
+                        },
+                      ];
+
+                      // Set functionCalls on the response using Object.defineProperty
+                      Object.defineProperty(result, 'functionCalls', {
+                        value: functionCalls,
+                        writable: true,
+                        enumerable: true,
+                        configurable: true
+                      });
+
+                      yield result;
+                    }
+                  }
+                  continue;
+                }
 
                 try {
                   const parsed = JSON.parse(data);
-                  const content = parsed.choices?.[0]?.delta?.content;
+                  const delta = parsed.choices?.[0]?.delta;
+                  const content = delta?.content;
+                  const toolCalls = delta?.tool_calls;
+
+                  // Handle text content
                   if (content) {
                     const result = new GenerateContentResponse();
                     result.candidates = [
@@ -441,6 +592,42 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
                     ];
 
                     yield result;
+                  }
+
+                  // Accumulate tool calls in streaming
+                  if (toolCalls && Array.isArray(toolCalls)) {
+                    console.log('🔧 [DEBUG] Raw tool calls from delta:', JSON.stringify(toolCalls, null, 2));
+                    for (const toolCall of toolCalls) {
+                      console.log('🔧 [DEBUG] Processing toolCall:', JSON.stringify(toolCall, null, 2));
+                      if (toolCall.type === 'function' && toolCall.function) {
+                        const callId = toolCall.id || `${toolCall.function.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                        console.log(`🔧 [DEBUG] CallId: ${callId}, function name: ${toolCall.function.name}, arguments: ${toolCall.function.arguments}`);
+                        
+                        // Accumulate or update tool call
+                        if (accumulatedToolCalls.has(callId)) {
+                          // Update existing tool call (append arguments if needed)
+                          const existing = accumulatedToolCalls.get(callId);
+                          if (toolCall.function.arguments) {
+                            existing.function.arguments = (existing.function.arguments || '') + toolCall.function.arguments;
+                            console.log(`🔧 [DEBUG] Updated existing call ${callId}, new arguments: ${existing.function.arguments}`);
+                          }
+                        } else {
+                          // New tool call
+                          accumulatedToolCalls.set(callId, {
+                            id: callId,
+                            type: 'function',
+                            function: {
+                              name: toolCall.function.name,
+                              arguments: toolCall.function.arguments || ''
+                            }
+                          });
+                          console.log(`🔧 [DEBUG] New tool call ${callId} with arguments: ${toolCall.function.arguments || ''}`);
+                        }
+                      } else {
+                        console.log('🔧 [DEBUG] Invalid tool call structure:', toolCall);
+                      }
+                    }
+                    console.log('🔧 [DEBUG] Current accumulated calls:', JSON.stringify(Array.from(accumulatedToolCalls.entries()), null, 2));
                   }
                 } catch {
                   // Skip invalid JSON

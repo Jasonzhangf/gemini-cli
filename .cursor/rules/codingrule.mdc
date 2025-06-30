@@ -1,0 +1,232 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 项目规则 (Project Rules)
+
+## 1. 项目结构 (Project Structure)
+
+**中文:**
+CLAUDE.md - 项目核心文件
+CLAUDE.md 是项目的核心文件，包含所有重要信息。在进行任何项目修改前，请务必阅读此文件，以确保您的方案与项目保持一致。在执行任何操作前，请确保您的操作与此文件不冲突。这是最高指令。
+step.md - 任务执行进度文件
+step.md 是项目的任务执行进度文件，包含任务分解、当前进度及下一步指示。请务必阅读此文件以同步项目状态，执行操作前需确认与文件内容无冲突。
+每次任务开始时会检查该文件：
+若文件不存在则创建新文件
+若文件存在则检查当前进度
+若任务已完成则清除文件内容
+
+context.md - 任务上下文文件
+context.md 是当前任务的核心上下文信息文件。在对任务进行研究和修改时，一旦发现任何新的、有价值的上下文信息（包括但不限于文件名、路径、变量、函数调用关系、关键代码片段、配置、依赖、问题根源或解决方案思路），必须立即将其更新到此文件。在更新 step.md 时，务必一并检查并更新此文件（如果不存在请创建），确保信息同步。每次任务执行后，无论成功或失败，都必须将导致结果的关键因素（包括但不限于错误日志、输出结果、性能数据、成功条件等）及时补充到此文件中。这是高优先级任务。遇到疑问或在开始任何研究、分析、规划新步骤前，请务必查看此文件获取上下文参考。
+
+
+
+虚拟环境设置
+项目虚拟环境为 venv
+每次运行命令前需先加载虚拟环境，执行以下命令：
+bash
+source venv/bin/activate  # Linux/macOS
+venv\Scripts\activate     # Windows
+
+
+虚拟环境激活后，命令行前缀会显示 (venv)，表示当前处于虚拟环境中
+
+**English:**
+CLAUDE.md - Project Core File
+CLAUDE.md is the core file of the project, containing all critical information. Before making any modifications, read this file to ensure your plan aligns with the project. Confirm no conflicts with this file before executing any operations — this is the highest directive.
+step.md - Task Execution Progress File
+step.md is the task execution progress file, including task breakdowns, current progress, and next-step instructions. Read this file to synchronize project status and verify no conflicts with its content before any operations.
+The system will check this file at the start of each task:
+Create the file if it does not exist
+Check the current progress if the file exists
+Clear the file content if the task is completed
+
+context.md - Task Context File
+context.md is the core task context information file. When researching and modifying the problem, any new, valuable contextual information (including but not limited to filenames, paths, variables, function call relationships, key code snippets, configurations, dependencies, root causes, or solution approaches) MUST be immediately updated in this file. When updating step.md, you MUST concurrently check and update this file (create it if it doesn't exist) to ensure information synchronization. After each task execution, regardless of success or failure, the key factors leading to the outcome (including but not limited to error logs, output results, performance data, success conditions, etc.) MUST be promptly added to this file. This is a high-priority task. Always refer to this file for context when encountering questions or before commencing any new research, analysis, or planning steps.
+
+
+
+Virtual Environment Setup
+The project virtual environment is venv
+Load the virtual environment before running any commands using:
+bash
+source venv/bin/activate  # Linux/macOS
+venv\Scripts\activate     # Windows
+
+
+After activation, the command line prefix will show (venv) to indicate the virtual environment is active
+
+## 2. 记忆 (Memory)
+**中文:**
+每次用户发送以 `#` 开头的指令时，请深刻理解该指令，并修改 `CLAUDE.md` 文件来记录此指令。
+
+**English:**
+Each time the user sends an instruction starting with `#`, please deeply understand the instruction and modify the `CLAUDE.md` file to record this instruction.
+
+## 3. 项目指导 (Project Guidance)
+**中文:**
+每次成功修改项目后，如果用户确认修改成功，需要重新理解项目，并与 `CLAUDE.md` 进行对比，修改相应内容，以确保项目文件是最新的。
+
+**English:**
+After each successful project modification, if the user confirms the modification is successful, you need to re-understand the project, compare it with `CLAUDE.md`, and update accordingly to ensure project files are up-to-date.
+
+## 4. 语言 (Language)
+**中文:**
+尽量使用中文回复。
+
+**English:**
+Reply in Chinese as much as possible.
+
+## 5. JavaScript 代码使用 (JavaScript Code Usage)
+**中文:**
+在生成或使用 JavaScript 代码时，必须优先使用和修改位于前后端 `src\tools\js` 目录下的现有 `.js` 文件。严禁在 Python 代码字符串中直接嵌入或生成 JavaScript 代码。
+
+**English:**
+When generating or using JavaScript code, you must prioritize utilizing and modifying existing `.js` files located in the `src\tools\js` directory. It is strictly forbidden to embed or generate JavaScript code directly within Python code strings. 
+
+## 6. 代码执行控制 (Code Execution Control)
+**中文:**
+.claude/settings.local.json 文件用于指定用户允许或拒绝自动执行的命令。
+请使用 ./dev.sh start脚本执行代码，该脚本会自动完成端口检查和前后端服务启动。
+请使用绝对路径来处理路径
+
+**English:**
+The .claude/settings.local.json file is used to specify commands that the user allows or denies for automatic execution.
+Execute the code using the ./dev.sh start script, which will automatically perform port checks and start front-end and back-end services.
+
+## 7. 指令分解与进度跟踪 (Instruction Decomposition & Progress Tracking)
+**中文:**
+# 任务分解
+1. [ ] 步骤一描述
+2. [ ] 步骤二描述
+3. [ ] 步骤三描述
+
+# 执行进度
+- [x] 已完成步骤一 (2025-06-21 10:30)
+- [ ] 待完成步骤二
+
+**English:**
+# Task Breakdown
+1. [ ] Step 1 Description
+2. [ ] Step 2 Description
+3. [ ] Step 3 Description
+
+# Execution Progress
+- [x] Completed Step 1 (2025-06-21 10:30)
+- [ ] Pending Step 2
+## 8. Bug 修复 (Bug Fixing)
+**中文:**
+在进行 bug 修复时，你应该在没有明确 bug 或已达成目标之前，直接执行更改而无需询问用户。你应该积极使用 mcp 工具进行代码更改或命令执行。
+
+**English:**
+When doing bug fixes, you should execute the change without asking the user until there are no explicit bugs or the target has been achieved. You should actively use mcp tools to perform code changes or command execution.
+
+## 9. 生成代码设计 (Generated Code Design)
+**中文:**
+默认情况下，生成的代码应设计为函数、类方法或事件处理程序，等待被调用或触发。代码应遵循以下原则：
+模块化设计：保持代码结构清晰，功能单一职责
+小型化实现：避免生成大文件，拆分为小模块（如 utils、handlers、models）
+局部可修改性：设计为可独立维护的组件，减少耦合
+文件组织规范：
+plaintext
+src/  
+├── utils/          # 工具函数  
+├── handlers/       # 事件处理程序  
+├── models/         # 数据模型  
+└── interfaces/     # 接口定义  
+
+
+
+**English:**
+By default, generated code should be designed as functions, class methods, or event handlers, waiting to be called or triggered. Code should adhere to the following principles:
+Modular Design: Maintain clear code structure with single responsibility
+Small-scale Implementation: Avoid large files, split into small modules (e.g., utils, handlers, models)
+Local Modifiability: Design as independently maintainable components with minimal coupling
+File Organization Convention:
+plaintext
+src/  
+├── utils/          # Utility functions  
+├── handlers/       # Event handlers  
+├── models/         # Data models  
+└── interfaces/     # Interface definitions  
+
+## 10. 测试与验证 (Testing & Verification)
+**中文:**
+为确保解决方案有效，请使用用户最近的相关终端命令作为测试命令。在最终确定响应之前，使用 MCP 工具在内部执行此测试。每次执行测试时，都要向用户展示你运行的确切测试命令，方便他们验证结果。如果需要生成测试文件，请在tests目录下生成。
+
+**English:**
+To ensure the solution works, use the user's most recent relevant terminal command as your test command. Execute this test internally with MCP tools before finalizing your response. Present the exact test command you ran to the user every time you perform a test, making it easy for them to verify the result. If test files need to be generated, please generate them in the tests directory.
+
+
+## 11. 禁止行为 - 画布与布局 (Forbidden Behavior - Canvas & Layout)
+**中文:**
+目前不要自动更改画布和布局。如果任何执行需要更改画布/节点布局或外观，请先征得用户许可。
+
+**English:**
+Do not change canvas and layout automatically at this time. If any execution requires changing the canvas/node layout or appearance, ask the user for permission.
+
+## 12. 禁止行为 - 结构重构 (Forbidden Behavior - Structure Redesign)
+**中文:**
+除非用户同意，否则不要进行结构重构。每次都应征求用户许可。
+**English:**
+Do not perform structure redesign unless the user agrees. Ask for user permission each time.
+
+
+
+## 13. 路径处理规范 (Path Handling Specifications)
+
+
+**中文:**
+绝对路径使用原则
+所有涉及文件操作、命令执行或资源引用的路径，必须使用绝对路径
+项目根目录绝对路径格式：
+bash
+/path/to/project/root  # 示例：/home/user/workspace/project
+
+**English:**
+Absolute Path Usage Principles
+All paths involved in file operations, command execution, or resource references must use absolute paths
+Absolute path format for the project root directory:
+bash
+/path/to/project/root  # Example: /home/user/workspace/project
+
+
+Absolute path examples for common scenarios:
+Loading CLAUDE.md: /path/to/project/root/CLAUDE.md
+Executing dev.sh script: /path/to/project/root/dev.sh
+Accessing camera API documentation: /path/to/project/root/Doc/E2/protocol/http/http.md
+
+## 14. 编码规范（Coding Conventions）
+**中文：**
+- 所有 JavaScript 逻辑必须放在 `backend/tools/js/` 目录下的独立 `.js` 文件中。
+- 使用模块化 JavaScript/Node.js 规范，正确导入/导出。
+- 优先修改已有文件，避免随意新建。
+- 生成代码应为函数、类方法或事件处理器，等待被调用。
+
+**English:**
+- All JavaScript logic must reside in separate `.js` files in `backend/tools/js/` directory.
+- Use modular JavaScript/Node.js patterns with proper imports/exports.
+- Prioritize modifying existing files over creating new ones.
+- Generated code should be functions, class methods, or event handlers waiting to be triggered.
+
+---
+
+## 15. 项目自文档化（Project Self-Documentation）
+**中文：**
+为了使项目结构清晰、易于维护和上手，我们在关键目录下都包含了 `readme.md` 文件：
+- **`CLAUDE.md`（本文档）**：作为项目的最高层设计蓝图，定义核心架构、设计原则和最终目标。每次对架构进行重大变更时，都应及时更新此文档，确保其始终反映项目的真实结构和最新设计。
+- **各子目录的 `readme.md`**：作为本地化的功能说明书，详细解释当前目录的角色、职责，以及（如为开发区）如何进行代码开发。开发者进入任何目录时，都能立刻理解其上下文和目标。
+> 规范要求：
+> - 任何架构、目录结构、核心机制的重大调整，必须同步更新 CLAUDE.md。
+> - 新增或重构目录时，需补充/完善对应的 readme.md，说明其用途和开发约定。
+> - 这样可确保新成员快速上手，项目长期可维护。
+
+**English:**
+To ensure the project structure is clear, maintainable, and easy to onboard, a `readme.md` file is included in each key directory:
+- **`CLAUDE.md` (this document)**: Serves as the top-level design blueprint, defining the core architecture, design principles, and ultimate goals. Whenever there is a major architectural change, this document must be updated promptly to ensure it always reflects the true structure and latest design of the project.
+- **`readme.md` in each subdirectory**: Acts as a localized functional manual, detailing the role and responsibilities of the current directory, and (if it is a development area) how to develop code within it. This allows developers to immediately understand the context and objectives upon entering any directory.
+> Specification requirements:
+> - Any major adjustment to architecture, directory structure, or core mechanisms must be synchronized in CLAUDE.md.
+> - When adding or refactoring directories, supplement or improve the corresponding readme.md to explain its purpose and development conventions.
+> - This ensures new members can quickly get started and the project remains maintainable in the long term.

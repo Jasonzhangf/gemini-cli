@@ -1,0 +1,53 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+### 代码搜索策略
+当处理 UI 组件样式统一任务时，需要遵循以下搜索和分析规则：
+
+#### 1. 结构对比分析
+- **组件类型识别**: 首先确定目标组件使用的UI框架（如 Ant Design Modal vs 原生 div）
+- **布局模式对比**: 对比两个组件的整体布局结构差异
+  - TaskManagerPanel: Modal 组件 + Tabs + 表格转卡片布局
+  - TaskMonitorPanel: 原生 div + 自定义卡片布局
+- **容器尺寸规格**: 
+  - Modal width: 1200px, max-height: 70vh
+  - tab-content min-height: 400px
+
+#### 2. 关键CSS属性对比
+必须对比的核心布局属性（按优先级排序）：
+1. **容器尺寸**: width, max-width, height, min-height, max-height
+2. **内边距**: padding (直接影响视觉密度)
+3. **外边距**: margin-bottom (影响条目间距)
+4. **显示模式**: display, flex-direction, overflow-y
+5. **颜色主题**: background-color, color, border-color (最后考虑)
+
+#### 3. 文件搜索路径规范
+```
+优先搜索路径:
+1. /frontend/src/components/[ComponentName].tsx (组件结构)
+2. /frontend/src/components/[ComponentName].css (专用样式)
+3. 搜索关键字: className, 组件名, 样式类名
+```
+
+#### 4. 代码分析检查点
+- **布局容器**: 检查是否使用了不同的容器组件（Modal vs div）
+- **尺寸约束**: 寻找 width, height, min-height, max-height 等尺寸限制
+- **滚动处理**: 检查 overflow-y: auto 和自定义滚动条样式
+- **响应式设计**: 查看是否有 max-width, vh/vw 单位的使用
+
+#### 5. 实施优先级规则
+执行顺序（严格按此顺序）：
+1. **结构布局调整** (容器类型、尺寸、布局模式)
+2. **间距和尺寸匹配** (padding, margin, min-height)
+3. **滚动和交互效果** (overflow, scrollbar, transition)  
+4. **视觉样式统一** (颜色、阴影、边框)
+
+### 上下文查询关键词
+当需要理解组件关系和布局时，使用以下搜索关键词：
+- 布局相关: `width`, `height`, `min-height`, `max-height`, `display: flex`
+- 容器相关: `Modal`, `div className`, `task-monitor-panel`, `task-manager-panel`
+- 尺寸相关: `1200px`, `70vh`, `400px`, `padding: 16px`
+- 滚动相关: `overflow-y`, `scrollbar`, `webkit-scrollbar`

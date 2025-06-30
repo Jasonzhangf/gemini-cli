@@ -6,6 +6,11 @@
   "bin": {
     "gemini": "dist/index.js"
   },
+  "scripts": {
+    "build": "node scripts/build_all_packages.js",
+    "clean": "rm -rf packages/*/dist",
+    "install-local": "./install-local.sh"
+  },
   "files": [
     "dist",
     "README.md",
