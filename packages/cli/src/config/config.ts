@@ -283,6 +283,13 @@ function mergeMcpServers(settings: Settings, extensions: Extension[]) {
   return mcpServers;
 }
 function findEnvFile(startDir: string): string | null {
+  // First check for global gemini configuration (highest priority)
+  const homeGeminiEnvPath = path.join(os.homedir(), GEMINI_DIR, '.env');
+  if (fs.existsSync(homeGeminiEnvPath)) {
+    return homeGeminiEnvPath;
+  }
+
+  // Then search from current directory upwards
   let currentDir = path.resolve(startDir);
   while (true) {
     // prefer gemini-specific .env under GEMINI_DIR
@@ -296,11 +303,7 @@ function findEnvFile(startDir: string): string | null {
     }
     const parentDir = path.dirname(currentDir);
     if (parentDir === currentDir || !parentDir) {
-      // check .env under home as fallback, again preferring gemini-specific .env
-      const homeGeminiEnvPath = path.join(os.homedir(), GEMINI_DIR, '.env');
-      if (fs.existsSync(homeGeminiEnvPath)) {
-        return homeGeminiEnvPath;
-      }
+      // check .env under home as final fallback
       const homeEnvPath = path.join(os.homedir(), '.env');
       if (fs.existsSync(homeEnvPath)) {
         return homeEnvPath;
