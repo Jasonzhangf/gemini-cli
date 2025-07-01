@@ -1,4 +1,0 @@
-This is a direct tool test
-Created by Claude Code tool
-Time: 2025-06-28
-Purpose: Verify file writing capability
