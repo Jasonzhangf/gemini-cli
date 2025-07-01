@@ -16,6 +16,7 @@ import {
 import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
 import { DEFAULT_GEMINI_MODEL } from '../config/models.js';
 import { getEffectiveModel } from './modelCheck.js';
+import { Config } from '../config/config.js';
 
 interface HijackRule {
   targetModel: string;
@@ -362,6 +363,7 @@ export async function createContentGeneratorConfig(
 
 export async function createContentGenerator(
   config: ContentGeneratorConfig,
+  globalConfig?: Config,
 ): Promise<ContentGenerator> {
   const version = process.env.CLI_VERSION || process.version;
   const httpOptions = {
@@ -386,6 +388,7 @@ export async function createContentGenerator(
       config.apiKey,
       config.apiEndpoint,
       config.actualModel,
+      globalConfig,
     );
   }
 

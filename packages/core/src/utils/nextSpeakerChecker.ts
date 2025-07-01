@@ -124,6 +124,28 @@ export async function checkNextSpeaker(
     }
   }
 
+  // Enhanced pattern check: look for any recent tool execution patterns
+  // Check the last 4 messages for tool execution patterns
+  if (comprehensiveHistory.length >= 3) {
+    for (let i = comprehensiveHistory.length - 1; i >= Math.max(0, comprehensiveHistory.length - 4); i--) {
+      const currentMessage = comprehensiveHistory[i];
+      
+      // If we find a recent user message with function response, model should continue
+      if (
+        currentMessage &&
+        currentMessage.role === 'user' &&
+        currentMessage.parts &&
+        currentMessage.parts.some(part => part.functionResponse)
+      ) {
+        return {
+          reasoning:
+            'Recent tool execution detected: found function response in recent history. Model should continue to process results.',
+          next_speaker: 'model',
+        };
+      }
+    }
+  }
+
   if (
     lastComprehensiveMessage &&
     lastComprehensiveMessage.role === 'model' &&

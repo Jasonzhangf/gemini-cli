@@ -351,44 +351,88 @@ export class GeminiChat {
     const startTime = Date.now();
 
     try {
-      const apiCall = () =>
-        this.contentGenerator.generateContentStream({
-          model: this.config.getModel(),
-          contents: requestContents,
-          config: { ...this.generationConfig, ...params.config },
+      // Check if we're using OpenAI compatible API
+      const contentGeneratorConfig = this.config.getContentGeneratorConfig();
+      const isOpenAICompatible = contentGeneratorConfig?.authType === AuthType.OPENAI_COMPATIBLE;
+      
+      if (isOpenAICompatible) {
+        console.log('🔧 Using non-streaming API for OpenAI compatible mode');
+        
+        // Use non-streaming API to avoid streaming processing issues
+        const apiCall = () =>
+          this.contentGenerator.generateContent({
+            model: this.config.getModel(),
+            contents: requestContents,
+            config: { ...this.generationConfig, ...params.config },
+          });
+        
+        const response = await retryWithBackoff(apiCall, {
+          shouldRetry: (error: Error) => {
+            if (error && error.message) {
+              if (error.message.includes('429')) return true;
+              if (error.message.match(/5\d{2}/)) return true;
+            }
+            return false;
+          },
+          onPersistent429: async (authType?: string) =>
+            await this.handleFlashFallback(authType),
+          authType: contentGeneratorConfig?.authType,
+        });
+        
+        // Convert single response to async generator for compatibility
+        const generator = async function* () {
+          yield response;
+        };
+        
+        this.sendPromise = Promise.resolve();
+        
+        const endTime = Date.now();
+        const elapsed = endTime - startTime;
+        console.log(`✅ Non-streaming API call completed in ${elapsed}ms`);
+        
+        return generator();
+      } else {
+        console.log('🔧 Using streaming API for native Gemini mode');
+        
+        const apiCall = () =>
+          this.contentGenerator.generateContentStream({
+            model: this.config.getModel(),
+            contents: requestContents,
+            config: { ...this.generationConfig, ...params.config },
+          });
+
+        // Note: Retrying streams can be complex. If generateContentStream itself doesn't handle retries
+        // for transient issues internally before yielding the async generator, this retry will re-initiate
+        // the stream. For simple 429/500 errors on initial call, this is fine.
+        // If errors occur mid-stream, this setup won't resume the stream; it will restart it.
+        const streamResponse = await retryWithBackoff(apiCall, {
+          shouldRetry: (error: Error) => {
+            // Check error messages for status codes, or specific error names if known
+            if (error && error.message) {
+              if (error.message.includes('429')) return true;
+              if (error.message.match(/5\d{2}/)) return true;
+            }
+            return false; // Don't retry other errors by default
+          },
+          onPersistent429: async (authType?: string) =>
+            await this.handleFlashFallback(authType),
+          authType: this.config.getContentGeneratorConfig()?.authType,
         });
 
-      // Note: Retrying streams can be complex. If generateContentStream itself doesn't handle retries
-      // for transient issues internally before yielding the async generator, this retry will re-initiate
-      // the stream. For simple 429/500 errors on initial call, this is fine.
-      // If errors occur mid-stream, this setup won't resume the stream; it will restart it.
-      const streamResponse = await retryWithBackoff(apiCall, {
-        shouldRetry: (error: Error) => {
-          // Check error messages for status codes, or specific error names if known
-          if (error && error.message) {
-            if (error.message.includes('429')) return true;
-            if (error.message.match(/5\d{2}/)) return true;
-          }
-          return false; // Don't retry other errors by default
-        },
-        onPersistent429: async (authType?: string) =>
-          await this.handleFlashFallback(authType),
-        authType: this.config.getContentGeneratorConfig()?.authType,
-      });
+        // Resolve the internal tracking of send completion promise - `sendPromise`
+        // for both success and failure response. The actual failure is still
+        // propagated by the `await streamResponse`.
+        this.sendPromise = Promise.resolve(streamResponse)
+          .then(() => undefined)
+          .catch(() => undefined);
 
-      // Resolve the internal tracking of send completion promise - `sendPromise`
-      // for both success and failure response. The actual failure is still
-      // propagated by the `await streamResponse`.
-      this.sendPromise = Promise.resolve(streamResponse)
-        .then(() => undefined)
-        .catch(() => undefined);
-
-      const result = this.processStreamResponse(
-        streamResponse,
-        userContent,
-        startTime,
-      );
-      return result;
+        const result = this.processStreamResponse(
+          streamResponse,
+          userContent,
+          startTime,
+        );
+        return result;
+      }
     } catch (error) {
       const durationMs = Date.now() - startTime;
       this._logApiError(durationMs, error);

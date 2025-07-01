@@ -54,7 +54,7 @@ export class GeminiClient {
     temperature: 0,
     topP: 1,
   };
-  private readonly MAX_TURNS = 100;
+  private readonly MAX_TURNS = 3;
 
   constructor(private config: Config) {
     if (config.getProxy()) {
@@ -68,6 +68,7 @@ export class GeminiClient {
   async initialize(contentGeneratorConfig: ContentGeneratorConfig) {
     this.contentGenerator = await createContentGenerator(
       contentGeneratorConfig,
+      this.config,
     );
     // Update the client's model to reflect the actual model being used
     // (e.g., if hijacking occurred).
@@ -232,22 +233,22 @@ export class GeminiClient {
     }
     const turn = new Turn(this.getChat());
     const resultStream = turn.run(request, signal);
+    let lastEventWasToolResponse = false;
+    
     for await (const event of resultStream) {
       yield event;
-    }
-    if (!turn.pendingToolCalls.length && signal && !signal.aborted) {
-      const nextSpeakerCheck = await checkNextSpeaker(
-        this.getChat(),
-        this,
-        signal,
-      );
-      if (nextSpeakerCheck?.next_speaker === 'model') {
-        const nextRequest = [{ text: 'Please continue.' }];
-        // This recursive call's events will be yielded out, but the final
-        // turn object will be from the top-level call.
-        yield* this.sendMessageStream(nextRequest, signal, turns - 1);
+      
+      // Track if the last event was a tool response
+      if (event.type === GeminiEventType.ToolCallResponse) {
+        lastEventWasToolResponse = true;
+      } else if (event.type === GeminiEventType.Content) {
+        lastEventWasToolResponse = false;
       }
     }
+    
+    // Continuation logic completely disabled to prevent loops and timeouts
+    console.log('🛑 All continuation logic disabled to prevent loops and timeouts');
+    console.log('🏁 Client sendMessageStream completed normally');
     return turn;
   }
 
