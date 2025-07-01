@@ -364,11 +364,15 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   private addToolCallGuidance(message: string): string {
     const guidance = `
 
-IMPORTANT: When you need to execute tools, please respond with a JSON object in this exact format:
+IMPORTANT: When you need to execute tools, please follow these guidelines:
+
+1. **Execute ONE tool at a time** - Do not try to do multiple operations in a single response
+2. **Wait for execution results** - After each tool execution, wait for the system to report results before proceeding
+3. **Use this JSON format for SINGLE tool execution**:
 
 \`\`\`json
 {
-  "analysis": "Brief analysis of what the user wants",
+  "analysis": "Brief analysis of the current step",
   "tool_calls": [
     {
       "tool": "write_file",
@@ -378,9 +382,15 @@ IMPORTANT: When you need to execute tools, please respond with a JSON object in 
       }
     }
   ],
-  "message": "Brief message to user about what will be done"
+  "next_step": "What you plan to do after this step completes",
+  "message": "Brief message about this specific step"
 }
 \`\`\`
+
+For multiple tasks:
+- Execute the FIRST task only
+- Wait for the system to confirm completion  
+- Then proceed with the next task in a separate response
 
 Available tools:
 - write_file: Create or write files
@@ -932,62 +942,68 @@ USER REQUEST: ${message}`;
       if (jsonToolCalls.length > 0) {
         console.log(`🎯 Model returned ${jsonToolCalls.length} JSON tool calls`);
         
-        // Execute tools and collect results
-        const executionResults = [];
+        // SEQUENTIAL EXECUTION: Only execute the FIRST tool call
+        const firstToolCall = jsonToolCalls[0];
+        const remainingToolCalls = jsonToolCalls.slice(1);
         
-        for (const toolCall of jsonToolCalls) {
-          console.log(`🔧 Executing tool: ${toolCall.name}`);
-          
-          try {
-            if (toolCall.name === 'write_file') {
-              await this.executeWriteFileDirect(toolCall.args);
-              executionResults.push({
-                tool: toolCall.name,
-                status: 'success',
-                result: `Successfully created/wrote file: ${toolCall.args.file_path}`
-              });
-            } else {
-              // Handle other tools here
-              executionResults.push({
-                tool: toolCall.name,
-                status: 'unsupported',
-                result: `Tool ${toolCall.name} not yet implemented in new architecture`
-              });
-            }
-          } catch (error) {
-            console.error(`❌ Tool execution failed:`, error);
-            executionResults.push({
-              tool: toolCall.name,
-              status: 'error', 
-              result: `Error: ${error instanceof Error ? error.message : String(error)}`
-            });
-          }
+        console.log(`🔧 Executing FIRST tool only: ${firstToolCall.name}`);
+        if (remainingToolCalls.length > 0) {
+          console.log(`⏳ Remaining ${remainingToolCalls.length} tool calls will be executed in next turn`);
         }
         
-        // Create execution summary for model
-        const executionSummary = executionResults.map(r => 
-          `- ${r.tool}: ${r.status} - ${r.result}`
-        ).join('\n');
+        // Execute only the first tool
+        let executionResult;
+        try {
+          if (firstToolCall.name === 'write_file') {
+            await this.executeWriteFileDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully created/wrote file: ${firstToolCall.args.file_path}`
+            };
+          } else {
+            // Handle other tools here
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'unsupported',
+              result: `Tool ${firstToolCall.name} not yet implemented in new architecture`
+            };
+          }
+        } catch (error) {
+          console.error(`❌ Tool execution failed:`, error);
+          executionResult = {
+            tool: firstToolCall.name,
+            status: 'error', 
+            result: `Error: ${error instanceof Error ? error.message : String(error)}`
+          };
+        }
         
-        // Inject tool calls into response for compatibility
+        // Inject only the executed tool call into response
         if (!firstMessage.tool_calls) {
           firstMessage.tool_calls = [];
         }
         
-        for (const toolCall of jsonToolCalls) {
-          firstMessage.tool_calls.push({
-            id: `${toolCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            type: 'function',
-            function: {
-              name: toolCall.name,
-              arguments: JSON.stringify(toolCall.args)
-            }
-          });
+        firstMessage.tool_calls.push({
+          id: `${firstToolCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          type: 'function',
+          function: {
+            name: firstToolCall.name,
+            arguments: JSON.stringify(firstToolCall.args)
+          }
+        });
+        
+        // Create feedback message for sequential execution
+        let feedbackMessage = `第一步执行完成:\n- ${executionResult.tool}: ${executionResult.status} - ${executionResult.result}`;
+        
+        if (remainingToolCalls.length > 0) {
+          feedbackMessage += `\n\n还有 ${remainingToolCalls.length} 个任务待执行。请继续下一步操作。`;
+        } else {
+          feedbackMessage += `\n\n所有任务已完成。请向用户确认结果。`;
         }
         
-        // Replace model content with execution confirmation
-        firstMessage.content = `工具执行完成:\n${executionSummary}\n\n请基于这些执行结果向用户确认操作完成情况。`;
-        console.log('🔄 Updated model response with execution results');
+        // Replace model content with sequential execution feedback
+        firstMessage.content = feedbackMessage;
+        console.log(`🔄 Updated model response with sequential execution results (${remainingToolCalls.length} remaining)`);
       } else if (userRequestsTools) {
         // Model didn't return JSON but user requested tools - guide them
         console.log('⚠️ User requested tools but model did not return JSON format');
