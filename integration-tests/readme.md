@@ -1,18 +1,17 @@
 # Integration Tests
 
-This directory contains integration tests for the Gemini CLI. These tests are designed to validate the end-to-end functionality of the application, ensuring that different parts of the system (CLI, core logic, model interaction) work together correctly.
+This directory contains integration tests for the Gemini CLI project. These tests focus on verifying the end-to-end functionality of various tools and core features by simulating real-world scenarios and interactions.
 
-### Framework
+## Purpose:
 
-- The tests are written using **Vitest**.
-- They typically involve spawning the CLI as a child process and asserting its output or the side effects it produces (e.g., file creation).
+*   **End-to-End Validation**: Ensure that different components and tools work together correctly as a complete system.
+*   **Tool Reliability**: Verify the proper execution and output of individual tools (e.g., `write_file`, `run_shell_command`, `web_search`).
+*   **Scenario Testing**: Cover common user workflows and interactions to catch regressions.
 
-### Running Tests
+## Key Contents:
 
-To run the integration tests, use the following command from the project root:
+*   `*.test.js`: Individual test files, each focusing on a specific tool or integration scenario (e.g., `file-system.test.js`, `google_web_search.test.js`).
+*   `run-tests.js`: A script to orchestrate the execution of these integration tests.
+*   `test-helper.js`: Utility functions and setup common to the integration tests.
 
-```bash
-npm run test:integration
-```
-
-Please refer to the existing test files for examples of how to write new integration tests. 
+These tests are crucial for maintaining the stability and correctness of the Gemini CLI, especially as new features are added and existing ones are modified.

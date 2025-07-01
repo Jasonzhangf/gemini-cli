@@ -2,9 +2,9 @@
   "name": "@fanzhang/gemini-cli-hijack",
   "version": "0.1.5-hijack.1",
   "description": "A command-line interface for interacting with the Gemini API, with model hijacking capabilities.",
-  "main": "dist/index.js",
+  "main": "packages/cli/dist/index.js",
   "bin": {
-    "gemini": "dist/index.js"
+    "gemini": "packages/cli/dist/index.js"
   },
   "scripts": {
     "build": "node scripts/build_all_packages.js",
@@ -44,5 +44,8 @@
     "typescript-eslint": "^8.30.1",
     "yargs": "^17.7.2"
   },
-  "dependencies": {}
+  "dependencies": {},
+  "workspaces": [
+    "packages/*"
+  ]
 }

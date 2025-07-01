@@ -1,82 +1,57 @@
-#!/usr/bin/env node
-
 /**
- * Build all packages in the correct order
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
  */
 
-const { execSync } = require('child_process');
-const path = require('path');
-const fs = require('fs');
+import { execSync } from 'child_process';
+import { readdirSync, statSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const PROJECT_ROOT = path.join(__dirname, '..');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-function runCommand(command, cwd = PROJECT_ROOT) {
+// First, generate the git commit info file.
+try {
+  execSync('node scripts/generate-git-commit-info.js', { stdio: 'inherit' });
+} catch (error) {
+  console.error('❌ Failed to generate git commit info.');
+  process.exit(1);
+}
+
+console.log('🚀 Building all packages...');
+
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+const packagesDir = path.join(PROJECT_ROOT, 'packages');
+
+function runCommand(command, cwd) {
   console.log(`\n📦 Running: ${command}`);
   console.log(`📁 In: ${cwd}`);
   try {
-    execSync(command, { cwd, stdio: 'inherit' });
+    execSync(command, {
+      cwd,
+      stdio: 'inherit',
+    });
   } catch (error) {
-    console.error(`❌ Command failed: ${command}`);
+    console.error(`❌ Command failed: ${command} in ${cwd}`);
     process.exit(1);
   }
 }
 
-function buildPackage(packagePath) {
-  const packageJson = path.join(packagePath, 'package.json');
-  if (!fs.existsSync(packageJson)) {
-    console.log(`⚠️  No package.json found in ${packagePath}, skipping...`);
-    return;
+try {
+  const packages = readdirSync(packagesDir).filter((file) => {
+    return statSync(path.join(packagesDir, file)).isDirectory();
+  });
+
+  for (const pkg of packages) {
+    const pkgDir = path.join(packagesDir, pkg);
+    console.log(`\n🔨 Building @fanzhang/gemini-cli-hijack/${pkg}...`);
+    runCommand('npm run build', pkgDir);
   }
 
-  const pkg = JSON.parse(fs.readFileSync(packageJson, 'utf8'));
-  console.log(`\n🔨 Building ${pkg.name}...`);
-  
-  // Check if package has build script
-  if (pkg.scripts && pkg.scripts.build) {
-    runCommand('npm run build', packagePath);
-  } else {
-    console.log(`ℹ️  No build script found for ${pkg.name}, skipping...`);
-  }
+  console.log('\n✅ All packages built successfully!');
+} catch (error) {
+  console.error('❌ Failed to read packages directory.');
+  process.exit(1);
 }
-
-function main() {
-  console.log('🚀 Building all packages...');
-  
-  // Build order: core first, then cli
-  const packages = [
-    path.join(PROJECT_ROOT, 'packages', 'core'),
-    path.join(PROJECT_ROOT, 'packages', 'cli')
-  ];
-  
-  for (const packagePath of packages) {
-    if (fs.existsSync(packagePath)) {
-      buildPackage(packagePath);
-    } else {
-      console.log(`⚠️  Package not found: ${packagePath}`);
-    }
-  }
-  
-  // Copy CLI dist to root for global installation
-  const cliDistPath = path.join(PROJECT_ROOT, 'packages', 'cli', 'dist');
-  const rootDistPath = path.join(PROJECT_ROOT, 'dist');
-  
-  if (fs.existsSync(cliDistPath)) {
-    console.log('\n📋 Copying CLI dist to root...');
-    if (fs.existsSync(rootDistPath)) {
-      fs.rmSync(rootDistPath, { recursive: true });
-    }
-    fs.cpSync(cliDistPath, rootDistPath, { recursive: true });
-    console.log('✅ CLI dist copied to root');
-  } else {
-    console.error('❌ CLI dist not found after build');
-    process.exit(1);
-  }
-  
-  console.log('\n🎉 All packages built successfully!');
-}
-
-if (require.main === module) {
-  main();
-}
-
-module.exports = { buildPackage, main };

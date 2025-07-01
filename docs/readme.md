@@ -1,13 +1,26 @@
 # Documentation
 
-This directory serves as the central hub for all project documentation. It contains detailed information about the architecture, features, and development guidelines.
+This directory contains all the official documentation for the Gemini CLI project. It serves as a comprehensive resource for understanding the project's architecture, deployment, features, and how to use various tools and functionalities.
 
-## Key Documents
+## Purpose:
 
-- **[Architecture Overview](./architecture.md)**: A deep dive into the system architecture, components, and their interactions.
-- **[CLI Usage](./cli/README.md)**: (WIP) Detailed guides on using the command-line interface.
-- **[Core Logic](./core/README.md)**: (WIP) Documentation for the core package functionalities.
-- **[Troubleshooting](./troubleshooting.md)**: Common issues and how to resolve them.
-- **[Deployment](./deployment.md)**: Instructions for deploying the application.
+*   **Project Overview**: Provide high-level and detailed explanations of the Gemini CLI.
+*   **User Guides**: Offer instructions on how to install, configure, and use the CLI.
+*   **Developer Documentation**: Detail the project's architecture, development guidelines, and testing procedures.
+*   **Tool Reference**: Document the capabilities and usage of each tool available to the Gemini model.
 
-Please explore the other files and subdirectories for more specific topics. 
+## Key Contents:
+
+*   `architecture.md`: Describes the overall system architecture.
+*   `deployment.md`: Provides information on deploying the Gemini CLI.
+*   `extension.md`: Documentation related to extending the CLI's capabilities.
+*   `integration-tests.md`: Details about the integration testing framework.
+*   `sandbox.md`: Explains the sandboxing environment.
+*   `telemetry.md`: Documentation on telemetry and data collection.
+*   `tools/`: Contains documentation specific to each tool.
+*   `cli/`: Documentation specific to the CLI package.
+*   `core/`: Documentation specific to the core package.
+*   `assets/`: Static assets like images used in the documentation.
+*   `index.md`, `readme.md`: Entry points or overview documents for the documentation.
+
+This documentation aims to be a single source of truth for anyone looking to understand, use, or contribute to the Gemini CLI.

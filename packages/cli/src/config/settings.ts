@@ -66,6 +66,7 @@ export interface Settings {
 
   // Add other settings here.
   autoSwitchToFlashOnQuotaError?: boolean;
+  defaultModel?: string;
 }
 
 export interface SettingsError {

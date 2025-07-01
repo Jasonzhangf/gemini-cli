@@ -54,15 +54,16 @@ interface CliArgs {
   telemetryOtlpEndpoint: string | undefined;
   telemetryLogPrompts: boolean | undefined;
   autoSwitchToFlashOnQuotaError: boolean | undefined;
+  dir: string | undefined;
 }
 
-async function parseArguments(): Promise<CliArgs> {
+async function parseArguments(settings?: Settings): Promise<CliArgs> {
   const argv = await yargs(hideBin(process.argv))
     .option('model', {
       alias: 'm',
       type: 'string',
       description: `Model`,
-      default: process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
+      default: process.env.GEMINI_MODEL || settings?.defaultModel || DEFAULT_GEMINI_MODEL,
     })
     .option('prompt', {
       alias: 'p',
@@ -135,6 +136,10 @@ async function parseArguments(): Promise<CliArgs> {
         'Automatically switch to a faster, smaller model when rate limited.',
       default: true,
     })
+    .option('dir', {
+      type: 'string',
+      description: 'Set the working directory for the gemini CLI (target directory for operations)',
+    })
     .version(await getCliVersion()) // This will enable the --version flag based on package.json
     .alias('v', 'version')
     .help()
@@ -175,7 +180,7 @@ export async function loadCliConfig(
 ): Promise<Config> {
   loadEnvironment();
 
-  const argv = await parseArguments();
+  const argv = await parseArguments(settings);
   const debugMode = argv.debug || false;
 
   // Set the context filename in the server's memoryTool module BEFORE loading memory
