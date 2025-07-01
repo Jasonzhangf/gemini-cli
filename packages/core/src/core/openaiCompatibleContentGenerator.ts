@@ -531,11 +531,13 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   private addToolCallGuidance(message: string): string {
     const guidance = `
 
-IMPORTANT: When you need to execute tools, please follow these guidelines:
+CRITICAL: You MUST respond with the exact JSON format specified below. NO exceptions.
 
-1. **Execute ONE tool at a time** - Do not try to do multiple operations in a single response
-2. **Wait for execution results** - After each tool execution, wait for the system to report results before proceeding
-3. **Use this JSON format for SINGLE tool execution**:
+REQUIREMENTS:
+1. **ALWAYS respond with JSON code block** - wrapped in \`\`\`json and \`\`\`
+2. **Execute ONE tool at a time** - Do not try to do multiple operations in a single response
+3. **Wait for execution results** - After each tool execution, wait for the system to report results before proceeding
+4. **Use this EXACT JSON format for tool execution**:
 
 \`\`\`json
 {
@@ -614,6 +616,9 @@ Available tools:
 - read_many_files: Read multiple files at once (args: paths, optional: include, exclude, recursive, useDefaultExcludes, respect_git_ignore)
 - web_fetch: Fetch content from web URLs (args: prompt)
 - web_search: Search the web (args: query)
+
+REMEMBER: You MUST respond with JSON code block format. Start with \`\`\`json and end with \`\`\`. 
+DO NOT provide explanations outside the JSON block.
 
 USER REQUEST: ${message}`;
 
@@ -740,6 +745,13 @@ USER REQUEST: ${message}`;
       throw new Error('WriteFileTool not initialized - config not provided to OpenAICompatibleContentGenerator');
     }
     
+    // Convert relative paths to absolute paths
+    if (args.file_path && !path.isAbsolute(args.file_path)) {
+      const targetDir = this.config?.getTargetDir() || process.cwd();
+      args.file_path = path.resolve(targetDir, args.file_path);
+      console.log(`🔧 Converted relative path to absolute: ${args.file_path}`);
+    }
+    
     // Validate parameters
     const validationError = this.writeFileTool.validateToolParams(args);
     if (validationError) {
@@ -768,6 +780,13 @@ USER REQUEST: ${message}`;
       throw new Error('ReadFileTool not initialized - config not provided to OpenAICompatibleContentGenerator');
     }
     
+    // Convert relative paths to absolute paths
+    if (args.file_path && !path.isAbsolute(args.file_path)) {
+      const targetDir = this.config?.getTargetDir() || process.cwd();
+      args.file_path = path.resolve(targetDir, args.file_path);
+      console.log(`🔧 Converted relative path to absolute: ${args.file_path}`);
+    }
+    
     const validationError = this.readFileTool.validateToolParams(args);
     if (validationError) {
       throw new Error(`read_file validation failed: ${validationError}`);
@@ -792,6 +811,13 @@ USER REQUEST: ${message}`;
     
     if (!this.editTool) {
       throw new Error('EditTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    // Convert relative paths to absolute paths
+    if (args.file_path && !path.isAbsolute(args.file_path)) {
+      const targetDir = this.config?.getTargetDir() || process.cwd();
+      args.file_path = path.resolve(targetDir, args.file_path);
+      console.log(`🔧 Converted relative path to absolute: ${args.file_path}`);
     }
     
     const validationError = this.editTool.validateToolParams(args);
