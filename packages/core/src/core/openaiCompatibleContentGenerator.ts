@@ -26,6 +26,8 @@ import { GlobTool } from '../tools/glob.js';
 import { ReadManyFilesTool } from '../tools/read-many-files.js';
 import { WebFetchTool } from '../tools/web-fetch.js';
 import { WebSearchTool } from '../tools/web-search.js';
+import { KnowledgeGraphTool } from '../tools/knowledge-graph.js';
+import { SequentialThinkingTool } from '../tools/sequential-thinking.js';
 import { Config, ApprovalMode } from '../config/config.js';
 import path from 'path';
 
@@ -110,6 +112,8 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   private readManyFilesTool: ReadManyFilesTool | null = null;
   private webFetchTool: WebFetchTool | null = null;
   private webSearchTool: WebSearchTool | null = null;
+  private knowledgeGraphTool: KnowledgeGraphTool | null = null;
+  private sequentialThinkingTool: SequentialThinkingTool | null = null;
   
   // Model retry mechanism
   private failureCount: number = 0;
@@ -135,6 +139,8 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       this.readManyFilesTool = new ReadManyFilesTool(targetDir, config);
       this.webFetchTool = new WebFetchTool(config);
       this.webSearchTool = new WebSearchTool(config);
+      this.knowledgeGraphTool = new KnowledgeGraphTool(config);
+      this.sequentialThinkingTool = new SequentialThinkingTool(config);
     }
   }
 
@@ -616,6 +622,8 @@ Available tools:
 - read_many_files: Read multiple files at once (args: paths, optional: include, exclude, recursive, useDefaultExcludes, respect_git_ignore)
 - web_fetch: Fetch content from web URLs (args: prompt)
 - web_search: Search the web (args: query)
+- knowledge_graph: Persistent memory management (args: action, data) - actions: create_entities, create_relations, add_observations, delete_entities, delete_observations, delete_relations, read_graph, search_nodes, open_nodes
+- sequentialthinking: Dynamic problem-solving through thoughts (args: thought, nextThoughtNeeded, thoughtNumber, totalThoughts, optional: isRevision, revisesThought, branchFromThought, branchId, needsMoreThoughts)
 
 REMEMBER: You MUST respond with JSON code block format. Start with \`\`\`json and end with \`\`\`. 
 DO NOT provide explanations outside the JSON block.
@@ -1047,6 +1055,58 @@ USER REQUEST: ${message}`;
     console.log('🔎 web_search result:', result.llmContent);
     if (result.returnDisplay) {
       console.log('📺 web_search display:', result.returnDisplay);
+    }
+  }
+
+  /**
+   * Execute knowledge_graph tool directly
+   */
+  private async executeKnowledgeGraphDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
+    if (!this.knowledgeGraphTool) {
+      throw new Error('KnowledgeGraphTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    const validationError = this.knowledgeGraphTool.validateParams(args);
+    if (validationError) {
+      throw new Error(`knowledge_graph validation failed: ${validationError}`);
+    }
+    
+    const abortController = new AbortController();
+    const result = await this.knowledgeGraphTool.execute(args, abortController.signal);
+    
+    console.log('🧠 knowledge_graph result:', result.llmContent);
+    if (result.returnDisplay) {
+      console.log('📺 knowledge_graph display:', result.returnDisplay);
+    }
+  }
+
+  /**
+   * Execute sequentialthinking tool directly
+   */
+  private async executeSequentialThinkingDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
+    if (!this.sequentialThinkingTool) {
+      throw new Error('SequentialThinkingTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    const validationError = this.sequentialThinkingTool.validateParams(args);
+    if (validationError) {
+      throw new Error(`sequentialthinking validation failed: ${validationError}`);
+    }
+    
+    const abortController = new AbortController();
+    const result = await this.sequentialThinkingTool.execute(args, abortController.signal);
+    
+    console.log('💭 sequentialthinking result:', result.llmContent);
+    if (result.returnDisplay) {
+      console.log('📺 sequentialthinking display:', result.returnDisplay);
     }
   }
 
@@ -1561,6 +1621,20 @@ USER REQUEST: ${message}`;
               tool: firstToolCall.name,
               status: 'success',
               result: `Successfully searched for: ${firstToolCall.args.query}`
+            };
+          } else if (firstToolCall.name === 'knowledge_graph') {
+            await this.executeKnowledgeGraphDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully executed knowledge graph action: ${firstToolCall.args.action}`
+            };
+          } else if (firstToolCall.name === 'sequentialthinking') {
+            await this.executeSequentialThinkingDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully recorded thought ${firstToolCall.args.thoughtNumber}/${firstToolCall.args.totalThoughts}`
             };
           } else {
             // Handle unsupported tools

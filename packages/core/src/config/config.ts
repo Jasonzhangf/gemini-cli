@@ -23,6 +23,8 @@ import { WebFetchTool } from '../tools/web-fetch.js';
 import { ReadManyFilesTool } from '../tools/read-many-files.js';
 import { MemoryTool, setGeminiMdFilename } from '../tools/memoryTool.js';
 import { WebSearchTool } from '../tools/web-search.js';
+import { KnowledgeGraphTool } from '../tools/knowledge-graph.js';
+import { SequentialThinkingTool } from '../tools/sequential-thinking.js';
 import { GeminiClient } from '../core/client.js';
 import { GEMINI_CONFIG_DIR as GEMINI_DIR } from '../tools/memoryTool.js';
 import { FileDiscoveryService } from '../services/fileDiscoveryService.js';
@@ -500,6 +502,8 @@ export function createToolRegistry(config: Config): Promise<ToolRegistry> {
   registerCoreTool(ShellTool, config);
   registerCoreTool(MemoryTool);
   registerCoreTool(WebSearchTool, config);
+  registerCoreTool(KnowledgeGraphTool, config);
+  registerCoreTool(SequentialThinkingTool, config);
   return (async () => {
     await registry.discoverTools();
     return registry;
