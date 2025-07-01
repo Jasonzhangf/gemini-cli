@@ -9,7 +9,9 @@
   "scripts": {
     "build": "node scripts/build_all_packages.js",
     "clean": "rm -rf packages/*/dist",
-    "install-local": "./install-local.sh"
+    "install-local": "./install-local.sh",
+    "update-global": "./update-global.sh",
+    "dev": "./dev-watch.sh"
   },
   "files": [
     "dist",
