@@ -17,7 +17,16 @@ import {
 } from '@google/genai';
 import { ContentGenerator } from './contentGenerator.js';
 import { WriteFileTool } from '../tools/write-file.js';
-import { Config } from '../config/config.js';
+import { ReadFileTool } from '../tools/read-file.js';
+import { EditTool } from '../tools/edit.js';
+import { ShellTool } from '../tools/shell.js';
+import { LSTool } from '../tools/ls.js';
+import { GrepTool } from '../tools/grep.js';
+import { GlobTool } from '../tools/glob.js';
+import { ReadManyFilesTool } from '../tools/read-many-files.js';
+import { WebFetchTool } from '../tools/web-fetch.js';
+import { WebSearchTool } from '../tools/web-search.js';
+import { Config, ApprovalMode } from '../config/config.js';
 import path from 'path';
 
 interface OpenAIFunction {
@@ -90,16 +99,134 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   private apiKey: string;
   private apiEndpoint: string;
   private model: string;
+  private config: Config | null = null;
   private writeFileTool: WriteFileTool | null = null;
+  private readFileTool: ReadFileTool | null = null;
+  private editTool: EditTool | null = null;
+  private shellTool: ShellTool | null = null;
+  private lsTool: LSTool | null = null;
+  private grepTool: GrepTool | null = null;
+  private globTool: GlobTool | null = null;
+  private readManyFilesTool: ReadManyFilesTool | null = null;
+  private webFetchTool: WebFetchTool | null = null;
+  private webSearchTool: WebSearchTool | null = null;
+  
+  // Model retry mechanism
+  private failureCount: number = 0;
+  private readonly maxFailures: number = 3;
+  private availableModels: string[] = [];
 
   constructor(apiKey: string, apiEndpoint: string, model: string, config?: Config) {
     this.apiKey = apiKey;
     this.apiEndpoint = apiEndpoint;
     this.model = model;
+    this.config = config || null;
     
-    // Initialize WriteFileTool if config is provided
+    // Initialize all tools if config is provided
     if (config) {
+      const targetDir = config.getTargetDir();
       this.writeFileTool = new WriteFileTool(config);
+      this.readFileTool = new ReadFileTool(targetDir, config);
+      this.editTool = new EditTool(config);
+      this.shellTool = new ShellTool(config);
+      this.lsTool = new LSTool(targetDir, config);
+      this.grepTool = new GrepTool(targetDir);
+      this.globTool = new GlobTool(targetDir, config);
+      this.readManyFilesTool = new ReadManyFilesTool(targetDir, config);
+      this.webFetchTool = new WebFetchTool(config);
+      this.webSearchTool = new WebSearchTool(config);
+    }
+  }
+
+  /**
+   * Check if we're in non-interactive mode (YOLO mode)
+   */
+  private isNonInteractiveMode(): boolean {
+    return this.config?.getApprovalMode() === ApprovalMode.YOLO;
+  }
+
+  /**
+   * Fetch available models from the API endpoint
+   */
+  private async fetchAvailableModels(): Promise<string[]> {
+    try {
+      const response = await fetch(`${this.apiEndpoint}/models`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        console.warn(`⚠️ Failed to fetch models: ${response.status} ${response.statusText}`);
+        return [];
+      }
+
+      const data = await response.json();
+      const models = data.data?.map((model: any) => model.id) || [];
+      console.log(`📋 Available models: ${models.join(', ')}`);
+      return models;
+    } catch (error) {
+      console.warn(`⚠️ Error fetching models:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Handle model failure and attempt to switch to alternative model
+   */
+  private async handleModelFailure(): Promise<boolean> {
+    this.failureCount++;
+    console.warn(`⚠️ Model failure ${this.failureCount}/${this.maxFailures} for model: ${this.model}`);
+
+    if (this.failureCount >= this.maxFailures) {
+      console.log(`🔄 Attempting to switch model after ${this.maxFailures} failures...`);
+      
+      if (this.availableModels.length === 0) {
+        console.log(`📋 Fetching available models...`);
+        this.availableModels = await this.fetchAvailableModels();
+      }
+
+      // Find alternative models (prefer ones with 'gemini' or 'gpt' in the name)
+      const alternatives = this.availableModels.filter(m => 
+        m !== this.model && 
+        (m.toLowerCase().includes('gemini') || m.toLowerCase().includes('gpt'))
+      );
+
+      if (alternatives.length > 0) {
+        const newModel = alternatives[0];
+        console.log(`🔄 Switching from ${this.model} to ${newModel}`);
+        const oldModel = this.model;
+        this.model = newModel;
+        this.failureCount = 0; // Reset failure count for new model
+        
+        // Display model switch information
+        console.log(`\n🔄 ===== MODEL AUTO-SWITCHED ===== 🔄`);
+        console.log(`❌ Previous Model: ${oldModel} (failed ${this.maxFailures} times)`);
+        console.log(`✅ New Model: ${newModel}`);
+        console.log(`📋 Available alternatives: ${alternatives.slice(1).join(', ') || 'none'}`);
+        console.log(`🎯 Target Model (displayed): gemini-2.5-flash`);
+        console.log(`🔗 Endpoint: ${this.apiEndpoint}`);
+        console.log(`=======================================\n`);
+        
+        return true; // Model switched
+      } else {
+        console.error(`❌ No alternative models available. Current model: ${this.model}`);
+        return false; // No alternatives
+      }
+    }
+
+    return false; // Not yet time to switch
+  }
+
+  /**
+   * Reset failure count on successful response
+   */
+  private resetFailureCount(): void {
+    if (this.failureCount > 0) {
+      console.log(`✅ Model ${this.model} recovered, resetting failure count`);
+      this.failureCount = 0;
     }
   }
 
@@ -163,10 +290,50 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       jsonBlocks.push(match[1]);
     }
     
-    // Pattern 2: Standalone JSON objects
+    // Pattern 2: Standalone JSON objects (improved to handle braces balance)
     const jsonPattern = /{\s*["'](?:tool_calls?|tool|analysis)["'][\s\S]*?}/gi;
-    while ((match = jsonPattern.exec(content)) !== null) {
-      jsonBlocks.push(match[0]);
+    const resetContent = content; // Reset regex state
+    const lines = resetContent.split('\n');
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith('{') && (line.includes('tool_calls') || line.includes('analysis') || line.includes('tool'))) {
+        // Try to find the complete JSON object
+        let jsonStr = '';
+        let braceCount = 0;
+        let startFound = false;
+        
+        for (let j = i; j < lines.length; j++) {
+          const currentLine = lines[j];
+          jsonStr += currentLine + '\n';
+          
+          for (const char of currentLine) {
+            if (char === '{') {
+              braceCount++;
+              startFound = true;
+            } else if (char === '}') {
+              braceCount--;
+            }
+          }
+          
+          if (startFound && braceCount === 0) {
+            const cleanJson = jsonStr.trim();
+            if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
+              jsonBlocks.push(cleanJson);
+              console.log(`🔧 Found complete JSON object: ${cleanJson.slice(0, 100)}...`);
+            }
+            break;
+          }
+        }
+        break; // Only process the first JSON object found
+      }
+    }
+    
+    // Pattern 3: Fallback regex pattern
+    if (jsonBlocks.length === 0) {
+      while ((match = jsonPattern.exec(content)) !== null) {
+        jsonBlocks.push(match[0]);
+      }
     }
     
     console.log(`🔍 Found ${jsonBlocks.length} JSON blocks in response`);
@@ -387,15 +554,66 @@ IMPORTANT: When you need to execute tools, please follow these guidelines:
 }
 \`\`\`
 
+Examples for other tools:
+
+Read file:
+\`\`\`json
+{
+  "tool_calls": [{"tool": "read_file", "args": {"absolute_path": "/path/to/file.txt"}}]
+}
+\`\`\`
+
+Edit file:
+\`\`\`json
+{
+  "tool_calls": [{"tool": "edit", "args": {"file_path": "/path/to/file.txt", "old_string": "old text", "new_string": "new text"}}]
+}
+\`\`\`
+
+Shell command:
+\`\`\`json
+{
+  "tool_calls": [{"tool": "shell", "args": {"command": "ls -la"}}]
+}
+\`\`\`
+
+List directory:
+\`\`\`json
+{
+  "tool_calls": [{"tool": "ls", "args": {"path": "."}}]
+}
+\`\`\`
+
+Search files:
+\`\`\`json
+{
+  "tool_calls": [{"tool": "grep", "args": {"pattern": "Hello", "path": "."}}]
+}
+\`\`\`
+
+Find files:
+\`\`\`json
+{
+  "tool_calls": [{"tool": "glob", "args": {"pattern": "*.txt", "path": "."}}]
+}
+\`\`\`
+
 For multiple tasks:
 - Execute the FIRST task only
 - Wait for the system to confirm completion  
 - Then proceed with the next task in a separate response
 
 Available tools:
-- write_file: Create or write files
-- read_file: Read file contents  
-- list_directory: List directory contents
+- write_file: Create or write files (args: file_path, content)
+- read_file: Read file contents (args: absolute_path, optional: offset, limit)
+- edit: Edit existing files (args: file_path, old_string, new_string, optional: expected_replacements)
+- shell: Execute shell commands (args: command, optional: description, directory)
+- ls: List directory contents (args: path, optional: ignore, respect_git_ignore)
+- grep: Search for patterns in files (args: pattern, optional: path, include)
+- glob: Find files matching patterns (args: pattern, optional: path, case_sensitive, respect_git_ignore)
+- read_many_files: Read multiple files at once (args: paths, optional: include, exclude, recursive, useDefaultExcludes, respect_git_ignore)
+- web_fetch: Fetch content from web URLs (args: prompt)
+- web_search: Search the web (args: query)
 
 USER REQUEST: ${message}`;
 
@@ -514,6 +732,10 @@ USER REQUEST: ${message}`;
    * Execute write_file tool directly using the existing tool system
    */
   private async executeWriteFileDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
     if (!this.writeFileTool) {
       throw new Error('WriteFileTool not initialized - config not provided to OpenAICompatibleContentGenerator');
     }
@@ -531,6 +753,274 @@ USER REQUEST: ${message}`;
     console.log('📄 write_file result:', result.llmContent);
     if (result.returnDisplay) {
       console.log('📺 write_file display:', result.returnDisplay);
+    }
+  }
+
+  /**
+   * Execute read_file tool directly
+   */
+  private async executeReadFileDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
+    if (!this.readFileTool) {
+      throw new Error('ReadFileTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    const validationError = this.readFileTool.validateToolParams(args);
+    if (validationError) {
+      throw new Error(`read_file validation failed: ${validationError}`);
+    }
+    
+    const abortController = new AbortController();
+    const result = await this.readFileTool.execute(args, abortController.signal);
+    
+    console.log('📖 read_file result:', result.llmContent);
+    if (result.returnDisplay) {
+      console.log('📺 read_file display:', result.returnDisplay);
+    }
+  }
+
+  /**
+   * Execute edit tool directly
+   */
+  private async executeEditDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
+    if (!this.editTool) {
+      throw new Error('EditTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    const validationError = this.editTool.validateToolParams(args);
+    if (validationError) {
+      throw new Error(`edit validation failed: ${validationError}`);
+    }
+    
+    const abortController = new AbortController();
+    const result = await this.editTool.execute(args, abortController.signal);
+    
+    console.log('✏️ edit result:', result.llmContent);
+    if (result.returnDisplay) {
+      console.log('📺 edit display:', result.returnDisplay);
+    }
+  }
+
+  /**
+   * Execute shell tool directly
+   */
+  private async executeShellDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
+    if (!this.shellTool) {
+      throw new Error('ShellTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    const validationError = this.shellTool.validateToolParams(args);
+    if (validationError) {
+      throw new Error(`shell validation failed: ${validationError}`);
+    }
+    
+    const abortController = new AbortController();
+    const result = await this.shellTool.execute(args, abortController.signal);
+    
+    console.log('🐚 shell result:', result.llmContent);
+    if (result.returnDisplay) {
+      console.log('📺 shell display:', result.returnDisplay);
+    }
+  }
+
+  /**
+   * Execute ls tool directly
+   */
+  private async executeLsDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
+    if (!this.lsTool) {
+      throw new Error('LsTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    // Convert relative paths to absolute paths
+    if (args.path && !path.isAbsolute(args.path)) {
+      const targetDir = this.config?.getTargetDir() || process.cwd();
+      args.path = path.resolve(targetDir, args.path);
+      console.log(`🔧 Converted relative path to absolute: ${args.path}`);
+    }
+    
+    const validationError = this.lsTool.validateToolParams(args);
+    if (validationError) {
+      throw new Error(`ls validation failed: ${validationError}`);
+    }
+    
+    const abortController = new AbortController();
+    const result = await this.lsTool.execute(args, abortController.signal);
+    
+    console.log('📁 ls result:', result.llmContent);
+    if (result.returnDisplay) {
+      console.log('📺 ls display:', result.returnDisplay);
+    }
+  }
+
+  /**
+   * Execute grep tool directly
+   */
+  private async executeGrepDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
+    if (!this.grepTool) {
+      throw new Error('GrepTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    // Convert relative paths to absolute paths
+    if (args.path && !path.isAbsolute(args.path)) {
+      const targetDir = this.config?.getTargetDir() || process.cwd();
+      args.path = path.resolve(targetDir, args.path);
+      console.log(`🔧 Converted relative path to absolute: ${args.path}`);
+    }
+    
+    const validationError = this.grepTool.validateToolParams(args);
+    if (validationError) {
+      throw new Error(`grep validation failed: ${validationError}`);
+    }
+    
+    const abortController = new AbortController();
+    const result = await this.grepTool.execute(args, abortController.signal);
+    
+    console.log('🔍 grep result:', result.llmContent);
+    if (result.returnDisplay) {
+      console.log('📺 grep display:', result.returnDisplay);
+    }
+  }
+
+  /**
+   * Execute glob tool directly
+   */
+  private async executeGlobDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
+    if (!this.globTool) {
+      throw new Error('GlobTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    // Convert relative paths to absolute paths
+    if (args.path && !path.isAbsolute(args.path)) {
+      const targetDir = this.config?.getTargetDir() || process.cwd();
+      args.path = path.resolve(targetDir, args.path);
+      console.log(`🔧 Converted relative path to absolute: ${args.path}`);
+    }
+    
+    const validationError = this.globTool.validateToolParams(args);
+    if (validationError) {
+      throw new Error(`glob validation failed: ${validationError}`);
+    }
+    
+    const abortController = new AbortController();
+    const result = await this.globTool.execute(args, abortController.signal);
+    
+    console.log('🌐 glob result:', result.llmContent);
+    if (result.returnDisplay) {
+      console.log('📺 glob display:', result.returnDisplay);
+    }
+  }
+
+  /**
+   * Execute read_many_files tool directly
+   */
+  private async executeReadManyFilesDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
+    if (!this.readManyFilesTool) {
+      throw new Error('ReadManyFilesTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    // Convert relative paths to absolute paths in the paths array
+    if (args.paths && Array.isArray(args.paths)) {
+      const targetDir = this.config?.getTargetDir() || process.cwd();
+      args.paths = args.paths.map((filePath: string) => {
+        if (!path.isAbsolute(filePath)) {
+          const absolutePath = path.resolve(targetDir, filePath);
+          console.log(`🔧 Converted relative path to absolute: ${filePath} -> ${absolutePath}`);
+          return absolutePath;
+        }
+        return filePath;
+      });
+    }
+    
+    const validationError = this.readManyFilesTool.validateToolParams(args);
+    if (validationError) {
+      throw new Error(`read_many_files validation failed: ${validationError}`);
+    }
+    
+    const abortController = new AbortController();
+    const result = await this.readManyFilesTool.execute(args, abortController.signal);
+    
+    console.log('📚 read_many_files result:', result.llmContent);
+    if (result.returnDisplay) {
+      console.log('📺 read_many_files display:', result.returnDisplay);
+    }
+  }
+
+  /**
+   * Execute web_fetch tool directly
+   */
+  private async executeWebFetchDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
+    if (!this.webFetchTool) {
+      throw new Error('WebFetchTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    const validationError = this.webFetchTool.validateToolParams(args);
+    if (validationError) {
+      throw new Error(`web_fetch validation failed: ${validationError}`);
+    }
+    
+    const abortController = new AbortController();
+    const result = await this.webFetchTool.execute(args, abortController.signal);
+    
+    console.log('🌐 web_fetch result:', result.llmContent);
+    if (result.returnDisplay) {
+      console.log('📺 web_fetch display:', result.returnDisplay);
+    }
+  }
+
+  /**
+   * Execute web_search tool directly
+   */
+  private async executeWebSearchDirect(args: any): Promise<void> {
+    if (!this.isNonInteractiveMode()) {
+      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
+    }
+    
+    if (!this.webSearchTool) {
+      throw new Error('WebSearchTool not initialized - config not provided to OpenAICompatibleContentGenerator');
+    }
+    
+    const validationError = this.webSearchTool.validateToolParams(args);
+    if (validationError) {
+      throw new Error(`web_search validation failed: ${validationError}`);
+    }
+    
+    const abortController = new AbortController();
+    const result = await this.webSearchTool.execute(args, abortController.signal);
+    
+    console.log('🔎 web_search result:', result.llmContent);
+    if (result.returnDisplay) {
+      console.log('📺 web_search display:', result.returnDisplay);
     }
   }
 
@@ -924,17 +1414,39 @@ USER REQUEST: ${message}`;
 
       const openaiResponse: OpenAIResponse = await response.json();
       
+      // Display real model information to user (transparent to system)
+      const realModel = openaiResponse.model || this.model;
+      console.log(`🤖 Response from model: ${realModel} (displayed as: gemini-2.5-flash)`);
+      
       // Hide the real model name from the response - replace with target model name
-      if (openaiResponse.model && openaiResponse.model.includes('unsloth/qwen3-235b-a22b-gguf')) {
+      if (openaiResponse.model) {
         openaiResponse.model = 'gemini-2.5-flash';
       }
       
       console.log('✅ OpenAI API call successful');
       
-      // New architecture: Parse model response for JSON tool calls
+      // Check for empty or problematic responses that indicate model failure
       const firstChoice = openaiResponse.choices?.[0];
       const firstMessage = firstChoice?.message;
       const modelContent = firstMessage?.content || '';
+      
+      const isEmptyResponse = !modelContent.trim();
+      const isSystemFormatError = modelContent.includes('[System: Please format your tool calls as JSON in the specified format]');
+      const isModelFailure = isEmptyResponse || isSystemFormatError;
+      
+      if (isModelFailure) {
+        console.warn(`⚠️ Detected model failure: empty=${isEmptyResponse}, format_error=${isSystemFormatError}`);
+        const shouldRetry = await this.handleModelFailure();
+        
+        if (shouldRetry) {
+          console.log(`🔄 Retrying with new model: ${this.model}`);
+          return this.generateContent(request); // Recursive retry with new model
+        }
+      } else {
+        this.resetFailureCount(); // Reset on successful response
+      }
+      
+      // New architecture: Parse model response for JSON tool calls
       
       // Check if model returned JSON tool calls
       const jsonToolCalls = this.parseJsonToolCalls(modelContent);
@@ -961,8 +1473,71 @@ USER REQUEST: ${message}`;
               status: 'success',
               result: `Successfully created/wrote file: ${firstToolCall.args.file_path}`
             };
+          } else if (firstToolCall.name === 'read_file') {
+            await this.executeReadFileDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully read file: ${firstToolCall.args.file_path}`
+            };
+          } else if (firstToolCall.name === 'edit') {
+            await this.executeEditDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully edited file: ${firstToolCall.args.file_path}`
+            };
+          } else if (firstToolCall.name === 'shell') {
+            await this.executeShellDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully executed shell command: ${firstToolCall.args.command}`
+            };
+          } else if (firstToolCall.name === 'ls') {
+            await this.executeLsDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully listed directory: ${firstToolCall.args.path || '.'}`
+            };
+          } else if (firstToolCall.name === 'grep') {
+            await this.executeGrepDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully searched for pattern: ${firstToolCall.args.pattern}`
+            };
+          } else if (firstToolCall.name === 'glob') {
+            await this.executeGlobDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully found files matching: ${firstToolCall.args.pattern}`
+            };
+          } else if (firstToolCall.name === 'read_many_files') {
+            await this.executeReadManyFilesDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully read multiple files`
+            };
+          } else if (firstToolCall.name === 'web_fetch') {
+            await this.executeWebFetchDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully fetched URL: ${firstToolCall.args.url}`
+            };
+          } else if (firstToolCall.name === 'web_search') {
+            await this.executeWebSearchDirect(firstToolCall.args);
+            executionResult = {
+              tool: firstToolCall.name,
+              status: 'success',
+              result: `Successfully searched for: ${firstToolCall.args.query}`
+            };
           } else {
-            // Handle other tools here
+            // Handle unsupported tools
             executionResult = {
               tool: firstToolCall.name,
               status: 'unsupported',
