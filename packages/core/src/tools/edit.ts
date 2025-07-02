@@ -24,6 +24,7 @@ import { ensureCorrectEdit } from '../utils/editCorrector.js';
 import { DEFAULT_DIFF_OPTIONS } from './diffOptions.js';
 import { ReadFileTool } from './read-file.js';
 import { ModifiableTool, ModifyContext } from './modifiable-tool.js';
+import { Tool } from '@google/genai';
 
 /**
  * Parameters for the Edit tool
@@ -119,6 +120,18 @@ Expectation for required parameters:
     this.config = config;
     this.rootDirectory = path.resolve(this.config.getTargetDir());
     this.client = config.getGeminiClient();
+  }
+
+  getToolDefinition(): Tool {
+    return {
+      functionDeclarations: [
+        {
+          name: this.name,
+          description: this.description,
+          parameters: this.schema.parameters,
+        },
+      ],
+    };
   }
 
   /**

@@ -11,6 +11,7 @@ import { SchemaValidator } from '../utils/schemaValidator.js';
 import { BaseTool, ToolResult } from './tools.js';
 import { shortenPath, makeRelative } from '../utils/paths.js';
 import { Config } from '../config/config.js';
+import { Tool } from '@google/genai';
 
 // Subset of 'Path' interface provided by 'glob' that we can implement for testing
 export interface GlobPath {
@@ -119,6 +120,18 @@ export class GlobTool extends BaseTool<GlobToolParams, ToolResult> {
     );
 
     this.rootDirectory = path.resolve(rootDirectory);
+  }
+
+  getToolDefinition(): Tool {
+    return {
+      functionDeclarations: [
+        {
+          name: this.name,
+          description: this.description,
+          parameters: this.schema.parameters,
+        },
+      ],
+    };
   }
 
   /**

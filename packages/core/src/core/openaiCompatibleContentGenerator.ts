@@ -16,18 +16,6 @@ import {
   FunctionDeclaration,
 } from '@google/genai';
 import { ContentGenerator } from './contentGenerator.js';
-import { WriteFileTool } from '../tools/write-file.js';
-import { ReadFileTool } from '../tools/read-file.js';
-import { EditTool } from '../tools/edit.js';
-import { ShellTool } from '../tools/shell.js';
-import { LSTool } from '../tools/ls.js';
-import { GrepTool } from '../tools/grep.js';
-import { GlobTool } from '../tools/glob.js';
-import { ReadManyFilesTool } from '../tools/read-many-files.js';
-import { WebFetchTool } from '../tools/web-fetch.js';
-import { WebSearchTool } from '../tools/web-search.js';
-import { KnowledgeGraphTool } from '../tools/knowledge-graph.js';
-import { SequentialThinkingTool } from '../tools/sequential-thinking.js';
 import { Config, ApprovalMode } from '../config/config.js';
 import path from 'path';
 
@@ -102,18 +90,6 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   private apiEndpoint: string;
   private model: string;
   private config: Config | null = null;
-  private writeFileTool: WriteFileTool | null = null;
-  private readFileTool: ReadFileTool | null = null;
-  private editTool: EditTool | null = null;
-  private shellTool: ShellTool | null = null;
-  private lsTool: LSTool | null = null;
-  private grepTool: GrepTool | null = null;
-  private globTool: GlobTool | null = null;
-  private readManyFilesTool: ReadManyFilesTool | null = null;
-  private webFetchTool: WebFetchTool | null = null;
-  private webSearchTool: WebSearchTool | null = null;
-  private knowledgeGraphTool: KnowledgeGraphTool | null = null;
-  private sequentialThinkingTool: SequentialThinkingTool | null = null;
   
   // Model retry mechanism
   private failureCount: number = 0;
@@ -126,23 +102,70 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     this.model = model;
     this.config = config || null;
     
-    // Initialize all tools if config is provided
-    if (config) {
-      const targetDir = config.getTargetDir();
-      this.writeFileTool = new WriteFileTool(config);
-      this.readFileTool = new ReadFileTool(targetDir, config);
-      this.editTool = new EditTool(config);
-      this.shellTool = new ShellTool(config);
-      this.lsTool = new LSTool(targetDir, config);
-      this.grepTool = new GrepTool(targetDir);
-      this.globTool = new GlobTool(targetDir, config);
-      this.readManyFilesTool = new ReadManyFilesTool(targetDir, config);
-      this.webFetchTool = new WebFetchTool(config);
-      this.webSearchTool = new WebSearchTool(config);
-      this.knowledgeGraphTool = new KnowledgeGraphTool(config);
-      this.sequentialThinkingTool = new SequentialThinkingTool(config);
+    // No longer need to initialize tool instances - tools will be registered in ToolRegistry
+    // and executed through the traditional path
+    console.log('🚀 OpenAI Compatible Generator initialized with hijacking approach');
+  }
+
+  /**
+   * Check if content contains analysis-only JSON (indicating task completion)
+   * This helps distinguish between tool calls needed vs. completion status
+   */
+  private hasAnalysisOnlyJson(content: string): boolean {
+    try {
+      const jsonBlocks = this.extractJsonBlocks(content);
+      
+      for (const jsonBlock of jsonBlocks) {
+        try {
+          const parsed = JSON.parse(jsonBlock);
+          
+          // Check if it's an analysis-only JSON with empty or no tool_calls
+          if (parsed.analysis && 
+              (!parsed.tool_calls || 
+               (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length === 0))) {
+            console.log('🎯 Detected analysis-only JSON response (task completion)');
+            return true;
+          }
+        } catch (e) {
+          // Skip invalid JSON blocks
+          continue;
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      return false;
     }
   }
+
+  /**
+   * Map JSON tool names to actual registry tool names
+   * This bridges the gap between what the model expects and what's registered
+   */
+  private mapToolName(jsonToolName: string): string {
+    const toolNameMap: Record<string, string> = {
+      'shell': 'run_shell_command',
+      'edit': 'replace', 
+      'ls': 'list_directory',
+      'grep': 'search_file_content',
+      'web_search': 'google_web_search',
+      // These don't need mapping as they match
+      'write_file': 'write_file',
+      'read_file': 'read_file', 
+      'glob': 'glob',
+      'web_fetch': 'web_fetch',
+      'read_many_files': 'read_many_files',
+      'knowledge_graph': 'knowledge_graph',
+      'sequentialthinking': 'sequentialthinking'
+    };
+    
+    const mappedName = toolNameMap[jsonToolName] || jsonToolName;
+    if (mappedName !== jsonToolName) {
+      console.log(`🔄 Mapped tool name: "${jsonToolName}" → "${mappedName}"`);
+    }
+    return mappedName;
+  }
+
 
   /**
    * Check if we're in non-interactive mode (YOLO mode)
@@ -741,374 +764,6 @@ USER REQUEST: ${message}`;
     return result;
   }
 
-  /**
-   * Execute write_file tool directly using the existing tool system
-   */
-  private async executeWriteFileDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.writeFileTool) {
-      throw new Error('WriteFileTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    // Convert relative paths to absolute paths
-    if (args.file_path && !path.isAbsolute(args.file_path)) {
-      const targetDir = this.config?.getTargetDir() || process.cwd();
-      args.file_path = path.resolve(targetDir, args.file_path);
-      console.log(`🔧 Converted relative path to absolute: ${args.file_path}`);
-    }
-    
-    // Validate parameters
-    const validationError = this.writeFileTool.validateToolParams(args);
-    if (validationError) {
-      throw new Error(`write_file validation failed: ${validationError}`);
-    }
-    
-    // Execute the tool directly
-    const abortController = new AbortController();
-    const result = await this.writeFileTool.execute(args, abortController.signal);
-    
-    console.log('📄 write_file result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 write_file display:', result.returnDisplay);
-    }
-  }
-
-  /**
-   * Execute read_file tool directly
-   */
-  private async executeReadFileDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.readFileTool) {
-      throw new Error('ReadFileTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    // Convert relative paths to absolute paths
-    if (args.file_path && !path.isAbsolute(args.file_path)) {
-      const targetDir = this.config?.getTargetDir() || process.cwd();
-      args.file_path = path.resolve(targetDir, args.file_path);
-      console.log(`🔧 Converted relative path to absolute: ${args.file_path}`);
-    }
-    
-    const validationError = this.readFileTool.validateToolParams(args);
-    if (validationError) {
-      throw new Error(`read_file validation failed: ${validationError}`);
-    }
-    
-    const abortController = new AbortController();
-    const result = await this.readFileTool.execute(args, abortController.signal);
-    
-    console.log('📖 read_file result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 read_file display:', result.returnDisplay);
-    }
-  }
-
-  /**
-   * Execute edit tool directly
-   */
-  private async executeEditDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.editTool) {
-      throw new Error('EditTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    // Convert relative paths to absolute paths
-    if (args.file_path && !path.isAbsolute(args.file_path)) {
-      const targetDir = this.config?.getTargetDir() || process.cwd();
-      args.file_path = path.resolve(targetDir, args.file_path);
-      console.log(`🔧 Converted relative path to absolute: ${args.file_path}`);
-    }
-    
-    const validationError = this.editTool.validateToolParams(args);
-    if (validationError) {
-      throw new Error(`edit validation failed: ${validationError}`);
-    }
-    
-    const abortController = new AbortController();
-    const result = await this.editTool.execute(args, abortController.signal);
-    
-    console.log('✏️ edit result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 edit display:', result.returnDisplay);
-    }
-  }
-
-  /**
-   * Execute shell tool directly
-   */
-  private async executeShellDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.shellTool) {
-      throw new Error('ShellTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    const validationError = this.shellTool.validateToolParams(args);
-    if (validationError) {
-      throw new Error(`shell validation failed: ${validationError}`);
-    }
-    
-    const abortController = new AbortController();
-    const result = await this.shellTool.execute(args, abortController.signal);
-    
-    console.log('🐚 shell result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 shell display:', result.returnDisplay);
-    }
-  }
-
-  /**
-   * Execute ls tool directly
-   */
-  private async executeLsDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.lsTool) {
-      throw new Error('LsTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    // Convert relative paths to absolute paths
-    if (args.path && !path.isAbsolute(args.path)) {
-      const targetDir = this.config?.getTargetDir() || process.cwd();
-      args.path = path.resolve(targetDir, args.path);
-      console.log(`🔧 Converted relative path to absolute: ${args.path}`);
-    }
-    
-    const validationError = this.lsTool.validateToolParams(args);
-    if (validationError) {
-      throw new Error(`ls validation failed: ${validationError}`);
-    }
-    
-    const abortController = new AbortController();
-    const result = await this.lsTool.execute(args, abortController.signal);
-    
-    console.log('📁 ls result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 ls display:', result.returnDisplay);
-    }
-  }
-
-  /**
-   * Execute grep tool directly
-   */
-  private async executeGrepDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.grepTool) {
-      throw new Error('GrepTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    // Convert relative paths to absolute paths
-    if (args.path && !path.isAbsolute(args.path)) {
-      const targetDir = this.config?.getTargetDir() || process.cwd();
-      args.path = path.resolve(targetDir, args.path);
-      console.log(`🔧 Converted relative path to absolute: ${args.path}`);
-    }
-    
-    const validationError = this.grepTool.validateToolParams(args);
-    if (validationError) {
-      throw new Error(`grep validation failed: ${validationError}`);
-    }
-    
-    const abortController = new AbortController();
-    const result = await this.grepTool.execute(args, abortController.signal);
-    
-    console.log('🔍 grep result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 grep display:', result.returnDisplay);
-    }
-  }
-
-  /**
-   * Execute glob tool directly
-   */
-  private async executeGlobDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.globTool) {
-      throw new Error('GlobTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    // Convert relative paths to absolute paths
-    if (args.path && !path.isAbsolute(args.path)) {
-      const targetDir = this.config?.getTargetDir() || process.cwd();
-      args.path = path.resolve(targetDir, args.path);
-      console.log(`🔧 Converted relative path to absolute: ${args.path}`);
-    }
-    
-    const validationError = this.globTool.validateToolParams(args);
-    if (validationError) {
-      throw new Error(`glob validation failed: ${validationError}`);
-    }
-    
-    const abortController = new AbortController();
-    const result = await this.globTool.execute(args, abortController.signal);
-    
-    console.log('🌐 glob result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 glob display:', result.returnDisplay);
-    }
-  }
-
-  /**
-   * Execute read_many_files tool directly
-   */
-  private async executeReadManyFilesDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.readManyFilesTool) {
-      throw new Error('ReadManyFilesTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    // Convert relative paths to absolute paths in the paths array
-    if (args.paths && Array.isArray(args.paths)) {
-      const targetDir = this.config?.getTargetDir() || process.cwd();
-      args.paths = args.paths.map((filePath: string) => {
-        if (!path.isAbsolute(filePath)) {
-          const absolutePath = path.resolve(targetDir, filePath);
-          console.log(`🔧 Converted relative path to absolute: ${filePath} -> ${absolutePath}`);
-          return absolutePath;
-        }
-        return filePath;
-      });
-    }
-    
-    const validationError = this.readManyFilesTool.validateToolParams(args);
-    if (validationError) {
-      throw new Error(`read_many_files validation failed: ${validationError}`);
-    }
-    
-    const abortController = new AbortController();
-    const result = await this.readManyFilesTool.execute(args, abortController.signal);
-    
-    console.log('📚 read_many_files result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 read_many_files display:', result.returnDisplay);
-    }
-  }
-
-  /**
-   * Execute web_fetch tool directly
-   */
-  private async executeWebFetchDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.webFetchTool) {
-      throw new Error('WebFetchTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    const validationError = this.webFetchTool.validateToolParams(args);
-    if (validationError) {
-      throw new Error(`web_fetch validation failed: ${validationError}`);
-    }
-    
-    const abortController = new AbortController();
-    const result = await this.webFetchTool.execute(args, abortController.signal);
-    
-    console.log('🌐 web_fetch result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 web_fetch display:', result.returnDisplay);
-    }
-  }
-
-  /**
-   * Execute web_search tool directly
-   */
-  private async executeWebSearchDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.webSearchTool) {
-      throw new Error('WebSearchTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    const validationError = this.webSearchTool.validateToolParams(args);
-    if (validationError) {
-      throw new Error(`web_search validation failed: ${validationError}`);
-    }
-    
-    const abortController = new AbortController();
-    const result = await this.webSearchTool.execute(args, abortController.signal);
-    
-    console.log('🔎 web_search result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 web_search display:', result.returnDisplay);
-    }
-  }
-
-  /**
-   * Execute knowledge_graph tool directly
-   */
-  private async executeKnowledgeGraphDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.knowledgeGraphTool) {
-      throw new Error('KnowledgeGraphTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    const validationError = this.knowledgeGraphTool.validateParams(args);
-    if (validationError) {
-      throw new Error(`knowledge_graph validation failed: ${validationError}`);
-    }
-    
-    const abortController = new AbortController();
-    const result = await this.knowledgeGraphTool.execute(args, abortController.signal);
-    
-    console.log('🧠 knowledge_graph result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 knowledge_graph display:', result.returnDisplay);
-    }
-  }
-
-  /**
-   * Execute sequentialthinking tool directly
-   */
-  private async executeSequentialThinkingDirect(args: any): Promise<void> {
-    if (!this.isNonInteractiveMode()) {
-      throw new Error('Direct tool execution only allowed in non-interactive mode (--yolo). Please run with --yolo to enable automatic execution.');
-    }
-    
-    if (!this.sequentialThinkingTool) {
-      throw new Error('SequentialThinkingTool not initialized - config not provided to OpenAICompatibleContentGenerator');
-    }
-    
-    const validationError = this.sequentialThinkingTool.validateParams(args);
-    if (validationError) {
-      throw new Error(`sequentialthinking validation failed: ${validationError}`);
-    }
-    
-    const abortController = new AbortController();
-    const result = await this.sequentialThinkingTool.execute(args, abortController.signal);
-    
-    console.log('💭 sequentialthinking result:', result.llmContent);
-    if (result.returnDisplay) {
-      console.log('📺 sequentialthinking display:', result.returnDisplay);
-    }
-  }
 
   private async convertGeminiToOpenAI(
     request: GenerateContentParameters,
@@ -1386,11 +1041,16 @@ USER REQUEST: ${message}`;
 
     // Create a proper GenerateContentResponse structure with all required properties
     const result = new GenerateContentResponse();
+    
+    // Determine the role based on whether tools were executed
+    const hasToolCalls = functionCalls.length > 0;
+    const role = hasToolCalls ? 'model' : 'model'; // Keep as model for now since we're handling it elsewhere
+    
     result.candidates = [
       {
         content: {
           parts,
-          role: 'model',
+          role: role,
         },
         finishReason: FinishReason.STOP,
         index: 0,
@@ -1540,147 +1200,40 @@ USER REQUEST: ${message}`;
       if (jsonToolCalls.length > 0) {
         console.log(`🎯 Model returned ${jsonToolCalls.length} JSON tool calls`);
         
-        // SEQUENTIAL EXECUTION: Only execute the FIRST tool call
-        const firstToolCall = jsonToolCalls[0];
-        const remainingToolCalls = jsonToolCalls.slice(1);
+        // NEW HIJACKING APPROACH: Convert JSON tool calls to proper function calls for the registry
+        console.log(`🎯 Converting ${jsonToolCalls.length} JSON tool calls to function calls`);
         
-        console.log(`🔧 Executing FIRST tool only: ${firstToolCall.name}`);
-        if (remainingToolCalls.length > 0) {
-          console.log(`⏳ Remaining ${remainingToolCalls.length} tool calls will be executed in next turn`);
-        }
-        
-        // Execute only the first tool
-        let executionResult;
-        try {
-          if (firstToolCall.name === 'write_file') {
-            await this.executeWriteFileDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully created/wrote file: ${firstToolCall.args.file_path}`
-            };
-          } else if (firstToolCall.name === 'read_file') {
-            await this.executeReadFileDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully read file: ${firstToolCall.args.file_path}`
-            };
-          } else if (firstToolCall.name === 'edit') {
-            await this.executeEditDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully edited file: ${firstToolCall.args.file_path}`
-            };
-          } else if (firstToolCall.name === 'shell') {
-            await this.executeShellDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully executed shell command: ${firstToolCall.args.command}`
-            };
-          } else if (firstToolCall.name === 'ls') {
-            await this.executeLsDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully listed directory: ${firstToolCall.args.path || '.'}`
-            };
-          } else if (firstToolCall.name === 'grep') {
-            await this.executeGrepDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully searched for pattern: ${firstToolCall.args.pattern}`
-            };
-          } else if (firstToolCall.name === 'glob') {
-            await this.executeGlobDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully found files matching: ${firstToolCall.args.pattern}`
-            };
-          } else if (firstToolCall.name === 'read_many_files') {
-            await this.executeReadManyFilesDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully read multiple files`
-            };
-          } else if (firstToolCall.name === 'web_fetch') {
-            await this.executeWebFetchDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully fetched URL: ${firstToolCall.args.url}`
-            };
-          } else if (firstToolCall.name === 'web_search') {
-            await this.executeWebSearchDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully searched for: ${firstToolCall.args.query}`
-            };
-          } else if (firstToolCall.name === 'knowledge_graph') {
-            await this.executeKnowledgeGraphDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully executed knowledge graph action: ${firstToolCall.args.action}`
-            };
-          } else if (firstToolCall.name === 'sequentialthinking') {
-            await this.executeSequentialThinkingDirect(firstToolCall.args);
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'success',
-              result: `Successfully recorded thought ${firstToolCall.args.thoughtNumber}/${firstToolCall.args.totalThoughts}`
-            };
-          } else {
-            // Handle unsupported tools
-            executionResult = {
-              tool: firstToolCall.name,
-              status: 'unsupported',
-              result: `Tool ${firstToolCall.name} not yet implemented in new architecture`
-            };
-          }
-        } catch (error) {
-          console.error(`❌ Tool execution failed:`, error);
-          executionResult = {
-            tool: firstToolCall.name,
-            status: 'error', 
-            result: `Error: ${error instanceof Error ? error.message : String(error)}`
-          };
-        }
-        
-        // Inject only the executed tool call into response
+        // Replace the existing tool_calls in the response with our converted ones
         if (!firstMessage.tool_calls) {
           firstMessage.tool_calls = [];
         }
         
-        firstMessage.tool_calls.push({
-          id: `${firstToolCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          type: 'function',
-          function: {
-            name: firstToolCall.name,
-            arguments: JSON.stringify(firstToolCall.args)
-          }
-        });
+        // Clear existing tool calls and add converted ones
+        firstMessage.tool_calls = [];
         
-        // Create feedback message for sequential execution
-        let feedbackMessage = `第一步执行完成:\n- ${executionResult.tool}: ${executionResult.status} - ${executionResult.result}`;
-        
-        if (remainingToolCalls.length > 0) {
-          feedbackMessage += `\n\n还有 ${remainingToolCalls.length} 个任务待执行。请继续下一步操作。`;
-        } else {
-          feedbackMessage += `\n\n所有任务已完成。请向用户确认结果。`;
+        for (const jsonToolCall of jsonToolCalls) {
+          const callId = `${jsonToolCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          const actualToolName = this.mapToolName(jsonToolCall.name);
+          
+          firstMessage.tool_calls.push({
+            id: callId,
+            type: 'function',
+            function: {
+              name: actualToolName,  // Use mapped tool name
+              arguments: JSON.stringify(jsonToolCall.args)
+            }
+          });
+          
+          console.log(`🔄 Converted JSON tool call '${jsonToolCall.name}' to function call '${actualToolName}'`);
         }
         
-        // Replace model content with sequential execution feedback
-        firstMessage.content = feedbackMessage;
-        console.log(`🔄 Updated model response with sequential execution results (${remainingToolCalls.length} remaining)`);
-      } else if (userRequestsTools) {
+        // Clear the content since we want the system to process the function calls
+        firstMessage.content = '';
+        
+        console.log(`✅ Successfully converted ${jsonToolCalls.length} JSON tool calls to function calls for registry execution`);
+      } else if (userRequestsTools && !this.hasAnalysisOnlyJson(modelContent)) {
         // Model didn't return JSON but user requested tools - guide them
+        // But don't guide if model returned analysis-only JSON (indicating completion)
         console.log('⚠️ User requested tools but model did not return JSON format');
         
         // This should trigger a follow-up request asking model to format as JSON

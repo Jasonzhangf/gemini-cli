@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { GroundingMetadata } from '@google/genai';
+import { GroundingMetadata, Tool } from '@google/genai';
 import { BaseTool, ToolResult } from './tools.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 
@@ -79,6 +79,18 @@ export class WebSearchTool extends BaseTool<
         required: ['query'],
       },
     );
+  }
+
+  getToolDefinition(): Tool {
+    return {
+      functionDeclarations: [
+        {
+          name: this.name,
+          description: this.description,
+          parameters: this.schema.parameters,
+        },
+      ],
+    };
   }
 
   validateParams(params: WebSearchToolParams): string | null {

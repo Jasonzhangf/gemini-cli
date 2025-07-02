@@ -31,6 +31,7 @@ import {
   recordFileOperationMetric,
   FileOperation,
 } from '../telemetry/metrics.js';
+import { Tool } from '@google/genai';
 
 /**
  * Parameters for the WriteFile tool
@@ -87,6 +88,18 @@ export class WriteFileTool
     );
 
     this.client = this.config.getGeminiClient();
+  }
+
+  getToolDefinition(): Tool {
+    return {
+      functionDeclarations: [
+        {
+          name: this.name,
+          description: this.description,
+          parameters: this.schema.parameters,
+        },
+      ],
+    };
   }
 
   private isWithinRoot(pathToCheck: string): boolean {

@@ -16,7 +16,7 @@ import {
   DEFAULT_ENCODING,
   getSpecificMimeType,
 } from '../utils/fileUtils.js';
-import { PartListUnion } from '@google/genai';
+import { PartListUnion, Tool } from '@google/genai';
 import { Config } from '../config/config.js';
 import {
   recordFileOperationMetric,
@@ -199,6 +199,18 @@ Use this tool when the user's query implies needing the content of several files
     this.geminiIgnorePatterns = config
       .getFileService()
       .getGeminiIgnorePatterns();
+  }
+
+  getToolDefinition(): Tool {
+    return {
+      functionDeclarations: [
+        {
+          name: this.name,
+          description: this.description,
+          parameters: this.schema.parameters,
+        },
+      ],
+    };
   }
 
   validateParams(params: ReadManyFilesParams): string | null {

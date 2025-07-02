@@ -282,6 +282,157 @@ HIJACK_ACTIVE_PROVIDER=HIJACK  # 当前使用哪个提供商
 echo "HIJACK_ACTIVE_PROVIDER=BACK" >> ~/.gemini/.env
 ```
 
+## 新架构：透明工具执行劫持系统 (v0.1.5-hijack.2)
+
+### 架构突破
+
+**问题背景**: 原有系统存在两套并行的工具执行机制：
+1. **传统ToolRegistry系统**: 工具在registry中注册，通过`executeToolCall`执行
+2. **JSON直接执行系统**: OpenAI兼容生成器直接执行工具
+
+这导致了"Tool not found in registry"错误，使得对话无法继续。
+
+**解决方案 - 透明劫持架构**:
+实现了一个优雅的"劫持"方法，让JSON仅用于模型通信，实际执行通过传统registry系统进行。
+
+### 新架构工作流程
+
+```mermaid
+graph TB
+    A[模型返回JSON工具调用] --> B[解析JSON块]
+    B --> C[工具名称映射]
+    C --> D[转换为Function Calls]
+    D --> E[传统ToolRegistry执行]
+    E --> F[返回执行结果]
+    
+    subgraph "工具名称映射"
+        G[shell → run_shell_command]
+        H[edit → replace]
+        I[ls → list_directory]
+        J[grep → search_file_content]
+    end
+```
+
+### 技术实现详情
+
+#### 1. JSON工具调用解析
+```typescript
+// 位置: packages/core/src/core/openaiCompatibleContentGenerator.ts
+private parseJsonToolCalls(content: string): Array<{name: string, args: any}> {
+  const toolCalls: Array<{name: string, args: any}> = [];
+  
+  // 解析JSON代码块和独立JSON对象
+  const jsonBlocks = this.extractJsonBlocks(content);
+  
+  for (const jsonBlock of jsonBlocks) {
+    const parsed = JSON.parse(jsonBlock);
+    
+    // 支持多种JSON格式
+    if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
+      // 结构化工具调用格式
+      for (const toolCall of parsed.tool_calls) {
+        if (toolCall.tool && toolCall.args) {
+          toolCalls.push({
+            name: toolCall.tool,
+            args: toolCall.args
+          });
+        }
+      }
+    } else if (parsed.tool && parsed.args) {
+      // 单一工具调用格式
+      toolCalls.push({
+        name: parsed.tool,
+        args: parsed.args
+      });
+    }
+  }
+  
+  return toolCalls;
+}
+```
+
+#### 2. 工具名称映射系统
+```typescript
+private mapToolName(jsonToolName: string): string {
+  const toolNameMap: Record<string, string> = {
+    'shell': 'run_shell_command',
+    'edit': 'replace', 
+    'ls': 'list_directory',
+    'grep': 'search_file_content',
+    'web_search': 'google_web_search',
+    // 其他工具名称保持不变
+    'write_file': 'write_file',
+    'read_file': 'read_file', 
+    'glob': 'glob',
+    'web_fetch': 'web_fetch',
+    'read_many_files': 'read_many_files',
+    'knowledge_graph': 'knowledge_graph',
+    'sequentialthinking': 'sequentialthinking'
+  };
+  
+  const mappedName = toolNameMap[jsonToolName] || jsonToolName;
+  if (mappedName !== jsonToolName) {
+    console.log(`🔄 Mapped tool name: "${jsonToolName}" → "${mappedName}"`);
+  }
+  return mappedName;
+}
+```
+
+#### 3. 透明转换为Function Calls
+```typescript
+// 劫持转换：JSON工具调用 → 传统Function Calls
+if (jsonToolCalls.length > 0) {
+  console.log(`🎯 Converting ${jsonToolCalls.length} JSON tool calls to function calls`);
+  
+  // 清除现有工具调用并添加转换后的
+  firstMessage.tool_calls = [];
+  
+  for (const jsonToolCall of jsonToolCalls) {
+    const callId = `${jsonToolCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const actualToolName = this.mapToolName(jsonToolCall.name);
+    
+    firstMessage.tool_calls.push({
+      id: callId,
+      type: 'function',
+      function: {
+        name: actualToolName,  // 使用映射后的工具名
+        arguments: JSON.stringify(jsonToolCall.args)
+      }
+    });
+    
+    console.log(`🔄 Converted JSON tool call '${jsonToolCall.name}' to function call '${actualToolName}'`);
+  }
+  
+  // 清空内容，让系统处理function calls
+  firstMessage.content = '';
+}
+```
+
+### 架构优势
+
+1. **完全向后兼容**: 传统ToolRegistry系统保持不变
+2. **透明劫持**: 用户无感知，JSON仅用于模型通信
+3. **统一执行路径**: 所有工具都通过标准registry执行
+4. **错误消除**: 彻底解决"Tool not found in registry"问题
+5. **连续对话**: 工具执行后对话可以正常继续
+
+### 移除的旧组件
+
+为了实现纯粹的劫持架构，我们移除了：
+
+1. **直接工具实例**: 不再在OpenAI兼容生成器中初始化工具实例
+2. **直接执行方法**: 删除了所有`execute*Direct`方法
+3. **并行执行路径**: 只保留传统ToolRegistry执行路径
+
+### 验证结果
+
+测试显示新架构成功解决了所有问题：
+- ✅ JSON工具调用正确解析
+- ✅ 工具名称正确映射 (`shell` → `run_shell_command`)
+- ✅ Function calls成功转换
+- ✅ 工具在registry中找到并执行
+- ✅ 连续命令可以正常执行
+
 ## 技术实现细节
 
 ### 1. 配置加载逻辑

@@ -19,6 +19,7 @@ import {
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import { getErrorMessage } from '../utils/errors.js';
 import stripAnsi from 'strip-ansi';
+import { Tool } from '@google/genai';
 
 export interface ShellToolParams {
   command: string;
@@ -66,6 +67,18 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
       false, // output is not markdown
       true, // output can be updated
     );
+  }
+
+  getToolDefinition(): Tool {
+    return {
+      functionDeclarations: [
+        {
+          name: this.name,
+          description: this.description,
+          parameters: this.schema.parameters,
+        },
+      ],
+    };
   }
 
   getDescription(params: ShellToolParams): string {

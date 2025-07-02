@@ -10,6 +10,7 @@ import { getErrorMessage } from '../utils/errors.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Config } from '../config/config.js';
+import { Tool } from '@google/genai';
 
 interface Entity {
   name: string;
@@ -142,6 +143,18 @@ export class KnowledgeGraphTool extends BaseTool<any, ToolResult> {
     );
 
     this.memoryPath = memoryPath || path.join(this.config.getTargetDir(), 'memory.json');
+  }
+
+  getToolDefinition(): Tool {
+    return {
+      functionDeclarations: [
+        {
+          name: this.name,
+          description: this.description,
+          parameters: this.schema.parameters,
+        },
+      ],
+    };
   }
 
   validateParams(params: any): string | null {

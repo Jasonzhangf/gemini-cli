@@ -8,6 +8,7 @@ import { BaseTool, ToolResult } from './tools.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { Config } from '../config/config.js';
+import { Tool } from '@google/genai';
 
 interface ThoughtData {
   thought: string;
@@ -99,6 +100,18 @@ export class SequentialThinkingTool extends BaseTool<SequentialThinkingParams, T
     );
 
     this.disableLogging = process.env.DISABLE_THOUGHT_LOGGING === 'true';
+  }
+
+  getToolDefinition(): Tool {
+    return {
+      functionDeclarations: [
+        {
+          name: this.name,
+          description: this.description,
+          parameters: this.schema.parameters,
+        },
+      ],
+    };
   }
 
   validateParams(params: SequentialThinkingParams): string | null {

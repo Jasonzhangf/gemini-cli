@@ -15,6 +15,7 @@ import { SchemaValidator } from '../utils/schemaValidator.js';
 import { makeRelative, shortenPath } from '../utils/paths.js';
 import { getErrorMessage, isNodeError } from '../utils/errors.js';
 import { isGitRepository } from '../utils/gitUtils.js';
+import { Tool } from '@google/genai';
 
 // --- Interfaces ---
 
@@ -88,6 +89,18 @@ export class GrepTool extends BaseTool<GrepToolParams, ToolResult> {
     );
     // Ensure rootDirectory is absolute and normalized
     this.rootDirectory = path.resolve(rootDirectory);
+  }
+
+  getToolDefinition(): Tool {
+    return {
+      functionDeclarations: [
+        {
+          name: this.name,
+          description: this.description,
+          parameters: this.schema.parameters,
+        },
+      ],
+    };
   }
 
   // --- Validation Methods ---

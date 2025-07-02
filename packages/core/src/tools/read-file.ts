@@ -15,6 +15,7 @@ import {
   recordFileOperationMetric,
   FileOperation,
 } from '../telemetry/metrics.js';
+import { Tool } from '@google/genai';
 
 /**
  * Parameters for the ReadFile tool
@@ -74,6 +75,18 @@ export class ReadFileTool extends BaseTool<ReadFileToolParams, ToolResult> {
       },
     );
     this.rootDirectory = path.resolve(rootDirectory);
+  }
+
+  getToolDefinition(): Tool {
+    return {
+      functionDeclarations: [
+        {
+          name: this.name,
+          description: this.description,
+          parameters: this.schema.parameters,
+        },
+      ],
+    };
   }
 
   validateToolParams(params: ReadFileToolParams): string | null {

@@ -10,6 +10,7 @@ import { BaseTool, ToolResult } from './tools.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import { makeRelative, shortenPath } from '../utils/paths.js';
 import { Config } from '../config/config.js';
+import { Tool } from '@google/genai';
 
 /**
  * Parameters for the LS tool
@@ -106,6 +107,18 @@ export class LSTool extends BaseTool<LSToolParams, ToolResult> {
 
     // Set the root directory
     this.rootDirectory = path.resolve(rootDirectory);
+  }
+
+  getToolDefinition(): Tool {
+    return {
+      functionDeclarations: [
+        {
+          name: this.name,
+          description: this.description,
+          parameters: this.schema.parameters,
+        },
+      ],
+    };
   }
 
   /**
