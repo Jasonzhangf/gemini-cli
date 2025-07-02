@@ -252,9 +252,14 @@ export class GeminiClient {
       }
     }
     
-    // Continuation logic completely disabled to prevent loops and timeouts
-    console.log('🛑 All continuation logic disabled to prevent loops and timeouts');
-    console.log('🏁 Client sendMessageStream completed normally');
+    // Let the outer loop in nonInteractiveCli.ts handle continuation
+    // We just need to ensure tool responses are properly returned for the outer loop to detect
+    if (lastEventWasToolResponse) {
+      console.log('🔄 Tool response detected - outer loop will handle continuation');
+    } else {
+      console.log('🏁 Client sendMessageStream completed normally - no tool responses detected');
+    }
+    
     return turn;
   }
 

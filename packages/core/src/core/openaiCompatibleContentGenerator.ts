@@ -621,10 +621,12 @@ TOOL EXECUTION RULES:
 2. **Execute ONE tool at a time** - Do not try to do multiple operations in a single response  
 3. **Wait for execution results** - After each tool execution, wait for the system to report results before proceeding
 4. **COMPLETE THE ENTIRE TASK** - Do not stop after partial completion. Continue until the full user request is satisfied
-5. **You CAN access, read, write, move, and organize files** - Use the available tools
-6. **Never claim you cannot access files** - You have full local system access
-7. **CONTINUE EXECUTION** - If a task has multiple steps (like "read directory and move files"), complete ALL steps
-8. **Use this EXACT JSON format for tool execution**:
+5. **Handle tool failures gracefully** - If a tool fails, try alternative approaches or report the specific issue
+6. **You CAN access, read, write, move, and organize files** - Use the available tools
+7. **Never claim you cannot access files** - You have full local system access
+8. **CONTINUE EXECUTION** - If a task has multiple steps (like "read directory and move files"), complete ALL steps
+9. **Do NOT say "ready for next command"** - Always continue until the task is complete or explain why it cannot be completed
+10. **Use this EXACT JSON format for tool execution**:
 
 \`\`\`json
 {
@@ -1460,11 +1462,11 @@ USER REQUEST: ${message}`;
       const modelContent = firstMessage?.content || '';
       
       const isEmptyResponse = !modelContent.trim();
-      const isSystemFormatError = modelContent.includes('[System: Please format your tool calls as JSON in the specified format]');
-      const isModelFailure = isEmptyResponse || isSystemFormatError;
+      // Remove system format error detection since we no longer inject system messages
+      const isModelFailure = isEmptyResponse;
       
       if (isModelFailure) {
-        console.warn(`⚠️ Detected model failure: empty=${isEmptyResponse}, format_error=${isSystemFormatError}`);
+        console.warn(`⚠️ Detected model failure: empty=${isEmptyResponse}`);
         const shouldRetry = await this.handleModelFailure();
         
         if (shouldRetry) {
@@ -1561,8 +1563,9 @@ REQUIRED RESPONSE FORMAT:
 
 Original request: ${userMessage}`;
         } else {
-          // Standard guidance for format issues
-          firstMessage.content += '\n\n[System: Please format your tool calls as JSON in the specified format]';
+          // Instead of modifying the content, log the issue and let the system handle it through normal flow
+          console.log('🔍 Model did not return proper JSON format, but will let natural conversation flow continue');
+          // Do not modify the message content as this causes the model to return system messages
         }
       }
       
