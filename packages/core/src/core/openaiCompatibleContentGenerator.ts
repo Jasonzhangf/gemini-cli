@@ -550,7 +550,7 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
    * Check if user message contains tool requests
    */
   private containsToolRequest(message: string): boolean {
-    const toolKeywords = /(?:创建|写入|建立|生成|保存|文件|write_file|create|file|read|list|search)/i;
+    const toolKeywords = /(?:创建|写入|建立|生成|保存|文件|整理|遍历|阅读|移动|复制|删除|查看|列出|搜索|执行|运行|write_file|create|file|read|list|search|shell|ls|grep|glob|edit|move|copy|delete|organize|traverse)/i;
     return toolKeywords.test(message);
   }
 
@@ -560,13 +560,16 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   private addToolCallGuidance(message: string): string {
     const guidance = `
 
+IMPORTANT: You HAVE FULL ACCESS to local files and can execute system commands. DO NOT say you cannot access files.
+
 CRITICAL: You MUST respond with the exact JSON format specified below. NO exceptions.
 
 REQUIREMENTS:
 1. **ALWAYS respond with JSON code block** - wrapped in \`\`\`json and \`\`\`
-2. **Execute ONE tool at a time** - Do not try to do multiple operations in a single response
+2. **Execute ONE tool at a time** - Do not try to do multiple operations in a single response  
 3. **Wait for execution results** - After each tool execution, wait for the system to report results before proceeding
-4. **Use this EXACT JSON format for tool execution**:
+4. **You CAN access, read, write, move, and organize files** - Use the available tools
+5. **Use this EXACT JSON format for tool execution**:
 
 \`\`\`json
 {
@@ -1009,42 +1012,72 @@ USER REQUEST: ${message}`;
         }
       }
     } else if (content && !toolCalls) {
-      // Fallback: Parse text content for tool call requests when API doesn't support proper tool calls
-      console.log('🔍 No tool_calls found, checking content for tool requests...');
-      const parsedToolCalls = this.parseTextForToolCalls(content);
-      if (parsedToolCalls.length > 0) {
-        console.log('🔧 Found tool calls in text content:', parsedToolCalls);
-        for (const parsedCall of parsedToolCalls) {
-          const callId = `${parsedCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      // Check for JSON tool calls in content that need role conversion
+      const jsonToolCalls = this.parseJsonToolCalls(content);
+      if (jsonToolCalls.length > 0) {
+        console.log(`🎯 Found ${jsonToolCalls.length} JSON tool calls in content - applying role conversion`);
+        
+        // Apply role conversion: convert JSON tool calls to function calls
+        for (const jsonToolCall of jsonToolCalls) {
+          const callId = `${jsonToolCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          const actualToolName = this.mapToolName(jsonToolCall.name);
           
           // Add to parts array for content
           parts.push({
             functionCall: {
-              name: parsedCall.name,
-              args: parsedCall.args,
+              name: actualToolName,
+              args: jsonToolCall.args,
               id: callId,
             },
           });
 
           // Add to functionCalls array for direct access
           functionCalls.push({
-            name: parsedCall.name,
-            args: parsedCall.args,
+            name: actualToolName,
+            args: jsonToolCall.args,
             id: callId,
           });
+          
+          console.log(`🔄 Role conversion: JSON tool '${jsonToolCall.name}' → function call '${actualToolName}'`);
         }
-        
-        // Clear the text content since we've converted it to tool calls
-        parts.length = 0; // Remove the text part
+      } else {
+        // Fallback: Parse text content for tool call requests when API doesn't support proper tool calls
+        console.log('🔍 No JSON tool calls found, checking content for text-based tool requests...');
+        const parsedToolCalls = this.parseTextForToolCalls(content);
+        if (parsedToolCalls.length > 0) {
+          console.log('🔧 Found tool calls in text content:', parsedToolCalls);
+          for (const parsedCall of parsedToolCalls) {
+            const callId = `${parsedCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            
+            // Add to parts array for content
+            parts.push({
+              functionCall: {
+                name: parsedCall.name,
+                args: parsedCall.args,
+                id: callId,
+              },
+            });
+
+            // Add to functionCalls array for direct access
+            functionCalls.push({
+              name: parsedCall.name,
+              args: parsedCall.args,
+              id: callId,
+            });
+          }
+          
+          // Clear the text content since we've converted it to tool calls
+          parts.length = 0; // Remove the text part
+        }
       }
     }
 
     // Create a proper GenerateContentResponse structure with all required properties
     const result = new GenerateContentResponse();
     
-    // Determine the role based on whether tools were executed
+    // Role conversion logic: When we have function calls, they should be processed by the tool registry
     const hasToolCalls = functionCalls.length > 0;
-    const role = hasToolCalls ? 'model' : 'model'; // Keep as model for now since we're handling it elsewhere
+    const role = hasToolCalls ? 'model' : 'model'; // Always model role - let tool registry handle execution
     
     result.candidates = [
       {
@@ -1059,7 +1092,7 @@ USER REQUEST: ${message}`;
 
     // Add functionCalls array to response for direct access
     if (functionCalls.length > 0) {
-      console.log('🔧 Setting functionCalls on result:', JSON.stringify(functionCalls, null, 2));
+      console.log('🔧 Setting functionCalls on result for tool registry execution:', JSON.stringify(functionCalls, null, 2));
       // Debug: check each function call structure
       for (let i = 0; i < functionCalls.length; i++) {
         const fc = functionCalls[i];
@@ -1078,7 +1111,7 @@ USER REQUEST: ${message}`;
           enumerable: true,
           configurable: true
         });
-        console.log('✅ Successfully set functionCalls on result');
+        console.log('✅ Successfully set functionCalls on result for role conversion to tool execution');
         console.log('🔍 Verification - result.functionCalls:', (result as any).functionCalls);
         
         // Add continuation hint for the conversation system
@@ -1088,7 +1121,7 @@ USER REQUEST: ${message}`;
           enumerable: true,
           configurable: true
         });
-        console.log('🔄 Set shouldContinueAfterToolExecution flag');
+        console.log('🔄 Set shouldContinueAfterToolExecution flag - system will execute tools and continue conversation');
       } catch (error) {
         // If setting functionCalls fails, add it to the response metadata
         console.log('❌ Failed to set functionCalls:', error);
@@ -1110,7 +1143,7 @@ USER REQUEST: ${message}`;
       return value;
     }, 2);
     
-    console.log('🔍 Converted Gemini Response:', sanitizedResult);
+    console.log('🔍 Converted Gemini Response with role conversion:', sanitizedResult);
     return result;
   }
 
@@ -1200,20 +1233,21 @@ USER REQUEST: ${message}`;
       if (jsonToolCalls.length > 0) {
         console.log(`🎯 Model returned ${jsonToolCalls.length} JSON tool calls`);
         
-        // NEW HIJACKING APPROACH: Convert JSON tool calls to proper function calls for the registry
-        console.log(`🎯 Converting ${jsonToolCalls.length} JSON tool calls to function calls`);
+        // CORRECT HIJACKING APPROACH: Convert JSON to function calls with proper role handling
+        console.log(`🎯 Converting ${jsonToolCalls.length} JSON tool calls to function calls with role conversion`);
         
-        // Replace the existing tool_calls in the response with our converted ones
-        if (!firstMessage.tool_calls) {
-          firstMessage.tool_calls = [];
-        }
-        
-        // Clear existing tool calls and add converted ones
-        firstMessage.tool_calls = [];
+        // Create function calls for the assistant message
+        const functionCalls = [];
+        const parts = [];
         
         for (const jsonToolCall of jsonToolCalls) {
           const callId = `${jsonToolCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
           const actualToolName = this.mapToolName(jsonToolCall.name);
+          
+          // Add to OpenAI format for conversion
+          if (!firstMessage.tool_calls) {
+            firstMessage.tool_calls = [];
+          }
           
           firstMessage.tool_calls.push({
             id: callId,
@@ -1222,6 +1256,21 @@ USER REQUEST: ${message}`;
               name: actualToolName,  // Use mapped tool name
               arguments: JSON.stringify(jsonToolCall.args)
             }
+          });
+          
+          // Also prepare for Gemini format
+          parts.push({
+            functionCall: {
+              name: actualToolName,
+              args: jsonToolCall.args,
+              id: callId,
+            },
+          });
+
+          functionCalls.push({
+            name: actualToolName,
+            args: jsonToolCall.args,
+            id: callId,
           });
           
           console.log(`🔄 Converted JSON tool call '${jsonToolCall.name}' to function call '${actualToolName}'`);
@@ -1309,38 +1358,70 @@ USER REQUEST: ${message}`;
         const content = message?.content;
         const toolCalls = message?.tool_calls;
         
-        // Handle text content
+        // Handle text content - check for JSON tool calls requiring role conversion
         if (content && typeof content === 'string') {
-          console.log('📝 Text content received:', content);
-          const result = new GenerateContentResponse();
-          result.candidates = [
-            {
-              content: {
-                parts: [{ text: content }],
-                role: 'model',
+          console.log('📝 [STREAMING] Text content received:', content);
+          
+          // Check for JSON tool calls in the content
+          const jsonToolCalls = self.parseJsonToolCalls(content);
+          
+          if (jsonToolCalls.length > 0) {
+            console.log(`🎯 [STREAMING] Found ${jsonToolCalls.length} JSON tool calls - applying role conversion`);
+            
+            // Convert JSON tool calls to OpenAI format for proper processing
+            const convertedToolCalls = [];
+            for (const jsonToolCall of jsonToolCalls) {
+              const callId = `${jsonToolCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+              const actualToolName = self.mapToolName(jsonToolCall.name);
+              
+              convertedToolCalls.push({
+                id: callId,
+                type: 'function',
+                function: {
+                  name: actualToolName,
+                  arguments: JSON.stringify(jsonToolCall.args)
+                }
+              });
+              
+              console.log(`🔄 [STREAMING] Role conversion: JSON tool '${jsonToolCall.name}' → function call '${actualToolName}'`);
+            }
+            
+            // Set the converted tool calls on the message for processing by the tool call handler below
+            message.tool_calls = convertedToolCalls;
+            message.content = ''; // Clear content since we've converted it to tool calls
+          } else {
+            // Regular text content - yield it
+            const result = new GenerateContentResponse();
+            result.candidates = [
+              {
+                content: {
+                  parts: [{ text: content }],
+                  role: 'model',
+                },
+                finishReason: FinishReason.STOP,
+                index: 0,
               },
-              finishReason: FinishReason.STOP,
-              index: 0,
-            },
-          ];
-          
-          result.usageMetadata = {
-            promptTokenCount: openaiResponse.usage?.prompt_tokens || 0,
-            candidatesTokenCount: openaiResponse.usage?.completion_tokens || 0,
-            totalTokenCount: openaiResponse.usage?.total_tokens || 0,
-          };
-          
-          yield result;
+            ];
+            
+            result.usageMetadata = {
+              promptTokenCount: openaiResponse.usage?.prompt_tokens || 0,
+              candidatesTokenCount: openaiResponse.usage?.completion_tokens || 0,
+              totalTokenCount: openaiResponse.usage?.total_tokens || 0,
+            };
+            
+            yield result;
+          }
         }
         
-        // Handle tool calls
-        if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
-          console.log('🔧 Tool calls received:', JSON.stringify(toolCalls, null, 2));
+        // Handle tool calls (including converted JSON tool calls)
+        const finalToolCalls = message?.tool_calls || toolCalls;
+        if (finalToolCalls && Array.isArray(finalToolCalls) && finalToolCalls.length > 0) {
+          console.log('🔧 [STREAMING] Tool calls received (includes role converted):', JSON.stringify(finalToolCalls, null, 2));
           
           const functionCalls: any[] = [];
           const parts: any[] = [];
           
-          for (const toolCall of toolCalls) {
+          for (const toolCall of finalToolCalls) {
             if (toolCall.type === 'function' && toolCall.function) {
               let functionCallArgs = {};
               try {
