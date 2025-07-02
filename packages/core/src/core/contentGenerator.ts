@@ -258,7 +258,7 @@ export type ContentGeneratorConfig = {
 export async function createContentGeneratorConfig(
   model: string | undefined,
   authType: AuthType | undefined,
-  config?: { getModel?: () => string },
+  config?: { getModel?: () => string; getActualModel?: () => string | undefined },
 ): Promise<ContentGeneratorConfig> {
   const geminiApiKey = process.env.GEMINI_API_KEY;
   const googleApiKey = process.env.GOOGLE_API_KEY;
@@ -272,40 +272,68 @@ export async function createContentGeneratorConfig(
   let hijackedApiEndpoint: string | undefined;
   let actualModel: string | undefined;
 
-  // Check for model hijacking from environment variables
-  const hijackConfig = loadHijackConfigFromEnv();
-  if (hijackConfig?.enabled) {
-    const hijackRule = hijackConfig.hijackRules.find(
-      (rule) => shouldHijackModel(effectiveModel, rule.targetModel),
-    );
-    if (hijackRule) {
-      // Enable actual hijacking
-      hijackedAuthType = AuthType.OPENAI_COMPATIBLE;
-      hijackedApiKey = hijackRule.apiKey;
-      hijackedApiEndpoint = hijackRule.apiEndpoint;
-      actualModel = hijackRule.actualModel;
-
-      // IMPORTANT: Keep the effective model as the target model for display purposes
-      // The actual model will be passed separately to the content generator
-
-      // Enhanced success notification
-      const availableProviders = getAvailableProviders();
-      console.log('');
-      console.log('🔄 ===== MODEL HIJACK CONFIGURED ===== 🔄');
-      console.log(`🏷️  Active Provider: ${hijackConfig.activeProvider}`);
-      if (availableProviders.length > 1) {
-        console.log(`📋 Available Providers: ${availableProviders.join(', ')}`);
-        console.log(`💡 Switch providers using: HIJACK_ACTIVE_PROVIDER=${availableProviders.filter(p => p !== hijackConfig.activeProvider)[0]}`);
+  // Check for model hijacking - prioritize command line actualModel over environment
+  const commandLineActualModel = config?.getActualModel?.();
+  
+  if (commandLineActualModel) {
+    // Use command line specified actual model
+    const hijackConfig = loadHijackConfigFromEnv();
+    if (hijackConfig?.enabled) {
+      const hijackRule = hijackConfig.hijackRules[0]; // Use first available provider
+      if (hijackRule) {
+        hijackedAuthType = AuthType.OPENAI_COMPATIBLE;
+        hijackedApiKey = hijackRule.apiKey;
+        hijackedApiEndpoint = hijackRule.apiEndpoint;
+        actualModel = commandLineActualModel; // Use command line model instead of env model
       }
-      console.log(`🎯 Target Model: ${effectiveModel}`);
-      console.log(`✨ Configured To: ${hijackRule.actualModel}`);
-      console.log(`🔗 Endpoint: ${hijackRule.apiEndpoint}`);
-      console.log(`🔑 Using API Key: ${hijackRule.apiKey.substring(0, 8)}...`);
-      console.log('✅ OpenAI compatible implementation active');
-      console.log('🚀 Requests will be sent to configured endpoint');
-      console.log('========================================');
-      console.log('');
     }
+  } else {
+    // Fallback to environment variable based hijacking
+    const hijackConfig = loadHijackConfigFromEnv();
+    if (hijackConfig?.enabled) {
+      const hijackRule = hijackConfig.hijackRules.find(
+        (rule) => shouldHijackModel(effectiveModel, rule.targetModel),
+      );
+      if (hijackRule) {
+        // Enable actual hijacking
+        hijackedAuthType = AuthType.OPENAI_COMPATIBLE;
+        hijackedApiKey = hijackRule.apiKey;
+        hijackedApiEndpoint = hijackRule.apiEndpoint;
+        actualModel = hijackRule.actualModel;
+        
+        // Enhanced success notification for environment-based hijacking
+        const availableProviders = getAvailableProviders();
+        console.log('');
+        console.log('🔄 ===== MODEL HIJACK CONFIGURED ===== 🔄');
+        console.log(`🏷️  Active Provider: ${hijackConfig.activeProvider}`);
+        if (availableProviders.length > 1) {
+          console.log(`📋 Available Providers: ${availableProviders.join(', ')}`);
+          console.log(`💡 Switch providers using: HIJACK_ACTIVE_PROVIDER=${availableProviders.filter(p => p !== hijackConfig.activeProvider)[0]}`);
+        }
+        console.log(`🎯 Target Model: ${effectiveModel}`);
+        console.log(`✨ Configured To: ${hijackRule.actualModel}`);
+        console.log(`🔗 Endpoint: ${hijackRule.apiEndpoint}`);
+        console.log(`🔑 Using API Key: ${hijackRule.apiKey.substring(0, 8)}...`);
+        console.log('✅ OpenAI compatible implementation active');
+        console.log('🚀 Requests will be sent to configured endpoint');
+        console.log('========================================');
+        console.log('');
+      }
+    }
+  }
+  
+  // Show hijacking notification for command line based hijacking
+  if (commandLineActualModel && hijackedAuthType === AuthType.OPENAI_COMPATIBLE) {
+    console.log('');
+    console.log('🔄 ===== COMMAND LINE MODEL HIJACK ===== 🔄');
+    console.log(`🎯 Display Model: ${effectiveModel}`);
+    console.log(`✨ Actual Model: ${commandLineActualModel}`);
+    console.log(`🔗 Endpoint: ${hijackedApiEndpoint}`);
+    console.log(`🔑 Using API Key: ${hijackedApiKey?.substring(0, 8)}...`);
+    console.log('✅ OpenAI compatible implementation active');
+    console.log('🚀 Command line model override active');
+    console.log('========================================');
+    console.log('');
   }
 
   const contentGeneratorConfig: ContentGeneratorConfig = {

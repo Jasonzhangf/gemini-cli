@@ -35,10 +35,10 @@ import {
   ContentGenerator,
   ContentGeneratorConfig,
   createContentGenerator,
+  AuthType,
 } from './contentGenerator.js';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { DEFAULT_GEMINI_FLASH_MODEL } from '../config/models.js';
-import { AuthType } from './contentGenerator.js';
 
 function isThinkingSupported(model: string) {
   if (model.startsWith('gemini-2.5')) return true;
@@ -70,6 +70,12 @@ export class GeminiClient {
       contentGeneratorConfig,
       this.config,
     );
+    
+    // 设置工具注册表的模型能力
+    const toolRegistry = await this.config.getToolRegistry();
+    const isOpenAICompatible = contentGeneratorConfig.authType === AuthType.OPENAI_COMPATIBLE;
+    toolRegistry.setModelCapability(contentGeneratorConfig.model, isOpenAICompatible);
+    
     // Update the client's model to reflect the actual model being used
     // (e.g., if hijacking occurred).
     this.model = contentGeneratorConfig.model;

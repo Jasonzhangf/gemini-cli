@@ -1,0 +1,5 @@
+这是一个JavaScript代码文件
+function hello() {
+    console.log("Hello World");
+}
+EOF < /dev/null

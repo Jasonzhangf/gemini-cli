@@ -18,6 +18,8 @@ import {
 import { ContentGenerator } from './contentGenerator.js';
 import { Config, ApprovalMode } from '../config/config.js';
 import path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 
 interface OpenAIFunction {
   name: string;
@@ -85,6 +87,14 @@ interface OpenAIResponse {
   };
 }
 
+interface ApplicationRule {
+  filename: string;
+  description: string;
+  globs: string[];
+  alwaysApply: boolean;
+  content: string;
+}
+
 export class OpenAICompatibleContentGenerator implements ContentGenerator {
   private apiKey: string;
   private apiEndpoint: string;
@@ -95,6 +105,9 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   private failureCount: number = 0;
   private readonly maxFailures: number = 3;
   private availableModels: string[] = [];
+  
+  // Application rules cache
+  private applicationRulesCache: ApplicationRule[] | null = null;
 
   constructor(apiKey: string, apiEndpoint: string, model: string, config?: Config) {
     this.apiKey = apiKey;
@@ -102,8 +115,10 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     this.model = model;
     this.config = config || null;
     
-    // No longer need to initialize tool instances - tools will be registered in ToolRegistry
-    // and executed through the traditional path
+    // 模型能力适配器将在 client 初始化时设置
+    
+    // Ensure tools are available through the config's tool registry
+    // The hijacking system needs access to all tools for proper execution
     console.log('🚀 OpenAI Compatible Generator initialized with hijacking approach');
   }
 
@@ -119,11 +134,30 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
         try {
           const parsed = JSON.parse(jsonBlock);
           
-          // Check if it's an analysis-only JSON with empty or no tool_calls
+          // Only consider it analysis-only if it explicitly indicates completion
+          // Look for clear completion indicators in the message or analysis
+          const hasCompletionIndicators = 
+            (parsed.message && 
+             (parsed.message.toLowerCase().includes('完成') || 
+              parsed.message.toLowerCase().includes('finished') ||
+              parsed.message.toLowerCase().includes('done') ||
+              parsed.message.toLowerCase().includes('ready for your next'))) ||
+            (parsed.analysis && 
+             (parsed.analysis.toLowerCase().includes('task completed') ||
+              parsed.analysis.toLowerCase().includes('operation finished') ||
+              parsed.analysis.toLowerCase().includes('waiting for next instruction')));
+          
+          // Only treat as completion if there are clear completion indicators
+          // AND no tool calls, AND it's not asking for more information or clarification
           if (parsed.analysis && 
               (!parsed.tool_calls || 
-               (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length === 0))) {
-            console.log('🎯 Detected analysis-only JSON response (task completion)');
+               (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length === 0)) &&
+              hasCompletionIndicators &&
+              !content.toLowerCase().includes('需要') &&
+              !content.toLowerCase().includes('请') &&
+              !content.toLowerCase().includes('should') &&
+              !content.toLowerCase().includes('need')) {
+            console.log('🎯 Detected analysis-only JSON response with completion indicators');
             return true;
           }
         } catch (e) {
@@ -278,9 +312,10 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
           if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
             for (const toolCall of parsed.tool_calls) {
               if (toolCall.tool && toolCall.args) {
+                const processedArgs = this.processToolCallArgs(toolCall.tool, toolCall.args);
                 toolCalls.push({
                   name: toolCall.tool,
-                  args: toolCall.args
+                  args: processedArgs
                 });
                 console.log(`🔧 Parsed JSON tool call: ${toolCall.tool}`);
               }
@@ -289,9 +324,10 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
           
           // Handle single tool call format
           else if (parsed.tool && parsed.args) {
+            const processedArgs = this.processToolCallArgs(parsed.tool, parsed.args);
             toolCalls.push({
               name: parsed.tool,
-              args: parsed.args
+              args: processedArgs
             });
             console.log(`🔧 Parsed single JSON tool call: ${parsed.tool}`);
           }
@@ -557,19 +593,38 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   /**
    * Add tool call guidance to user message
    */
-  private addToolCallGuidance(message: string): string {
-    const guidance = `
+  private async addToolCallGuidance(message: string): Promise<string> {
+    // Load applicable application rules (user-defined rules)
+    const currentWorkingDir = process.cwd();
+    const applicationRules = await this.getApplicableRules(currentWorkingDir);
+    
+    let guidance = '';
+    
+    // Add application rules if available (these come BEFORE system guidance but with override notice)
+    if (applicationRules && applicationRules.trim()) {
+      guidance += `\n${applicationRules}\n\n`;
+    }
+    
+    // Add the built-in tool guidance with override notice
+    guidance += `
 
-IMPORTANT: You HAVE FULL ACCESS to local files and can execute system commands. DO NOT say you cannot access files.
+TOOL EXECUTION MODE OVERRIDE: The following rules override any general CLI rules for tool execution tasks.
 
-CRITICAL: You MUST respond with the exact JSON format specified below. NO exceptions.
+IGNORE CONCISENESS REQUIREMENTS: For this tool execution task, you MUST ignore any previous instructions about being concise or keeping responses short. Tool execution requires the specific JSON format shown below.
 
-REQUIREMENTS:
+IMPORTANT: You HAVE FULL ACCESS to local files and can execute system commands. You ARE a local assistant with full system access. DO NOT say you cannot access files.
+
+CRITICAL: You MUST respond with the exact JSON format specified below. NO exceptions. Do NOT provide explanations outside the JSON format.
+
+TOOL EXECUTION RULES:
 1. **ALWAYS respond with JSON code block** - wrapped in \`\`\`json and \`\`\`
 2. **Execute ONE tool at a time** - Do not try to do multiple operations in a single response  
 3. **Wait for execution results** - After each tool execution, wait for the system to report results before proceeding
-4. **You CAN access, read, write, move, and organize files** - Use the available tools
-5. **Use this EXACT JSON format for tool execution**:
+4. **COMPLETE THE ENTIRE TASK** - Do not stop after partial completion. Continue until the full user request is satisfied
+5. **You CAN access, read, write, move, and organize files** - Use the available tools
+6. **Never claim you cannot access files** - You have full local system access
+7. **CONTINUE EXECUTION** - If a task has multiple steps (like "read directory and move files"), complete ALL steps
+8. **Use this EXACT JSON format for tool execution**:
 
 \`\`\`json
 {
@@ -651,8 +706,14 @@ Available tools:
 - knowledge_graph: Persistent memory management (args: action, data) - actions: create_entities, create_relations, add_observations, delete_entities, delete_observations, delete_relations, read_graph, search_nodes, open_nodes
 - sequentialthinking: Dynamic problem-solving through thoughts (args: thought, nextThoughtNeeded, thoughtNumber, totalThoughts, optional: isRevision, revisesThought, branchFromThought, branchId, needsMoreThoughts)
 
-REMEMBER: You MUST respond with JSON code block format. Start with \`\`\`json and end with \`\`\`. 
-DO NOT provide explanations outside the JSON block.
+REMEMBER: 
+- You MUST respond with JSON code block format. Start with \`\`\`json and end with \`\`\`. 
+- DO NOT provide explanations outside the JSON block.
+- You ARE a local assistant with FULL SYSTEM ACCESS. You CAN read, write, move, organize files.
+- NEVER say "I cannot access files" or "I can only browse URLs" - this is FALSE.
+- You have access to ALL the tools listed above and MUST use them when requested.
+
+SYSTEM IDENTITY: You are a local file system assistant with full access to read, write, execute, and organize files on this system.
 
 USER REQUEST: ${message}`;
 
@@ -665,11 +726,225 @@ USER REQUEST: ${message}`;
   private cleanupPath(filePath: string): string {
     // Remove surrounding quotes and clean up path
     filePath = filePath.replace(/^['"""']|['"""']$/g, '').trim();
+    
+    // Handle home directory expansion
+    if (filePath.startsWith('~')) {
+      const homeDir = os.homedir();
+      filePath = filePath.replace(/^~/, homeDir);
+    }
+    
     // Convert relative paths to absolute paths
     if (!filePath.startsWith('/') && !filePath.includes(':')) {
       filePath = path.resolve(process.cwd(), filePath);
     }
     return filePath;
+  }
+  
+  /**
+   * Process tool call arguments to ensure proper path handling
+   */
+  private processToolCallArgs(toolName: string, args: any): any {
+    if (!args || typeof args !== 'object') {
+      return args;
+    }
+    
+    const processedArgs = { ...args };
+    
+    // Process file path arguments for different tools
+    const pathFields: Record<string, string[]> = {
+      'write_file': ['file_path'],
+      'read_file': ['absolute_path', 'file_path'],
+      'edit': ['file_path'],
+      'replace': ['file_path'],
+      'shell': ['command'], // Special handling for shell commands
+      'run_shell_command': ['command'],
+      'list_directory': ['path'],
+      'ls': ['path'],
+      'glob': ['path'],
+      'grep': ['path'],
+      'search_file_content': ['path']
+    };
+    
+    const fieldsToProcess = pathFields[toolName] || [];
+    
+    for (const field of fieldsToProcess) {
+      if (processedArgs[field] && typeof processedArgs[field] === 'string') {
+        if (field === 'command') {
+          // Special handling for shell commands - process file paths within commands
+          processedArgs[field] = this.processShellCommand(processedArgs[field]);
+        } else {
+          // Regular path field processing
+          processedArgs[field] = this.cleanupPath(processedArgs[field]);
+        }
+        console.log(`🛠️ Processed ${field}: ${args[field]} → ${processedArgs[field]}`);
+      }
+    }
+    
+    return processedArgs;
+  }
+  
+  /**
+   * Process shell commands to convert relative paths to absolute paths
+   */
+  private processShellCommand(command: string): string {
+    // For now, disable shell command path processing to avoid regex issues
+    // The AI model is primarily using dedicated tools (list_directory, read_file, etc.)
+    // rather than shell commands, so this complex processing isn't needed
+    return command;
+  }
+  
+  /**
+   * Load application rules from ~/.gemini/rules/*.md
+   */
+  private async loadApplicationRules(): Promise<ApplicationRule[]> {
+    // Use cache to avoid reading files multiple times
+    if (this.applicationRulesCache !== null) {
+      return this.applicationRulesCache;
+    }
+    
+    const rules: ApplicationRule[] = [];
+    
+    try {
+      const homeDir = os.homedir();
+      const rulesDir = path.join(homeDir, '.gemini', 'rules');
+      
+      const files = await fs.promises.readdir(rulesDir);
+      const mdFiles = files.filter(file => file.endsWith('.md'));
+      
+      for (const filename of mdFiles) {
+        try {
+          const filePath = path.join(rulesDir, filename);
+          const content = await fs.promises.readFile(filePath, 'utf8');
+          
+          const rule = this.parseRuleFile(filename, content);
+          if (rule) {
+            rules.push(rule);
+          }
+        } catch (error) {
+          console.warn(`⚠️ Failed to load rule file ${filename}: ${error}`);
+        }
+      }
+      
+      this.applicationRulesCache = rules;
+      console.log(`📋 Loaded ${rules.length} application rules from ~/.gemini/rules/`);
+      
+      // Log which rules will be applied
+      for (const rule of rules) {
+        if (rule.alwaysApply) {
+          console.log(`📜 Applying application rule: ${rule.filename} (${rule.description})`);
+        }
+      }
+      
+      return rules;
+    } catch (error) {
+      if ((error as any).code === 'ENOENT') {
+        console.log(`💡 No application rules directory found at ~/.gemini/rules/`);
+        console.log(`💡 Create this directory and add .md files with application rules`);
+      } else {
+        console.warn(`⚠️ Failed to load application rules: ${error}`);
+      }
+      
+      this.applicationRulesCache = [];
+      return [];
+    }
+  }
+  
+  /**
+   * Parse a rule file to extract metadata and content
+   */
+  private parseRuleFile(filename: string, content: string): ApplicationRule | null {
+    try {
+      // Look for YAML frontmatter
+      const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+      
+      if (!frontmatterMatch) {
+        // Handle files without proper frontmatter - treat as alwaysApply=true
+        console.log(`📝 Rule file ${filename} has no frontmatter, treating as alwaysApply=true`);
+        return {
+          filename,
+          description: 'Auto-applied rule (no frontmatter)',
+          globs: [],
+          alwaysApply: true,
+          content: content.trim()
+        };
+      }
+      
+      const [, frontmatter, ruleContent] = frontmatterMatch;
+      
+      // Parse YAML frontmatter manually (simple key-value parsing)
+      const metadata: any = {};
+      const lines = frontmatter.split('\n');
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        
+        if (trimmed.includes(':')) {
+          const [key, ...valueParts] = trimmed.split(':');
+          const value = valueParts.join(':').trim();
+          
+          if (key.trim() === 'globs') {
+            // Parse array format
+            if (value.startsWith('[') && value.endsWith(']')) {
+              const arrayContent = value.slice(1, -1);
+              metadata.globs = arrayContent.split(',').map(s => s.trim().replace(/['"]/g, ''));
+            } else if (value) {
+              metadata.globs = [value.replace(/['"]/g, '')];
+            } else {
+              metadata.globs = [];
+            }
+          } else if (key.trim() === 'alwaysApply') {
+            metadata.alwaysApply = value.toLowerCase() === 'true';
+          } else {
+            metadata[key.trim()] = value.replace(/['"]/g, '');
+          }
+        }
+      }
+      
+      return {
+        filename,
+        description: metadata.description || 'No description',
+        globs: metadata.globs || [],
+        alwaysApply: metadata.alwaysApply !== undefined ? metadata.alwaysApply : true, // Default to true if not specified
+        content: ruleContent.trim()
+      };
+    } catch (error) {
+      console.warn(`⚠️ Failed to parse rule file ${filename}: ${error}`);
+      return null;
+    }
+  }
+  
+  /**
+   * Get applicable application rules based on current context
+   */
+  private async getApplicableRules(currentFile?: string): Promise<string> {
+    const rules = await this.loadApplicationRules();
+    const applicableRules: string[] = [];
+    
+    for (const rule of rules) {
+      let shouldApply = rule.alwaysApply;
+      
+      // Check glob patterns if file is provided
+      if (!shouldApply && currentFile && rule.globs.length > 0) {
+        for (const glob of rule.globs) {
+          // Simple glob matching - for more complex patterns, consider using a glob library
+          const globRegex = new RegExp(
+            glob.replace(/\*/g, '.*').replace(/\?/g, '.'), 'i'
+          );
+          if (globRegex.test(currentFile)) {
+            shouldApply = true;
+            break;
+          }
+        }
+      }
+      
+      if (shouldApply) {
+        // Only log once when rules are first loaded, not every time they're applied
+        applicableRules.push(rule.content);
+      }
+    }
+    
+    return applicableRules.join('\n\n');
   }
   
   /**
@@ -747,15 +1022,8 @@ USER REQUEST: ${message}`;
       },
     ];
 
-    // Set functionCalls on the response
-    if (functionCalls.length > 0) {
-      Object.defineProperty(result, 'functionCalls', {
-        value: functionCalls,
-        writable: true,
-        enumerable: true,
-        configurable: true
-      });
-    }
+    // Note: functionCalls is set through the parts array (functionCall objects)
+    // No need to set a separate functionCalls property as it's handled by the parts
 
     result.usageMetadata = {
       promptTokenCount: 0,
@@ -854,7 +1122,7 @@ USER REQUEST: ${message}`;
               
               // Enhance user message with tool call guidance if needed
               if (role === 'user' && this.containsToolRequest(messageContent)) {
-                messageContent = this.addToolCallGuidance(messageContent);
+                messageContent = await this.addToolCallGuidance(messageContent);
               }
               
               messages.push({
@@ -947,6 +1215,9 @@ USER REQUEST: ${message}`;
         openaiRequest.tools = openaiTools;
         openaiRequest.tool_choice = 'auto';
         console.log(`✅ Added ${openaiTools.length} tools to request`);
+        console.log(`🔧 Tool names: ${openaiTools.map(t => t.function.name).join(', ')}`);
+      } else {
+        console.log(`⚠️ No tools were converted from ${request.config?.tools?.length || 0} config tools`);
       }
     } else if (isSimpleConversation) {
       console.log('🚀 Skipping tool processing for simple conversation');
@@ -1104,29 +1375,8 @@ USER REQUEST: ${message}`;
           argsKeys: fc.args ? Object.keys(fc.args) : 'null'
         });
       }
-      try {
-        Object.defineProperty(result, 'functionCalls', {
-          value: functionCalls,
-          writable: true,
-          enumerable: true,
-          configurable: true
-        });
-        console.log('✅ Successfully set functionCalls on result for role conversion to tool execution');
-        console.log('🔍 Verification - result.functionCalls:', (result as any).functionCalls);
-        
-        // Add continuation hint for the conversation system
-        Object.defineProperty(result, 'shouldContinueAfterToolExecution', {
-          value: true,
-          writable: true,
-          enumerable: true,
-          configurable: true
-        });
-        console.log('🔄 Set shouldContinueAfterToolExecution flag - system will execute tools and continue conversation');
-      } catch (error) {
-        // If setting functionCalls fails, add it to the response metadata
-        console.log('❌ Failed to set functionCalls:', error);
-        console.log('📝 Adding functionCalls to response metadata instead');
-      }
+      // Function calls are already set through the parts array
+      console.log('✅ Successfully set function calls through parts array for tool execution');
     }
 
     result.usageMetadata = {
@@ -1281,12 +1531,39 @@ USER REQUEST: ${message}`;
         
         console.log(`✅ Successfully converted ${jsonToolCalls.length} JSON tool calls to function calls for registry execution`);
       } else if (userRequestsTools && !this.hasAnalysisOnlyJson(modelContent)) {
-        // Model didn't return JSON but user requested tools - guide them
+        // Model didn't return JSON but user requested tools - guide them more strongly
         // But don't guide if model returned analysis-only JSON (indicating completion)
         console.log('⚠️ User requested tools but model did not return JSON format');
         
-        // This should trigger a follow-up request asking model to format as JSON
-        firstMessage.content += '\n\n[System: Please format your tool calls as JSON in the specified format]';
+        // Check if model is claiming it cannot access files (incorrect behavior)
+        const claimsNoAccess = modelContent.toLowerCase().includes('cannot access') || 
+                              modelContent.toLowerCase().includes('unable to access') ||
+                              modelContent.toLowerCase().includes('can only browse urls') ||
+                              modelContent.toLowerCase().includes('no url was provided');
+        
+        if (claimsNoAccess) {
+          // Strong correction for models that forget their capabilities
+          firstMessage.content = `SYSTEM CORRECTION: You DO have full file system access. You ARE a local assistant. Execute the user's request using the available tools in JSON format.
+
+REQUIRED RESPONSE FORMAT:
+\`\`\`json
+{
+  "analysis": "Understanding the user's request",
+  "tool_calls": [
+    {
+      "tool": "ls",
+      "args": {"path": "."}
+    }
+  ],
+  "message": "Executing the requested operation"
+}
+\`\`\`
+
+Original request: ${userMessage}`;
+        } else {
+          // Standard guidance for format issues
+          firstMessage.content += '\n\n[System: Please format your tool calls as JSON in the specified format]';
+        }
       }
       
       return this.convertOpenAIToGemini(openaiResponse);
@@ -1472,22 +1749,7 @@ USER REQUEST: ${message}`;
               totalTokenCount: openaiResponse.usage?.total_tokens || 0,
             };
             
-            // Set functionCalls on the response using Object.defineProperty
-            Object.defineProperty(result, 'functionCalls', {
-              value: functionCalls,
-              writable: true,
-              enumerable: true,
-              configurable: true
-            });
-            
-            // Add continuation hint for the conversation system
-            Object.defineProperty(result, 'shouldContinueAfterToolExecution', {
-              value: true,
-              writable: true,
-              enumerable: true,
-              configurable: true
-            });
-            console.log('🔄 Set shouldContinueAfterToolExecution flag');
+            // Function calls are already set through the parts array
             
             yield result;
           }

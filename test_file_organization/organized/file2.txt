@@ -1,0 +1,6 @@
+这是一个Python脚本
+import os
+print("Hello from Python")
+def main():
+    pass
+EOF < /dev/null

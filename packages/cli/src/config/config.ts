@@ -41,6 +41,7 @@ const logger = {
 
 interface CliArgs {
   model: string | undefined;
+  actualModel: string | undefined;
   sandbox: boolean | string | undefined;
   'sandbox-image': string | undefined;
   debug: boolean | undefined;
@@ -62,8 +63,13 @@ async function parseArguments(settings?: Settings): Promise<CliArgs> {
     .option('model', {
       alias: 'm',
       type: 'string',
-      description: `Model`,
-      default: process.env.GEMINI_MODEL || settings?.defaultModel || DEFAULT_GEMINI_MODEL,
+      description: `Display model name (fixed)`,
+      default: 'gemini-2.5-flash',
+    })
+    .option('actual-model', {
+      type: 'string',
+      description: `Actual model to use for hijacking`,
+      default: process.env.GEMINI_ACTUAL_MODEL || process.env.GEMINI_MODEL || settings?.defaultModel || DEFAULT_GEMINI_MODEL,
     })
     .option('prompt', {
       alias: 'p',
@@ -256,6 +262,7 @@ export async function loadCliConfig(
     fileDiscoveryService: fileService,
     bugCommand: settings.bugCommand,
     model: argv.model!,
+    actualModel: argv.actualModel,
     extensionContextFilePaths,
     autoSwitchToFlashOnQuotaError:
       process.env.GEMINI_AUTO_SWITCH_TO_FLASH !== undefined

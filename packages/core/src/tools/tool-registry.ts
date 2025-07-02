@@ -10,6 +10,7 @@ import { Config } from '../config/config.js';
 import { spawn, execSync } from 'node:child_process';
 import { discoverMcpTools } from './mcp-client.js';
 import { DiscoveredMCPTool } from './mcp-tool.js';
+import { ModelCapabilityAdapter, ModelCapability, ModelCapabilityDetector } from './model-capability-adapter.js';
 
 type ToolParams = Record<string, unknown>;
 
@@ -125,6 +126,7 @@ export class ToolRegistry {
   private tools: Map<string, Tool> = new Map();
   private discovery: Promise<void> | null = null;
   private config: Config;
+  private modelCapabilityAdapter: ModelCapabilityAdapter | null = null;
 
   constructor(config: Config) {
     this.config = config;
@@ -192,12 +194,30 @@ export class ToolRegistry {
   }
 
   /**
+   * 设置模型能力适配器
+   * @param modelName 模型名称
+   * @param isOpenAICompatible 是否使用 OpenAI 兼容接口
+   */
+  setModelCapability(modelName: string, isOpenAICompatible: boolean): void {
+    const capability = ModelCapabilityDetector.detectCapability(modelName, isOpenAICompatible);
+    this.modelCapabilityAdapter = new ModelCapabilityAdapter(capability, this.getAllTools());
+    
+    console.log(`🔧 Model capability detected: ${capability} for model: ${modelName}`);
+  }
+
+  /**
    * Retrieves the list of tool schemas (FunctionDeclaration array).
    * Extracts the declarations from the ToolListUnion structure.
    * Includes discovered (vs registered) tools if configured.
    * @returns An array of FunctionDeclarations.
    */
   getFunctionDeclarations(): FunctionDeclaration[] {
+    // 如果有模型能力适配器，使用适配器提供的声明
+    if (this.modelCapabilityAdapter) {
+      return this.modelCapabilityAdapter.getToolDeclarations();
+    }
+    
+    // 否则返回原始声明
     const declarations: FunctionDeclaration[] = [];
     this.tools.forEach((tool) => {
       declarations.push(tool.schema);
@@ -227,8 +247,55 @@ export class ToolRegistry {
 
   /**
    * Get the definition of a specific tool.
+   * 支持通过适配器进行工具调用转换
    */
   getTool(name: string): Tool | undefined {
+    // 如果有适配器，先尝试转换工具调用
+    if (this.modelCapabilityAdapter) {
+      const { realToolName } = this.modelCapabilityAdapter.convertToolCall(name, {});
+      return this.tools.get(realToolName);
+    }
+    
     return this.tools.get(name);
+  }
+
+  /**
+   * 执行工具调用，支持适配器转换
+   * @param toolName 工具名称
+   * @param args 工具参数
+   * @returns 工具执行结果
+   */
+  async executeToolCall(toolName: string, args: any): Promise<ToolResult | null> {
+    let realToolName = toolName;
+    let realArgs = args;
+
+    // 使用适配器转换工具调用
+    if (this.modelCapabilityAdapter) {
+      const converted = this.modelCapabilityAdapter.convertToolCall(toolName, args);
+      realToolName = converted.realToolName;
+      realArgs = converted.realArgs;
+      
+      console.log(`🔄 Tool call converted: "${toolName}" → "${realToolName}"`);
+    }
+
+    const tool = this.tools.get(realToolName);
+    if (!tool) {
+      console.error(`❌ Tool "${realToolName}" not found in registry`);
+      return null;
+    }
+
+    try {
+      return await tool.execute(realArgs, new AbortController().signal);
+    } catch (error) {
+      console.error(`❌ Error executing tool "${realToolName}":`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 获取模型能力适配器
+   */
+  getModelCapabilityAdapter(): ModelCapabilityAdapter | null {
+    return this.modelCapabilityAdapter;
   }
 }

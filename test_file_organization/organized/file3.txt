@@ -1,0 +1,5 @@
+这是一个配置文件
+server_port=8080
+database_url=localhost:5432
+debug=true
+EOF < /dev/null

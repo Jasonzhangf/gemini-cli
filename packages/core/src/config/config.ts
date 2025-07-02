@@ -127,6 +127,7 @@ export interface ConfigParameters {
   fileDiscoveryService?: FileDiscoveryService;
   bugCommand?: BugCommandSettings;
   model: string;
+  actualModel?: string;
   extensionContextFilePaths?: string[];
   autoSwitchToFlashOnQuotaError?: boolean;
 }
@@ -166,6 +167,7 @@ export class Config {
   private readonly cwd: string;
   private readonly bugCommand: BugCommandSettings | undefined;
   private readonly model: string;
+  private readonly actualModel: string | undefined;
   private readonly extensionContextFilePaths: string[];
   private modelSwitchedDuringSession: boolean = false;
   private readonly autoSwitchToFlashOnQuotaError: boolean;
@@ -210,6 +212,7 @@ export class Config {
     this.fileDiscoveryService = params.fileDiscoveryService ?? null;
     this.bugCommand = params.bugCommand;
     this.model = params.model;
+    this.actualModel = params.actualModel;
     this.extensionContextFilePaths = params.extensionContextFilePaths ?? [];
     this.autoSwitchToFlashOnQuotaError =
       params.autoSwitchToFlashOnQuotaError ?? true;
@@ -274,6 +277,10 @@ export class Config {
 
   getModel(): string {
     return this.contentGeneratorConfig?.model || this.model;
+  }
+
+  getActualModel(): string | undefined {
+    return this.actualModel;
   }
 
   setModel(newModel: string): void {
