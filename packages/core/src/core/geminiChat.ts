@@ -35,6 +35,7 @@ import {
   ApiResponseEvent,
 } from '../telemetry/types.js';
 import { DEFAULT_GEMINI_FLASH_MODEL } from '../config/models.js';
+import { ApprovalMode } from '../config/config.js';
 
 /**
  * Returns true if the response is valid, false otherwise.

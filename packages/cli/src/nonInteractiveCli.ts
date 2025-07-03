@@ -299,53 +299,12 @@ After I execute the tools, I will provide the results and you can continue.`;
           }
         }
         
-        // 检查原始用户输入，判断是否为复杂任务
-        const userPrompt = input.toLowerCase();
-        const isComplexTask = userPrompt.includes('分析') || 
-                              userPrompt.includes('更新') || 
-                              userPrompt.includes('创建') ||
-                              userPrompt.includes('写入') ||
-                              userPrompt.includes('生成') ||
-                              userPrompt.includes('架构') ||
-                              userPrompt.includes('analyze') ||
-                              userPrompt.includes('create') ||
-                              userPrompt.includes('update') ||
-                              userPrompt.includes('generate') ||
-                              userPrompt.includes('architecture');
-        
-        if (!isComplexTask && functionCalls.length === 1 && 
-            (functionCalls[0].name === 'read_file' || 
-             functionCalls[0].name === 'list_directory' ||
-             functionCalls[0].name === 'search_file_content')) {
-          // 仅对真正的简单查询任务：直接显示结果并结束
-          for (const part of toolResponseParts) {
-            if (part.functionResponse && part.functionResponse.response) {
-              const response = part.functionResponse.response;
-              if (typeof response === 'object' && response.content) {
-                process.stdout.write(String(response.content));
-              } else if (typeof response === 'string') {
-                process.stdout.write(response);
-              } else if (typeof response === 'object' && response.output) {
-                process.stdout.write(String(response.output));
-              } else {
-                // 尝试直接输出完整响应
-                process.stdout.write(JSON.stringify(response, null, 2));
-              }
-            } else if (part.text) {
-              // 处理纯文本部分
-              process.stdout.write(part.text);
-            }
-          }
-          process.stdout.write('\n');
-          return;
-        } else {
-          // 复杂任务或多步骤任务：让模型继续处理
-          console.log(`🔄 Tool execution completed - continuing with next steps...`);
-          const continuationParts = [
-            ...toolResponseParts
-          ];
-          currentMessages = [{ role: 'model', parts: continuationParts }];
-        }
+        // Always continue the conversation with the tool response.
+        console.log(`🔄 Tool execution completed - continuing with next steps...`);
+        const continuationParts = [
+          ...toolResponseParts
+        ];
+        currentMessages = [{ role: 'model', parts: continuationParts }];
       } else {
         process.stdout.write('\n'); // Ensure a final newline
         return;

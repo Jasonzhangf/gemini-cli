@@ -316,3 +316,11 @@ export class ToolRegistry {
     return this.modelCapabilityAdapter;
   }
 }
+
+export function isComplexTool(toolName: string): boolean {
+  return toolName === 'knowledge_graph' || toolName === 'sequentialthinking';
+}
+
+export function isSequentialThinkingTool(toolName: string): boolean {
+  return toolName === 'sequentialthinking';
+}

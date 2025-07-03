@@ -13,151 +13,148 @@ import {
   MappingResult,
   ToolParameterMapping 
 } from './types.js';
+import {
+  isComplexTool,
+  isSequentialThinkingTool,
+} from '../../tools/tool-registry.js';
 
 // Import mapping configurations
 import aistudioProxyMapping from './aistudio-proxy.json' with { type: 'json' };
 import lmStudioQwenMapping from './lm-studio-qwen.json' with { type: 'json' };
+
+// New, more flexible structure for mappings
+export interface ParameterMapping {
+  name: string;
+  models: string[];
+  endpoints?: string[];
+  mappings: {
+    [toolName: string]: {
+      [sourceParam: string]: string;
+    };
+  };
+}
+
+/**
+ * @deprecated The old mapping structure. Will be removed in a future version.
+ */
+interface LegacyMapping {
+  model: string;
+  provider: string;
+  endpointPattern?: string;
+  toolMappings: {
+    [toolName: string]: {
+      [sourceParam: string]: string;
+    };
+  };
+}
 
 /**
  * Parameter Mapping Manager
  * Handles loading and applying parameter mappings for different models
  */
 export class ParameterMappingManager {
-  private static instance: ParameterMappingManager;
-  private mappingRegistry: ParameterMappingRegistry = {};
+  private mappings: ParameterMapping[] = [];
 
-  private constructor() {
-    this.loadBuiltinMappings();
+  constructor() {
+    this.loadMappings();
   }
 
-  public static getInstance(): ParameterMappingManager {
-    if (!ParameterMappingManager.instance) {
-      ParameterMappingManager.instance = new ParameterMappingManager();
-    }
-    return ParameterMappingManager.instance;
-  }
-
-  /**
-   * Load built-in parameter mappings
-   */
-  private loadBuiltinMappings(): void {
-    // Load AIStudio Proxy mapping
-    this.mappingRegistry['aistudio-gemini-2.5-flash'] = aistudioProxyMapping as ModelParameterMapping;
+  private loadMappings() {
+    // Manually import and process mappings
+    const allConfigs: unknown[] = [aistudioProxyMapping, lmStudioQwenMapping];
     
-    // Load LM Studio Qwen mapping  
-    this.mappingRegistry['lmstudio-qwen-qwq-32b'] = lmStudioQwenMapping as ModelParameterMapping;
-
-    console.log(`🔧 Loaded ${Object.keys(this.mappingRegistry).length} parameter mapping configurations`);
+    for (const config of allConfigs) {
+      // Check if it's the new format
+      if (typeof config === 'object' && config && 'models' in config && 'mappings' in config) {
+        this.mappings.push(config as ParameterMapping);
+      } 
+      // Assume it's the old format and convert it
+      else if (typeof config === 'object' && config &&'model' in config && 'toolMappings' in config) {
+        const legacy = config as LegacyMapping;
+        const converted: ParameterMapping = {
+          name: `${legacy.provider} (legacy)`,
+          models: [legacy.model],
+          endpoints: legacy.endpointPattern ? [legacy.endpointPattern] : undefined,
+          mappings: legacy.toolMappings,
+        };
+        this.mappings.push(converted);
+      }
+    }
+    console.log(`🔧 Loaded ${this.mappings.length} parameter mapping configurations`);
   }
 
   /**
-   * Find appropriate mapping for a model and endpoint
+   * Find a parameter mapping configuration that matches the given model and endpoint.
+   * A mapping is considered a match if the model name matches one of the regex
+   * patterns in `models` and, if specified, the endpoint matches one of the regex 
+   * patterns in `endpoints`.
    */
-  public findMapping(actualModel: string, endpoint?: string): ModelParameterMapping | null {
-    // Try exact model match first
-    for (const [key, mapping] of Object.entries(this.mappingRegistry)) {
-      if (mapping.model === actualModel) {
-        // If endpoint pattern is specified, check it matches
-        if (mapping.endpointPattern && endpoint) {
-          if (endpoint.includes(mapping.endpointPattern) || 
-              mapping.endpointPattern.includes(endpoint.split('/')[2])) { // Check domain/port
-            console.log(`🎯 Found parameter mapping for model '${actualModel}' with endpoint '${endpoint}': ${key}`);
-            return mapping;
-          }
-        } else {
-          console.log(`🎯 Found parameter mapping for model '${actualModel}': ${key}`);
+  public findMapping(model: string, endpoint?: string): ParameterMapping | null {
+    for (const mapping of this.mappings) {
+      const modelMatch = mapping.models.some(pattern => new RegExp(pattern).test(model));
+      
+      // If endpoint patterns are not defined, we only need to match the model
+      if (modelMatch && !mapping.endpoints) {
+        console.log(`🎯 Found parameter mapping for model '${model}': ${mapping.name}`);
+        return mapping;
+      }
+
+      // If endpoint patterns are defined, we need to match both
+      if (modelMatch && mapping.endpoints) {
+        const endpointMatch = mapping.endpoints.some(pattern => new RegExp(pattern).test(endpoint || ''));
+        if (endpointMatch) {
+          console.log(`🎯 Found parameter mapping for model '${model}' and endpoint '${endpoint}': ${mapping.name}`);
           return mapping;
         }
       }
     }
-
-    // Try endpoint-based matching for known endpoints
-    if (endpoint) {
-      for (const [key, mapping] of Object.entries(this.mappingRegistry)) {
-        if (mapping.endpointPattern && 
-            (endpoint.includes(mapping.endpointPattern) || 
-             mapping.endpointPattern.includes(endpoint.split('/')[2]))) {
-          console.log(`🎯 Found parameter mapping for endpoint '${endpoint}': ${key} (model: ${mapping.model})`);
-          return mapping;
-        }
-      }
-    }
-
-    console.log(`ℹ️  No parameter mapping found for model '${actualModel}' with endpoint '${endpoint}'`);
+    console.log(`ℹ️  No parameter mapping found for model '${model}' with endpoint '${endpoint}'`);
     return null;
   }
 
   /**
-   * Apply parameter mappings to tool arguments
+   * Applies the parameter mapping to the given arguments for a specific tool.
+   * @returns The mapped arguments and a boolean indicating if any mapping was applied.
    */
   public applyMapping(
-    toolName: string, 
-    args: Record<string, unknown>, 
-    mapping: ModelParameterMapping
-  ): MappingResult {
-    const result: MappingResult = {
-      mapped: false,
-      mappedArgs: { ...args },
-      appliedMappings: []
-    };
-
-    // Get tool-specific mappings
-    const toolMapping = mapping.toolMappings[toolName];
-    if (!toolMapping) {
-      return result; // No mappings for this tool
+    toolName: string,
+    args: any,
+    mapping: ParameterMapping
+  ): { mappedArgs: any; mapped: boolean, appliedMappings: string[] } {
+    const toolMappings = mapping.mappings[toolName];
+    if (!toolMappings) {
+      return { mappedArgs: args, mapped: false, appliedMappings: [] };
     }
 
-    // Apply parameter mappings
-    for (const [originalParam, standardParam] of Object.entries(toolMapping)) {
-      if (originalParam in args) {
-        let mappedValue = args[originalParam];
-        
-        // Special handling for path parameters - convert relative to absolute
-        if ((standardParam === 'path' || standardParam === 'absolute_path' || standardParam === 'file_path') && 
-            typeof mappedValue === 'string' && 
-            !path.isAbsolute(mappedValue)) {
-          const absolutePath = path.resolve(process.cwd(), mappedValue);
-          mappedValue = absolutePath;
-          console.log(`🔄 Converted relative path to absolute: "${args[originalParam]}" → "${absolutePath}"`);
-        }
-        
-        // Move the value from original parameter name to standard parameter name
-        result.mappedArgs[standardParam] = mappedValue;
-        
-        // Only delete the original parameter if it's different from the mapped parameter
-        if (originalParam !== standardParam) {
-          delete result.mappedArgs[originalParam];
-        }
-        
-        result.mapped = true;
-        result.appliedMappings.push({
-          toolName,
-          originalParam,
-          mappedParam: standardParam
-        });
+    let mapped = false;
+    const appliedMappings: string[] = [];
+    const mappedArgs = { ...args };
+    
+    // In complex tools, the arguments are nested inside a 'data' property.
+    const argsToProcess = isComplexTool(toolName) ? mappedArgs.data || {} : mappedArgs;
 
-        console.log(`🔄 Mapped parameter: ${toolName}.${originalParam} → ${standardParam}`);
+    for (const [sourceParam, targetParam] of Object.entries(toolMappings)) {
+      if (sourceParam in argsToProcess) {
+        const value = argsToProcess[sourceParam];
+        delete argsToProcess[sourceParam];
+        argsToProcess[targetParam] = value;
+        mapped = true;
+        appliedMappings.push(`${sourceParam} → ${targetParam}`);
       }
     }
+    
+    // For sequential thinking tool, ensure 'thought' is not empty
+    if(isSequentialThinkingTool(toolName) && !argsToProcess.thought) {
+      argsToProcess.thought = "Thinking...";
+    }
 
-    return result;
-  }
+    // If it was a complex tool, put the processed args back into 'data'
+    if (isComplexTool(toolName)) {
+        mappedArgs.data = argsToProcess;
+    }
 
-  /**
-   * Get all available mappings (for debugging)
-   */
-  public getAllMappings(): ParameterMappingRegistry {
-    return { ...this.mappingRegistry };
-  }
-
-  /**
-   * Add a new mapping (for dynamic discovery)
-   */
-  public addMapping(key: string, mapping: ModelParameterMapping): void {
-    this.mappingRegistry[key] = mapping;
-    console.log(`✅ Added new parameter mapping: ${key}`);
+    return { mappedArgs, mapped, appliedMappings };
   }
 }
 
-// Export singleton instance
-export const parameterMappingManager = ParameterMappingManager.getInstance();
+export const parameterMappingManager = new ParameterMappingManager();

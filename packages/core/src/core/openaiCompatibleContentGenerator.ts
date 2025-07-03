@@ -295,11 +295,42 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   }
 
   /**
+   * Processes a successfully parsed JSON object to extract tool calls.
+   */
+  private processParsedJson(parsed: any, toolCalls: Array<{name: string, args: any}>): void {
+    // Handle structured tool calls format
+    if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
+      for (const toolCall of parsed.tool_calls) {
+        if (toolCall.tool) {
+          const args = toolCall.args || {};
+          const processedArgs = this.processToolCallArgs(toolCall.tool, args);
+          toolCalls.push({
+            name: toolCall.tool,
+            args: processedArgs
+          });
+          console.log(`🔧 Parsed JSON tool call: ${toolCall.tool}`);
+        }
+      }
+    }
+    
+    // Handle single tool call format
+    else if (parsed.tool) {
+      const args = parsed.args || {};
+      const processedArgs = this.processToolCallArgs(parsed.tool, args);
+      toolCalls.push({
+        name: parsed.tool,
+        args: processedArgs
+      });
+      console.log(`🔧 Parsed single JSON tool call: ${parsed.tool}`);
+    }
+  }
+
+  /**
    * Parse JSON tool calls from model response
    * New architecture: Model returns structured JSON, we execute tools and provide feedback
    */
   private parseJsonToolCalls(content: string): Array<{name: string, args: any}> {
-    const toolCalls: Array<{name: string, args: any}> = [];
+    const toolCalls: Array<{name:string, args: any}> = [];
     
     try {
       // Look for JSON blocks in the response
@@ -308,34 +339,43 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       for (const jsonBlock of jsonBlocks) {
         try {
           const parsed = JSON.parse(jsonBlock);
-          
-          // Handle structured tool calls format
-          if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
-            for (const toolCall of parsed.tool_calls) {
-              if (toolCall.tool) {
-                const args = toolCall.args || {};
-                const processedArgs = this.processToolCallArgs(toolCall.tool, args);
-                toolCalls.push({
-                  name: toolCall.tool,
-                  args: processedArgs
-                });
-                console.log(`🔧 Parsed JSON tool call: ${toolCall.tool}`);
+          this.processParsedJson(parsed, toolCalls);
+        } catch (parseError) {
+          console.log(`⚠️ Failed to parse JSON block, attempting to fix...`);
+          try {
+            let correctedBlock = jsonBlock;
+            const startIndex = correctedBlock.indexOf('{');
+            if (startIndex === -1) {
+              throw new Error("No opening brace '{' found.");
+            }
+
+            let braceCount = 0;
+            let endIndex = -1;
+            for (let i = startIndex; i < correctedBlock.length; i++) {
+              if (correctedBlock[i] === '{') {
+                braceCount++;
+              } else if (correctedBlock[i] === '}') {
+                braceCount--;
+              }
+
+              if (braceCount === 0) {
+                endIndex = i;
+                break;
               }
             }
+
+            if (endIndex === -1) {
+              throw new Error("Could not find matching closing brace '}'.");
+            }
+            
+            correctedBlock = correctedBlock.substring(startIndex, endIndex + 1);
+            const parsed = JSON.parse(correctedBlock);
+            console.log('✅ Successfully parsed fixed JSON.');
+            this.processParsedJson(parsed, toolCalls);
+          } catch(fixError) {
+            const err = fixError as Error;
+            console.log(`❌ Failed to fix and parse JSON block. Error: ${err.message}. Preview: ${jsonBlock.slice(0, 100)}`);
           }
-          
-          // Handle single tool call format
-          else if (parsed.tool) {
-            const args = parsed.args || {};
-            const processedArgs = this.processToolCallArgs(parsed.tool, args);
-            toolCalls.push({
-              name: parsed.tool,
-              args: processedArgs
-            });
-            console.log(`🔧 Parsed single JSON tool call: ${parsed.tool}`);
-          }
-        } catch (parseError) {
-          console.log(`⚠️ Failed to parse JSON block: ${jsonBlock.slice(0, 100)}`);
         }
       }
     } catch (error) {
@@ -555,7 +595,9 @@ USER REQUEST: ${message}`;
     // 核心原则：明确告诉模型它需要请求工具执行，而不是直接执行
     const guidance = `${message}
 
-注意：你无法直接执行工具。如需工具，请用JSON格式请求：
+注意：你无法直接执行工具。如需工具，请用JSON格式请求。
+**重要限制：你必须一次只请求一个工具调用。在任何情况下，"tool_calls" 数组中都不能包含超过一个对象。**
+
 \`\`\`json
 {"tool_calls": [{"tool": "read_file", "args": {"absolute_path": "/path"}}]}
 \`\`\``;
@@ -883,6 +925,7 @@ USER REQUEST: ${message}`;
     request: GenerateContentParameters,
   ): Promise<OpenAIRequest> {
     const messages: OpenAIMessage[] = [];
+    const toolResponses: { name: string; content: string }[] = [];
 
     // Handle different content formats
     if (request.contents) {
@@ -895,18 +938,11 @@ USER REQUEST: ${message}`;
           ) {
             let messageContent = '';
             let toolCalls: any[] = [];
-            let isToolResponse = false;
-            let toolCallId = '';
-            let functionName = '';
 
             // Extract text and function calls from parts if available
             if ('parts' in content && Array.isArray(content.parts)) {
               for (const part of content.parts) {
-                if (
-                  typeof part === 'object' &&
-                  part !== null
-                ) {
-                  // Handle text parts
+                if (typeof part === 'object' && part !== null) {
                   if ('text' in part && typeof part.text === 'string') {
                     messageContent += part.text;
                   }
@@ -914,7 +950,11 @@ USER REQUEST: ${message}`;
                   else if ('functionCall' in part && part.functionCall) {
                     const funcCall = part.functionCall;
                     toolCalls.push({
-                      id: funcCall.id || `call_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+                      id:
+                        funcCall.id ||
+                        `call_${Date.now()}_${Math.random()
+                          .toString(16)
+                          .slice(2)}`,
                       type: 'function',
                       function: {
                         name: funcCall.name,
@@ -923,51 +963,51 @@ USER REQUEST: ${message}`;
                     });
                   }
                   // Handle function responses (from user/tool execution)
-                  else if ('functionResponse' in part && part.functionResponse) {
-                    isToolResponse = true;
+                  else if (
+                    'functionResponse' in part &&
+                    part.functionResponse
+                  ) {
                     const funcResp = part.functionResponse;
-                    toolCallId = funcResp.id || '';
-                    functionName = funcResp.name || '';
-                    messageContent += JSON.stringify(funcResp.response || {});
+                    const functionName = funcResp.name || '';
+                    const toolContent = JSON.stringify(funcResp.response || {});
+                    console.log(
+                      `🔄 HIJACK: Collecting tool response for '${functionName}' to aggregate.`,
+                    );
+                    toolResponses.push({
+                      name: functionName,
+                      content: toolContent,
+                    });
                   }
                 }
               }
             }
 
-            // Determine message role and structure
-            if (isToolResponse) {
-              // This is a tool response message
-              // HIJACK: Convert tool response to user role to guide model
-              console.log(`🔄 HIJACK: Converting tool response to 'user' role for model guidance.`);
-              messages.push({
-                role: 'user',
-                content: `Tool execution result: ${messageContent}` || 'Tool execution completed',
-              });
-            } else if (toolCalls.length > 0) {
+            // After processing all parts, create the message if it's not a tool response
+            // and it doesn't contain a tool response part.
+            const hasFunctionResponse =
+              content.parts &&
+              Array.isArray(content.parts) &&
+              content.parts.some(
+                p => typeof p === 'object' && p !== null && 'functionResponse' in p,
+              );
+
+            if (toolCalls.length > 0) {
               // This is an assistant message with tool calls
               messages.push({
                 role: 'assistant',
                 content: messageContent || null,
                 tool_calls: toolCalls,
               });
-            } else if (messageContent) {
-              // Regular user or assistant message
+            } else if (messageContent && !hasFunctionResponse) {
+              // Regular user or assistant message that is NOT a tool response
               const role = content.role === 'user' ? 'user' : 'assistant';
-              
-              // Add /no_think prefix for user messages to disable thinking - only for qwen3 models
-              if (role === 'user' && this.model.toLowerCase().includes('qwen3')) {
-                // Only add /no_think if it's not already there
-                if (!messageContent.startsWith('/no_think ')) {
-                  messageContent = '/no_think ' + messageContent;
-                  console.log('🔧 Added /no_think prefix for qwen3 model');
-                }
-              }
-              
-              // Add natural tool guidance that mimics Gemini's JSON tool pattern  
+
               if (role === 'user') {
-                messageContent = await this.addNaturalToolGuidance(messageContent);
+                messageContent = await this.addNaturalToolGuidance(
+                  messageContent,
+                );
               }
-              
+
               messages.push({
                 role,
                 content: messageContent,
@@ -976,6 +1016,39 @@ USER REQUEST: ${message}`;
           }
         }
       }
+    }
+
+    // After processing all contents, add the aggregated tool responses as a single user message
+    if (toolResponses.length > 0) {
+      const toolResponseText = toolResponses
+        .map(resp => `Tool: ${resp.name}\nResult: ${resp.content}`)
+        .join('\n\n');
+
+      // Find the original user prompt from the messages we've already processed.
+      const firstUserMessage = messages.find(m => m.role === 'user');
+      const originalRequest = firstUserMessage?.content;
+
+      const userMessageParts = [
+        `Okay, here is the result from the tool call:`,
+        `\`\`\`text`,
+        `${toolResponseText}`,
+        `\`\`\``,
+        `Now, what is the next step to address the original request?`,
+      ];
+      if (originalRequest) {
+        // We need to strip the guidance we added earlier to get the raw prompt.
+        const guidancePattern = /\n\n注意：你无法直接执行工具(.|\n)*/;
+        const cleanRequest = originalRequest.replace(guidancePattern, '');
+        userMessageParts.push(`(The original request was: "${cleanRequest}")`);
+      }
+
+      console.log(
+        `🔄 HIJACK: Pushing aggregated tool responses as a single user message.`,
+      );
+      messages.push({
+        role: 'user',
+        content: userMessageParts.join('\n'),
+      });
     }
 
     const openaiRequest: OpenAIRequest = {
