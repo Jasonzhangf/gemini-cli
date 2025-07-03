@@ -129,31 +129,21 @@ export async function runNonInteractive(
             }
           }
         }
-        // For single tool calls (like read file), display result directly and exit
-        if (functionCalls.length === 1 && functionCalls[0].name === 'read_file') {
-          // Extract and display file content directly
-          for (const part of toolResponseParts) {
-            if (part.functionResponse && part.functionResponse.response) {
-              const response = part.functionResponse.response;
-              if (typeof response === 'object' && response.content) {
-                process.stdout.write(response.content);
-                process.stdout.write('\n');
-                return;
-              } else if (typeof response === 'string') {
-                process.stdout.write(response);
-                process.stdout.write('\n');
-                return;
-              }
+        // 核心角色转换劫持：让模型知道工具已执行，直接显示结果
+        // 对于简单的工具调用，直接显示结果而不让模型再次处理
+        for (const part of toolResponseParts) {
+          if (part.functionResponse && part.functionResponse.response) {
+            const response = part.functionResponse.response;
+            // 直接输出工具执行结果
+            if (typeof response === 'object' && response.content) {
+              process.stdout.write(response.content);
+            } else if (typeof response === 'string') {
+              process.stdout.write(response);
             }
           }
         }
-        
-        // For other cases, continue with model processing but with better guidance
-        const continuationParts = [
-          ...toolResponseParts,
-          { text: "\n\n请基于以上工具执行结果自然地继续回答用户的原始问题。不要返回结构化JSON，直接用自然语言回答。" }
-        ];
-        currentMessages = [{ role: 'model', parts: continuationParts }];
+        process.stdout.write('\n');
+        return; // 直接结束，不再让模型处理
       } else {
         process.stdout.write('\n'); // Ensure a final newline
         return;

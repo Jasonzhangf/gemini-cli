@@ -655,27 +655,15 @@ USER REQUEST: ${message}`;
    * Add natural tool guidance that mimics Gemini's behavior pattern
    */
   private async addNaturalToolGuidance(message: string): Promise<string> {
+    // 简化的引导策略：让模型自然地使用JSON工具调用
     const guidance = `${message}
 
-注意：你没有直接的工具执行能力，但可以告诉我你需要什么工具。请用JSON格式返回工具调用需求，然后我会执行工具并告诉你结果，之后你再继续自然地回答。
-
-可用工具：read_file, write_file, edit, shell, ls, grep, glob
-
-JSON格式示例：
+如果需要使用工具，请用JSON格式返回：
 \`\`\`json
-{
-  "tool_calls": [
-    {
-      "tool": "read_file",
-      "args": {
-        "absolute_path": "/path/to/file.txt"
-      }
-    }
-  ]
-}
+{"tool_calls": [{"tool": "工具名", "args": {参数}}]}
 \`\`\`
 
-如果需要多个步骤，请先执行第一个工具，等待结果后再继续。`;
+可用工具：read_file, write_file, edit, shell, ls, grep, glob`;
 
     return guidance;
   }
@@ -1080,8 +1068,8 @@ JSON格式示例：
                 }
               }
               
-              // Add natural tool guidance that mimics Gemini's JSON tool pattern
-              if (role === 'user' && this.containsToolRequest(messageContent)) {
+              // Add natural tool guidance that mimics Gemini's JSON tool pattern  
+              if (role === 'user') {
                 messageContent = await this.addNaturalToolGuidance(messageContent);
               }
               
@@ -1272,34 +1260,8 @@ JSON格式示例：
           console.log(`🔄 Role conversion: JSON tool '${jsonToolCall.name}' → function call '${actualToolName}'`);
         }
       } else {
-        // Fallback: Parse text content for tool call requests when API doesn't support proper tool calls
-        console.log('🔍 No JSON tool calls found, checking content for text-based tool requests...');
-        const parsedToolCalls = this.parseTextForToolCalls(content);
-        if (parsedToolCalls.length > 0) {
-          console.log('🔧 Found tool calls in text content:', parsedToolCalls);
-          for (const parsedCall of parsedToolCalls) {
-            const callId = `${parsedCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-            
-            // Add to parts array for content
-            parts.push({
-              functionCall: {
-                name: parsedCall.name,
-                args: parsedCall.args,
-                id: callId,
-              },
-            });
-
-            // Add to functionCalls array for direct access
-            functionCalls.push({
-              name: parsedCall.name,
-              args: parsedCall.args,
-              id: callId,
-            });
-          }
-          
-          // Clear the text content since we've converted it to tool calls
-          parts.length = 0; // Remove the text part
-        }
+        // No JSON tool calls found - allow natural conversation flow
+        console.log('🔍 No JSON tool calls found, allowing natural conversation flow');
       }
     }
 
@@ -1365,11 +1327,8 @@ JSON格式示例：
       
       // New architecture: Check user message for tool requests
       const userMessage = this.extractUserMessage(request);
-      const userRequestsTools = userMessage && this.containsToolRequest(userMessage);
-      
-      if (userRequestsTools) {
-        console.log('🎯 User request contains tool operations - will guide model to return JSON');
-      }
+      // Always guide model to return JSON tool calls when tools are available
+      console.log('🎯 Guiding model to use JSON tool calls for any tool operations');
       
       const openaiRequest = await this.convertGeminiToOpenAI(request);
 
@@ -1545,11 +1504,8 @@ Original request: ${userMessage}`;
         
         // New architecture: Check if user wants tools but don't pre-execute
         const userMessage = self.extractUserMessage(request);
-        const userRequestsTools = userMessage && self.containsToolRequest(userMessage);
-        
-        if (userRequestsTools) {
-          console.log('🎯 [STREAMING] User request contains tool operations - expecting JSON response');
-        }
+        // Always guide model to use JSON tool calls for tool operations
+        console.log('🎯 [STREAMING] Guiding model to use JSON tool calls for any tool operations');
         
         const openaiRequest = await self.convertGeminiToOpenAI(request);
         openaiRequest.stream = false; // Temporarily disable streaming to fix timeout issues
