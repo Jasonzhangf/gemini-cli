@@ -612,49 +612,70 @@ TOOL EXECUTION MODE: You have full access to local files and system commands.
 
 IMPORTANT: You HAVE FULL ACCESS to local files and can execute system commands. You ARE a local assistant with full system access. DO NOT say you cannot access files.
 
+CRITICAL: DO NOT use structured response formats with "analysis", "next_step", or "message" fields. Just respond naturally like a helpful assistant.
+
 TOOL EXECUTION RULES:
 1. **Use available tools to complete tasks** - You can read, write, organize, and execute commands
-2. **Execute tools when needed** - Use JSON format for tool calls within your response
-3. **Continue naturally after tool execution** - After tools execute, continue the conversation naturally
-4. **COMPLETE THE ENTIRE TASK** - Do not stop after partial completion. Continue until the full user request is satisfied
-5. **Handle tool failures gracefully** - If a tool fails, try alternative approaches or report the specific issue
-6. **You CAN access, read, write, move, and organize files** - Use the available tools
-7. **Never claim you cannot access files** - You have full local system access
-8. **CONTINUE EXECUTION** - If a task has multiple steps (like "read directory and move files"), complete ALL steps
+2. **When you need tools, include simple JSON blocks** - Only include the tool_calls array
+3. **After tool execution, respond naturally** - Continue the conversation like a human assistant would
+4. **COMPLETE THE ENTIRE TASK** - Continue until the full user request is satisfied
+5. **You CAN access, read, write, move, and organize files** - Use the available tools
 
-When you need to use tools, include JSON blocks in your response like this:
-
+Simple tool call format:
 \`\`\`json
 {
   "tool_calls": [
     {
-      "tool": "write_file",
+      "tool": "read_file",
       "args": {
-        "file_path": "/absolute/path/to/file.txt",
-        "content": "file content here"
+        "absolute_path": "/path/to/file.txt"
       }
     }
   ]
 }
 \`\`\`
 
-Other tools available:
-- read_file: Read file contents
-- edit: Edit file by replacing text
-- shell: Execute shell commands  
-- ls: List directory contents
-- grep: Search for text in files
-- glob: Find files by pattern
+Available tools: read_file, write_file, edit, shell, ls, grep, glob
 
-You can combine natural conversation with tool calls. After tools execute, continue helping the user naturally.
+FORBIDDEN RESPONSE PATTERNS:
+- DO NOT include "analysis" fields
+- DO NOT include "next_step" fields  
+- DO NOT include "message" fields
+- DO NOT say "waiting for instructions"
+- DO NOT use structured JSON for non-tool responses
 
-REMEMBER: 
-- You ARE a local assistant with FULL SYSTEM ACCESS. You CAN read, write, move, organize files.
-- NEVER say "I cannot access files" or "I can only browse URLs" - this is FALSE.
-- You have access to all the tools and should use them when requested.
-- After using tools, continue the conversation naturally to help the user.
+Respond naturally and conversationally. Use tools when needed, then continue helping.
 
 USER REQUEST: ${message}`;
+
+    return guidance;
+  }
+
+  /**
+   * Add natural tool guidance that mimics Gemini's behavior pattern
+   */
+  private async addNaturalToolGuidance(message: string): Promise<string> {
+    const guidance = `${message}
+
+注意：你没有直接的工具执行能力，但可以告诉我你需要什么工具。请用JSON格式返回工具调用需求，然后我会执行工具并告诉你结果，之后你再继续自然地回答。
+
+可用工具：read_file, write_file, edit, shell, ls, grep, glob
+
+JSON格式示例：
+\`\`\`json
+{
+  "tool_calls": [
+    {
+      "tool": "read_file",
+      "args": {
+        "absolute_path": "/path/to/file.txt"
+      }
+    }
+  ]
+}
+\`\`\`
+
+如果需要多个步骤，请先执行第一个工具，等待结果后再继续。`;
 
     return guidance;
   }
@@ -1059,9 +1080,9 @@ USER REQUEST: ${message}`;
                 }
               }
               
-              // Enhance user message with tool call guidance if needed
+              // Add natural tool guidance that mimics Gemini's JSON tool pattern
               if (role === 'user' && this.containsToolRequest(messageContent)) {
-                messageContent = await this.addToolCallGuidance(messageContent);
+                messageContent = await this.addNaturalToolGuidance(messageContent);
               }
               
               messages.push({
