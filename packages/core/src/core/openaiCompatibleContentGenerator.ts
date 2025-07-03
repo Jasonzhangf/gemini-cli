@@ -17,6 +17,7 @@ import {
 } from '@google/genai';
 import { ContentGenerator } from './contentGenerator.js';
 import { Config, ApprovalMode } from '../config/config.js';
+import { parameterMappingManager } from '../config/parameter-mappings/index.js';
 import path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -306,30 +307,35 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       
       for (const jsonBlock of jsonBlocks) {
         try {
+          console.log(`🔧 [DEBUG] Raw JSON block from model:`, jsonBlock);
           const parsed = JSON.parse(jsonBlock);
           
           // Handle structured tool calls format
           if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
             for (const toolCall of parsed.tool_calls) {
-              if (toolCall.tool && toolCall.args) {
-                const processedArgs = this.processToolCallArgs(toolCall.tool, toolCall.args);
+              console.log(`🔧 [DEBUG] Raw tool call from model:`, JSON.stringify(toolCall, null, 2));
+              if (toolCall.tool) {
+                const args = toolCall.args || {};
+                const processedArgs = this.processToolCallArgs(toolCall.tool, args);
                 toolCalls.push({
                   name: toolCall.tool,
                   args: processedArgs
                 });
-                console.log(`🔧 Parsed JSON tool call: ${toolCall.tool}`);
+                console.log(`🔧 Parsed JSON tool call: ${toolCall.tool} with args:`, JSON.stringify(processedArgs, null, 2));
               }
             }
           }
           
           // Handle single tool call format
-          else if (parsed.tool && parsed.args) {
-            const processedArgs = this.processToolCallArgs(parsed.tool, parsed.args);
+          else if (parsed.tool) {
+            console.log(`🔧 [DEBUG] Single tool call from model:`, JSON.stringify(parsed, null, 2));
+            const args = parsed.args || {};
+            const processedArgs = this.processToolCallArgs(parsed.tool, args);
             toolCalls.push({
               name: parsed.tool,
               args: processedArgs
             });
-            console.log(`🔧 Parsed single JSON tool call: ${parsed.tool}`);
+            console.log(`🔧 Parsed single JSON tool call: ${parsed.tool} with args:`, JSON.stringify(processedArgs, null, 2));
           }
         } catch (parseError) {
           console.log(`⚠️ Failed to parse JSON block: ${jsonBlock.slice(0, 100)}`);
@@ -455,6 +461,54 @@ USER REQUEST: ${message}`;
    * Add natural tool guidance that mimics Gemini's behavior pattern
    */
   private async addNaturalToolGuidance(message: string): Promise<string> {
+    // 检测以 # 开头的消息，自动激活 knowledge_graph 工具模式
+    if (message.trim().startsWith('#')) {
+      const knowledgeRequest = message.trim().substring(1).trim(); // 移除 # 前缀
+      
+      const guidance = `${message}
+
+检测到以 # 开头的命令，这表示需要使用 knowledge_graph 工具进行知识图谱操作。
+
+请根据用户的具体需求选择合适的操作：
+
+**可用操作类型：**
+- create_entities: 创建实体
+- read_graph: 读取整个知识图谱
+- search_nodes: 搜索节点
+- open_nodes: 打开特定节点
+- create_relations: 创建关系
+- add_observations: 添加观察信息
+- delete_entities: 删除实体
+- delete_observations: 删除观察信息
+- delete_relations: 删除关系
+
+**用户请求**: "${knowledgeRequest.replace(/"/g, '\\"')}"
+
+请使用 knowledge_graph 工具响应用户的具体需求：
+
+\`\`\`json
+{
+  "tool_calls": [
+    {
+      "tool": "knowledge_graph",
+      "args": {
+        "action": "适当的操作类型",
+        "data": "根据用户需求构造的数据"
+      }
+    }
+  ]
+}
+\`\`\`
+
+**示例：**
+- 如果用户要保存信息，使用 create_entities
+- 如果用户要查看所有信息，使用 read_graph  
+- 如果用户要搜索特定内容，使用 search_nodes
+- 如果用户要查看特定节点，使用 open_nodes`;
+      
+      return guidance;
+    }
+    
     // 核心原则：明确告诉模型它需要请求工具执行，而不是直接执行
     const guidance = `${message}
 
@@ -1151,11 +1205,20 @@ USER REQUEST: ${message}`;
       if (!response.ok) {
         const errorText = await response.text();
         
-        // API error - no fallback in new architecture
-        
-        throw new Error(
+        // Create error with status code for proper retry handling
+        const error = new Error(
           `OpenAI API request failed: ${response.status} ${response.statusText} - ${errorText}`,
-        );
+        ) as Error & { status: number };
+        error.status = response.status;
+        
+        // Log specific error types
+        if (response.status === 429) {
+          console.warn(`⚠️ Rate limit exceeded (429): ${errorText}`);
+        } else if (response.status >= 500 && response.status < 600) {
+          console.error(`🚨 Server error (${response.status}): ${errorText}`);
+        }
+        
+        throw error;
       }
 
       const openaiResponse: OpenAIResponse = await response.json();
@@ -1211,6 +1274,24 @@ USER REQUEST: ${message}`;
           const callId = `${jsonToolCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
           const actualToolName = this.mapToolName(jsonToolCall.name);
           
+          // Apply parameter mappings for third-party models
+          let mappedArgs = jsonToolCall.args;
+          console.log(`🔧 [DEBUG] Original args before mapping:`, JSON.stringify(mappedArgs, null, 2));
+          const paramMapping = parameterMappingManager.findMapping(this.model, this.apiEndpoint);
+          if (paramMapping) {
+            const mappingResult = parameterMappingManager.applyMapping(
+              actualToolName, 
+              jsonToolCall.args, 
+              paramMapping
+            );
+            console.log(`🔧 [DEBUG] Mapping result for ${actualToolName}:`, JSON.stringify(mappingResult, null, 2));
+            if (mappingResult.mapped) {
+              mappedArgs = mappingResult.mappedArgs;
+              console.log(`🔧 Applied ${mappingResult.appliedMappings.length} parameter mappings for ${actualToolName}`);
+            }
+          }
+          console.log(`🔧 [DEBUG] Final mapped args:`, JSON.stringify(mappedArgs, null, 2));
+          
           // Add to OpenAI format for conversion
           if (!firstMessage.tool_calls) {
             firstMessage.tool_calls = [];
@@ -1221,7 +1302,7 @@ USER REQUEST: ${message}`;
             type: 'function',
             function: {
               name: actualToolName,  // Use mapped tool name
-              arguments: JSON.stringify(jsonToolCall.args)
+              arguments: JSON.stringify(mappedArgs)  // Use mapped arguments
             }
           });
           
@@ -1229,14 +1310,14 @@ USER REQUEST: ${message}`;
           parts.push({
             functionCall: {
               name: actualToolName,
-              args: jsonToolCall.args,
+              args: mappedArgs,  // Use mapped arguments
               id: callId,
             },
           });
 
           functionCalls.push({
             name: actualToolName,
-            args: jsonToolCall.args,
+            args: mappedArgs,  // Use mapped arguments
             id: callId,
           });
           
@@ -1329,11 +1410,20 @@ Original request: ${userMessage}`;
         if (!response.ok) {
           const errorText = await response.text();
           
-          // API error - no fallback in new architecture
-          
-          throw new Error(
+          // Create error with status code for proper retry handling
+          const error = new Error(
             `OpenAI API request failed: ${response.status} ${response.statusText} - ${errorText}`,
-          );
+          ) as Error & { status: number };
+          error.status = response.status;
+          
+          // Log specific error types
+          if (response.status === 429) {
+            console.warn(`⚠️ Rate limit exceeded (429): ${errorText}`);
+          } else if (response.status >= 500 && response.status < 600) {
+            console.error(`🚨 Server error (${response.status}): ${errorText}`);
+          }
+          
+          throw error;
         }
 
         // Process non-streaming response

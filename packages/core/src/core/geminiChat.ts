@@ -268,6 +268,12 @@ export class GeminiChat {
 
       response = await retryWithBackoff(apiCall, {
         shouldRetry: (error: Error) => {
+          // Check status code first (more reliable)
+          const status = (error as Error & { status?: number }).status;
+          if (status === 429 || (status && status >= 500 && status < 600)) {
+            return true;
+          }
+          // Fallback to checking error message
           if (error && error.message) {
             if (error.message.includes('429')) return true;
             if (error.message.match(/5\d{2}/)) return true;
@@ -368,6 +374,12 @@ export class GeminiChat {
         
         const response = await retryWithBackoff(apiCall, {
           shouldRetry: (error: Error) => {
+            // Check status code first (more reliable)
+            const status = (error as Error & { status?: number }).status;
+            if (status === 429 || (status && status >= 500 && status < 600)) {
+              return true;
+            }
+            // Fallback to checking error message
             if (error && error.message) {
               if (error.message.includes('429')) return true;
               if (error.message.match(/5\d{2}/)) return true;
@@ -407,7 +419,12 @@ export class GeminiChat {
         // If errors occur mid-stream, this setup won't resume the stream; it will restart it.
         const streamResponse = await retryWithBackoff(apiCall, {
           shouldRetry: (error: Error) => {
-            // Check error messages for status codes, or specific error names if known
+            // Check status code first (more reliable)
+            const status = (error as Error & { status?: number }).status;
+            if (status === 429 || (status && status >= 500 && status < 600)) {
+              return true;
+            }
+            // Fallback to checking error message
             if (error && error.message) {
               if (error.message.includes('429')) return true;
               if (error.message.match(/5\d{2}/)) return true;

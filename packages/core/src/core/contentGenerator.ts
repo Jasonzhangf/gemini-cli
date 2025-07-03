@@ -33,6 +33,21 @@ interface HijackConfig {
   hijackRules: HijackRule[];
 }
 
+interface FallbackConfig {
+  provider: string;
+  model: string;
+  actualModel?: string;
+  endpoint?: string;
+  apiKey?: string;
+  maxRetries: number;
+  priority: number;
+}
+
+interface FallbackSystem {
+  enabled: boolean;
+  fallbacks: FallbackConfig[];
+}
+
 /**
  * Load hijack configuration from environment variables
  * Supports multiple provider configurations with prefix-based naming
@@ -109,6 +124,52 @@ function loadProviderConfig(prefix: string): HijackRule | null {
 }
 
 /**
+ * Load Fallback system configuration from environment variables
+ */
+function loadFallbackConfigFromEnv(): FallbackSystem | null {
+  try {
+    const fallbacks: FallbackConfig[] = [];
+    
+    // Look for FALLBACK_1, FALLBACK_2, etc.
+    for (let i = 1; i <= 10; i++) {
+      const prefix = `FALLBACK_${i}`;
+      const provider = process.env[`${prefix}_PROVIDER`];
+      const model = process.env[`${prefix}_MODEL`];
+      
+      if (!provider || !model) {
+        break; // Stop at first missing fallback
+      }
+      
+      const fallbackConfig: FallbackConfig = {
+        provider,
+        model,
+        actualModel: process.env[`${prefix}_ACTUAL_MODEL`],
+        endpoint: process.env[`${prefix}_ENDPOINT`],
+        apiKey: process.env[`${prefix}_API_KEY`],
+        maxRetries: parseInt(process.env[`${prefix}_MAX_RETRIES`] || '3'),
+        priority: i
+      };
+      
+      fallbacks.push(fallbackConfig);
+      console.log(`🔧 Loaded fallback ${i}: ${provider} ${model} (retries: ${fallbackConfig.maxRetries})`);
+    }
+    
+    if (fallbacks.length === 0) {
+      return null;
+    }
+    
+    console.log(`✅ Loaded ${fallbacks.length} fallback configurations`);
+    return {
+      enabled: true,
+      fallbacks
+    };
+  } catch (error) {
+    console.warn('❌ Failed to load fallback config from environment:', error);
+    return null;
+  }
+}
+
+/**
  * Check if a user-specified model should be hijacked by a hijack rule
  * Supports both exact matching and fuzzy matching for similar model names
  */
@@ -166,6 +227,13 @@ function shouldHijackModel(userModel: string, targetModel: string): boolean {
   }
   
   return false;
+}
+
+/**
+ * Get Fallback system configuration  
+ */
+export function getFallbackConfig(): FallbackSystem | null {
+  return loadFallbackConfigFromEnv();
 }
 
 /**
@@ -281,7 +349,9 @@ export async function createContentGeneratorConfig(
     if (hijackConfig?.enabled) {
       const hijackRule = hijackConfig.hijackRules[0]; // Use first available provider
       if (hijackRule) {
-        hijackedAuthType = AuthType.USE_GEMINI;
+        // Determine AuthType based on endpoint for command line hijacking too
+        const isGeminiEndpoint = hijackRule.apiEndpoint.includes('generativelanguage.googleapis.com');
+        hijackedAuthType = isGeminiEndpoint ? AuthType.USE_GEMINI : AuthType.OPENAI_COMPATIBLE;
         hijackedApiKey = hijackRule.apiKey;
         hijackedApiEndpoint = hijackRule.apiEndpoint;
         actualModel = commandLineActualModel; // Use command line model instead of env model
@@ -295,8 +365,9 @@ export async function createContentGeneratorConfig(
         (rule) => shouldHijackModel(effectiveModel, rule.targetModel),
       );
       if (hijackRule) {
-        // Enable actual hijacking
-        hijackedAuthType = AuthType.USE_GEMINI;
+        // Enable actual hijacking - determine AuthType based on endpoint
+        const isGeminiEndpoint = hijackRule.apiEndpoint.includes('generativelanguage.googleapis.com');
+        hijackedAuthType = isGeminiEndpoint ? AuthType.USE_GEMINI : AuthType.OPENAI_COMPATIBLE;
         hijackedApiKey = hijackRule.apiKey;
         hijackedApiEndpoint = hijackRule.apiEndpoint;
         actualModel = hijackRule.actualModel;
@@ -314,7 +385,8 @@ export async function createContentGeneratorConfig(
         console.log(`✨ Configured To: ${hijackRule.actualModel}`);
         console.log(`🔗 Endpoint: ${hijackRule.apiEndpoint}`);
         console.log(`🔑 Using API Key: ${hijackRule.apiKey.substring(0, 8)}...`);
-        console.log('✅ OpenAI compatible implementation active');
+        const isGeminiAPI = hijackRule.apiEndpoint.includes('generativelanguage.googleapis.com');
+        console.log(`✅ ${isGeminiAPI ? 'Gemini' : 'OpenAI compatible'} implementation active`);
         console.log('🚀 Requests will be sent to configured endpoint');
         console.log('========================================');
         console.log('');
