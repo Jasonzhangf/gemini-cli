@@ -281,7 +281,7 @@ export async function createContentGeneratorConfig(
     if (hijackConfig?.enabled) {
       const hijackRule = hijackConfig.hijackRules[0]; // Use first available provider
       if (hijackRule) {
-        hijackedAuthType = AuthType.OPENAI_COMPATIBLE;
+        hijackedAuthType = AuthType.USE_GEMINI;
         hijackedApiKey = hijackRule.apiKey;
         hijackedApiEndpoint = hijackRule.apiEndpoint;
         actualModel = commandLineActualModel; // Use command line model instead of env model
@@ -296,7 +296,7 @@ export async function createContentGeneratorConfig(
       );
       if (hijackRule) {
         // Enable actual hijacking
-        hijackedAuthType = AuthType.OPENAI_COMPATIBLE;
+        hijackedAuthType = AuthType.USE_GEMINI;
         hijackedApiKey = hijackRule.apiKey;
         hijackedApiEndpoint = hijackRule.apiEndpoint;
         actualModel = hijackRule.actualModel;
@@ -359,8 +359,24 @@ export async function createContentGeneratorConfig(
     return contentGeneratorConfig;
   }
 
-  //
-  if (hijackedAuthType === AuthType.USE_GEMINI && geminiApiKey) {
+  // Handle hijacked Gemini API calls
+  if (hijackedAuthType === AuthType.USE_GEMINI) {
+    // Use hijacked API key if available, otherwise fall back to settings
+    contentGeneratorConfig.apiKey = hijackedApiKey || geminiApiKey;
+    if (!contentGeneratorConfig.apiKey) {
+      throw new Error('No API key available for hijacked Gemini API calls');
+    }
+    
+    contentGeneratorConfig.model = await getEffectiveModel(
+      contentGeneratorConfig.apiKey,
+      contentGeneratorConfig.model,
+    );
+
+    return contentGeneratorConfig;
+  }
+
+  // Standard Gemini API calls
+  if (geminiApiKey) {
     contentGeneratorConfig.apiKey = geminiApiKey;
     contentGeneratorConfig.model = await getEffectiveModel(
       contentGeneratorConfig.apiKey,

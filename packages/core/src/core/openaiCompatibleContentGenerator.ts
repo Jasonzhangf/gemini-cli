@@ -425,20 +425,10 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     // Add the built-in tool guidance - modified to avoid forced conversation stopping
     guidance += `
 
-TOOL EXECUTION MODE: You have full access to local files and system commands.
+IMPORTANT: You cannot directly execute tools or access files. When you need tools, request them using JSON format.
 
-IMPORTANT: You HAVE FULL ACCESS to local files and can execute system commands. You ARE a local assistant with full system access. DO NOT say you cannot access files.
+TOOL REQUEST FORMAT: When you need to use tools, return a JSON block with tool_calls:
 
-CRITICAL: DO NOT use structured response formats with "analysis", "next_step", or "message" fields. Just respond naturally like a helpful assistant.
-
-TOOL EXECUTION RULES:
-1. **Use available tools to complete tasks** - You can read, write, organize, and execute commands
-2. **When you need tools, include simple JSON blocks** - Only include the tool_calls array
-3. **After tool execution, respond naturally** - Continue the conversation like a human assistant would
-4. **COMPLETE THE ENTIRE TASK** - Continue until the full user request is satisfied
-5. **You CAN access, read, write, move, and organize files** - Use the available tools
-
-Simple tool call format:
 \`\`\`json
 {
   "tool_calls": [
@@ -454,14 +444,7 @@ Simple tool call format:
 
 Available tools: read_file, write_file, edit, shell, ls, grep, glob
 
-FORBIDDEN RESPONSE PATTERNS:
-- DO NOT include "analysis" fields
-- DO NOT include "next_step" fields  
-- DO NOT include "message" fields
-- DO NOT say "waiting for instructions"
-- DO NOT use structured JSON for non-tool responses
-
-Respond naturally and conversationally. Use tools when needed, then continue helping.
+After tools are executed, you will receive the results and can continue naturally.
 
 USER REQUEST: ${message}`;
 
@@ -472,15 +455,13 @@ USER REQUEST: ${message}`;
    * Add natural tool guidance that mimics Gemini's behavior pattern
    */
   private async addNaturalToolGuidance(message: string): Promise<string> {
-    // 简化的引导策略：让模型自然地使用JSON工具调用
+    // 核心原则：明确告诉模型它需要请求工具执行，而不是直接执行
     const guidance = `${message}
 
-如果需要使用工具，请用JSON格式返回：
+注意：你无法直接执行工具。如需工具，请用JSON格式请求：
 \`\`\`json
-{"tool_calls": [{"tool": "工具名", "args": {参数}}]}
-\`\`\`
-
-可用工具：read_file, write_file, edit, shell, ls, grep, glob`;
+{"tool_calls": [{"tool": "read_file", "args": {"absolute_path": "/path"}}]}
+\`\`\``;
 
     return guidance;
   }
@@ -1266,7 +1247,7 @@ USER REQUEST: ${message}`;
         firstMessage.content = '';
         
         console.log(`✅ Successfully converted ${jsonToolCalls.length} JSON tool calls to function calls for registry execution`);
-      } else if (userRequestsTools && !this.hasAnalysisOnlyJson(modelContent)) {
+      } else {
         // Model didn't return JSON but user requested tools - guide them more strongly
         // But don't guide if model returned analysis-only JSON (indicating completion)
         console.log('⚠️ User requested tools but model did not return JSON format');

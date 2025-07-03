@@ -136,9 +136,11 @@ export async function runNonInteractive(
             const response = part.functionResponse.response;
             // 直接输出工具执行结果
             if (typeof response === 'object' && response.content) {
-              process.stdout.write(response.content);
+              process.stdout.write(String(response.content));
             } else if (typeof response === 'string') {
               process.stdout.write(response);
+            } else if (typeof response === 'object' && response.output) {
+              process.stdout.write(String(response.output));
             }
           }
         }
