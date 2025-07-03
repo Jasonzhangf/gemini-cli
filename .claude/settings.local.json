@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git merge:*)",
+      "Bash(git pull:*)",
+      "Bash(git config:*)",
+      "Bash(git reset:*)",
+      "Bash(git clean:*)",
+      "Bash(git fetch:*)",
+      "Bash(chmod:*)",
+      "Bash(node:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(gemini:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run test-hijack:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)"
+    ],
+    "deny": []
+  }
+}

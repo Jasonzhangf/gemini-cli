@@ -358,6 +358,11 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       jsonBlocks.push(match[1]);
     }
     
+    // If we found something in a code block, assume that's the definitive source.
+    if (jsonBlocks.length > 0) {
+        return jsonBlocks;
+    }
+    
     // Pattern 2: Standalone JSON objects (improved to handle braces balance)
     const jsonPattern = /{\s*["'](?:tool_calls?|tool|analysis)["'][\s\S]*?}/gi;
     const resetContent = content; // Reset regex state
@@ -891,11 +896,11 @@ USER REQUEST: ${message}`;
             // Determine message role and structure
             if (isToolResponse) {
               // This is a tool response message
+              // HIJACK: Convert tool response to user role to guide model
+              console.log(`🔄 HIJACK: Converting tool response to 'user' role for model guidance.`);
               messages.push({
-                role: 'tool',
-                content: messageContent || 'Tool execution completed',
-                tool_call_id: toolCallId,
-                name: functionName,
+                role: 'user',
+                content: `Tool execution result: ${messageContent}` || 'Tool execution completed',
               });
             } else if (toolCalls.length > 0) {
               // This is an assistant message with tool calls
