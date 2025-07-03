@@ -28,6 +28,7 @@ import {
   ApprovalMode,
   Config,
   EditTool,
+  OpenAICompatibleContentGenerator,
   ShellTool,
   WriteFileTool,
   sessionId,
@@ -111,6 +112,20 @@ export async function main() {
     );
   }
 
+  // VIRTUAL TOOL INJECTION - MOVED HERE
+  const generator = await config.getGenerator();
+  if (generator instanceof OpenAICompatibleContentGenerator) {
+    if (generator.getAllAvailableTools) {
+      const virtualTools = await generator.getAllAvailableTools();
+      const toolRegistry = await config.getToolRegistry();
+      toolRegistry.registerTools(virtualTools);
+    }
+  }
+
+  // ENSURE GEMINI CLIENT IS INITIALIZED WITH HIJACK CONFIG
+  // This ensures that both interactive and non-interactive modes use the same hijacked configuration
+  await config.getInitializedGeminiClient();
+
   setMaxSizedBoxDebugging(config.getDebugMode());
 
   // Initialize centralized FileDiscoveryService
@@ -165,6 +180,15 @@ export async function main() {
   }
   let input = config.getQuestion();
   const startupWarnings = await getStartupWarnings();
+
+  // Display working directory information for both interactive and non-interactive modes
+  console.log('');
+  console.log('📁 ===== WORKSPACE INFORMATION ===== 📁');
+  console.log(`🏠 Working Directory: ${workspaceRoot}`);
+  console.log(`🎯 Target Directory: ${config.getTargetDir()}`);
+  console.log(`📝 File operations will be limited to: ${config.getTargetDir()}`);
+  console.log('======================================');
+  console.log('');
 
   // Render UI, passing necessary config values. Check that there is no command line question.
   if (process.stdin.isTTY && input?.length === 0) {

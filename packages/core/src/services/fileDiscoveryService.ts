@@ -15,6 +15,11 @@ export interface FilterFilesOptions {
   respectGeminiIgnore?: boolean;
 }
 
+export interface FileFiltering {
+  respectGitIgnore: boolean;
+  enableRecursiveFileSearch: boolean;
+}
+
 export class FileDiscoveryService {
   private gitIgnoreFilter: GitIgnoreFilter | null = null;
   private geminiIgnoreFilter: GitIgnoreFilter | null = null;

@@ -57,3 +57,22 @@ export * from './tools/mcp-tool.js';
 // Export telemetry functions
 export * from './telemetry/index.js';
 export { sessionId } from './utils/session.js';
+
+export { LSTool } from './tools/ls.js';
+export { ReadFileTool } from './tools/read-file.js';
+export { ReadManyFilesTool } from './tools/read-many-files.js';
+export { SequentialThinkingTool } from './tools/sequential-thinking.js';
+export { ShellTool } from './tools/shell.js';
+export { WebFetchTool } from './tools/web-fetch.js';
+export { WebSearchTool } from './tools/web-search.js';
+export { WriteFileTool } from './tools/write-file.js';
+export {
+  AuthType,
+  ContentGenerator,
+  ContentGeneratorConfig,
+  OpenAICompatibleContentGenerator,
+} from './core/contentGenerator.js';
+export {
+  FileDiscoveryService,
+  FileFiltering,
+} from './services/fileDiscoveryService.js';

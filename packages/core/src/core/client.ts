@@ -73,7 +73,11 @@ export class GeminiClient {
     
     // 设置工具注册表的模型能力
     const toolRegistry = await this.config.getToolRegistry();
-    const isOpenAICompatible = contentGeneratorConfig.authType === AuthType.OPENAI_COMPATIBLE;
+    let isOpenAICompatible = contentGeneratorConfig.authType === AuthType.OPENAI_COMPATIBLE;
+    
+    // Note: FORCE_JSON_TOOL_CALLS is now handled in the tool execution layer
+    // rather than forcing a switch to OpenAI compatible mode
+    
     toolRegistry.setModelCapability(contentGeneratorConfig.model, isOpenAICompatible);
     
     // Update the client's model to reflect the actual model being used

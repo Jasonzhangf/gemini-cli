@@ -6,7 +6,9 @@
   "lastVerified": "2025-07-03T11:45:00Z",
   "toolMappings": {
     "write_file": {
-      "absolute_path": "file_path"
+      "absolute_path": "file_path",
+      "file_content": "content",
+      "content": "content"
     },
     "list_directory": {
       "absolute_path": "path"

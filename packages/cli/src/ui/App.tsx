@@ -50,6 +50,7 @@ import process from 'node:process';
 import {
   getErrorMessage,
   type Config,
+  ContentGenerator,
   getAllGeminiMdFilenames,
   ApprovalMode,
   isEditorAvailable,

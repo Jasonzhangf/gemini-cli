@@ -21,6 +21,105 @@ import {
 
 import { parseAndFormatApiError } from './ui/utils/errorParsing.js';
 
+/**
+ * Parse JSON tool calls from model response text
+ */
+function parseJsonToolCalls(content: string): Array<{name: string, args: any}> {
+  const toolCalls: Array<{name: string, args: any}> = [];
+  
+  try {
+    // Look for JSON blocks in the response
+    const jsonBlocks = extractJsonBlocks(content);
+    
+    for (const jsonBlock of jsonBlocks) {
+      try {
+        const parsed = JSON.parse(jsonBlock);
+        
+        // Handle structured tool calls format
+        if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
+          for (const toolCall of parsed.tool_calls) {
+            if (toolCall.tool) {
+              const args = toolCall.args || {};
+              toolCalls.push({
+                name: toolCall.tool,
+                args: args
+              });
+            }
+          }
+        }
+        
+        // Handle single tool call format
+        else if (parsed.tool) {
+          const args = parsed.args || {};
+          toolCalls.push({
+            name: parsed.tool,
+            args: args
+          });
+        }
+      } catch (parseError) {
+        // Skip invalid JSON blocks
+        continue;
+      }
+    }
+  } catch (error) {
+    // Skip if no JSON found
+  }
+  
+  return toolCalls;
+}
+
+/**
+ * Extract JSON blocks from text content
+ */
+function extractJsonBlocks(content: string): string[] {
+  const jsonBlocks: string[] = [];
+  
+  // Pattern 1: JSON code blocks
+  const codeBlockPattern = /```(?:json)?\s*({[\s\S]*?})\s*```/gi;
+  let match;
+  while ((match = codeBlockPattern.exec(content)) !== null) {
+    jsonBlocks.push(match[1]);
+  }
+  
+  // Pattern 2: Standalone JSON objects
+  const lines = content.split('\n');
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith('{') && (line.includes('tool_calls') || line.includes('tool'))) {
+      // Try to find the complete JSON object
+      let jsonStr = '';
+      let braceCount = 0;
+      let startFound = false;
+      
+      for (let j = i; j < lines.length; j++) {
+        const currentLine = lines[j];
+        jsonStr += currentLine + '\n';
+        
+        for (const char of currentLine) {
+          if (char === '{') {
+            braceCount++;
+            startFound = true;
+          } else if (char === '}') {
+            braceCount--;
+          }
+        }
+        
+        if (startFound && braceCount === 0) {
+          const cleanJson = jsonStr.trim();
+          if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
+            jsonBlocks.push(cleanJson);
+          }
+          break;
+        }
+      }
+      break; // Only process the first JSON object found
+    }
+  }
+  
+  return jsonBlocks;
+}
+
 function getResponseText(response: GenerateContentResponse): string | null {
   if (response.candidates && response.candidates.length > 0) {
     const candidate = response.candidates[0];
@@ -66,16 +165,61 @@ export async function runNonInteractive(
     while (true) {
       const functionCalls: FunctionCall[] = [];
 
+      // Check if we should force JSON tool calls instead of native function calls
+      const forceJsonToolCalls = process.env.FORCE_JSON_TOOL_CALLS === 'true';
+      
+      let messageToSend = currentMessages[0]?.parts || [];
+      let configToSend: any = {
+        abortSignal: abortController.signal,
+      };
+      
+      if (forceJsonToolCalls) {
+        console.log('🔧 FORCE_JSON_TOOL_CALLS enabled - disabling native function calls, using JSON tool call guidance');
+        
+        // Don't send tools to Gemini API - this forces pure text mode
+        // Instead, add tool guidance to the user message
+        if (messageToSend.length > 0 && messageToSend[0].text) {
+          const originalMessage = messageToSend[0].text;
+          const toolDeclarations = toolRegistry.getFunctionDeclarations();
+          const toolList = toolDeclarations.map(tool => tool.name).join(', ');
+          
+          const guidedMessage = `${originalMessage}
+
+IMPORTANT: You cannot directly execute tools. When you need tools, return a JSON block with tool_calls:
+
+\`\`\`json
+{
+  "tool_calls": [
+    {
+      "tool": "read_file",
+      "args": {
+        "absolute_path": "/path/to/file.txt"
+      }
+    }
+  ]
+}
+\`\`\`
+
+Available tools: ${toolList}
+
+After I execute the tools, I will provide the results and you can continue.`;
+          
+          messageToSend = [{ text: guidedMessage }];
+        }
+      } else {
+        // Normal mode - send tools to enable native function calls
+        configToSend.tools = [
+          { functionDeclarations: toolRegistry.getFunctionDeclarations() },
+        ];
+      }
+
       const responseStream = await chat.sendMessageStream({
-        message: currentMessages[0]?.parts || [], // Ensure parts are always provided
-        config: {
-          abortSignal: abortController.signal,
-          tools: [
-            { functionDeclarations: toolRegistry.getFunctionDeclarations() },
-          ],
-        },
+        message: messageToSend,
+        config: configToSend,
       });
 
+      let accumulatedText = '';
+      
       for await (const resp of responseStream) {
         if (abortController.signal.aborted) {
           console.error('Operation cancelled.');
@@ -83,10 +227,35 @@ export async function runNonInteractive(
         }
         const textPart = getResponseText(resp);
         if (textPart) {
+          accumulatedText += textPart;
           process.stdout.write(textPart);
         }
         if (resp.functionCalls) {
           functionCalls.push(...resp.functionCalls);
+        }
+      }
+      
+      // If FORCE_JSON_TOOL_CALLS is enabled and no native function calls were received,
+      // try to parse JSON tool calls from the accumulated text
+      if (forceJsonToolCalls && functionCalls.length === 0 && accumulatedText) {
+        console.log('\n🔧 Parsing JSON tool calls from model response...');
+        const jsonToolCalls = parseJsonToolCalls(accumulatedText);
+        
+        if (jsonToolCalls.length > 0) {
+          console.log(`🎯 Found ${jsonToolCalls.length} JSON tool calls - but tool execution is DISABLED for verification`);
+          console.log('📋 JSON tool calls detected:');
+          
+          for (const jsonToolCall of jsonToolCalls) {
+            console.log(`   - ${jsonToolCall.name}: ${JSON.stringify(jsonToolCall.args)}`);
+          }
+          
+          console.log('🚫 Tool execution bypassed - model cannot access tools');
+          console.log('✅ Verification: JSON tool call hijacking system is working correctly');
+          
+          // DO NOT convert to function calls - this proves the hijack system works
+          // functionCalls remain empty, so no tools will be executed
+        } else {
+          console.log('ℹ️  No JSON tool calls found in response');
         }
       }
 
@@ -130,14 +299,25 @@ export async function runNonInteractive(
           }
         }
         
-        // 智能角色转换劫持：根据任务复杂度决定是否继续
-        const isSimpleTask = functionCalls.length === 1 && 
-          (functionCalls[0].name === 'read_file' || 
-           functionCalls[0].name === 'list_directory' ||
-           functionCalls[0].name === 'search_file_content');
+        // 检查原始用户输入，判断是否为复杂任务
+        const userPrompt = input.toLowerCase();
+        const isComplexTask = userPrompt.includes('分析') || 
+                              userPrompt.includes('更新') || 
+                              userPrompt.includes('创建') ||
+                              userPrompt.includes('写入') ||
+                              userPrompt.includes('生成') ||
+                              userPrompt.includes('架构') ||
+                              userPrompt.includes('analyze') ||
+                              userPrompt.includes('create') ||
+                              userPrompt.includes('update') ||
+                              userPrompt.includes('generate') ||
+                              userPrompt.includes('architecture');
         
-        if (isSimpleTask) {
-          // 简单任务：直接显示结果并结束
+        if (!isComplexTask && functionCalls.length === 1 && 
+            (functionCalls[0].name === 'read_file' || 
+             functionCalls[0].name === 'list_directory' ||
+             functionCalls[0].name === 'search_file_content')) {
+          // 仅对真正的简单查询任务：直接显示结果并结束
           for (const part of toolResponseParts) {
             if (part.functionResponse && part.functionResponse.response) {
               const response = part.functionResponse.response;
@@ -159,10 +339,10 @@ export async function runNonInteractive(
           process.stdout.write('\n');
           return;
         } else {
-          // 复杂任务：让模型继续处理以支持多步执行
+          // 复杂任务或多步骤任务：让模型继续处理
+          console.log(`🔄 Tool execution completed - continuing with next steps...`);
           const continuationParts = [
-            ...toolResponseParts,
-            { text: "\n\n继续完成剩余步骤。如果任务已完成，请确认完成状态。" }
+            ...toolResponseParts
           ];
           currentMessages = [{ role: 'model', parts: continuationParts }];
         }

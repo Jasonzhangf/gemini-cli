@@ -8,7 +8,9 @@ import * as path from 'node:path';
 import process from 'node:process';
 import {
   AuthType,
+  ContentGenerator,
   ContentGeneratorConfig,
+  createContentGenerator,
   createContentGeneratorConfig,
 } from '../core/contentGenerator.js';
 import { ToolRegistry } from '../tools/tool-registry.js';
@@ -136,6 +138,7 @@ export class Config {
   private toolRegistry!: ToolRegistry;
   private readonly sessionId: string;
   private contentGeneratorConfig!: ContentGeneratorConfig;
+  private contentGenerator!: ContentGenerator;
   private readonly embeddingModel: string;
   private readonly sandbox: SandboxConfig | undefined;
   private readonly targetDir: string;
@@ -229,9 +232,14 @@ export class Config {
       ClearcutLogger.getInstance(this)?.logStartSessionEvent(
         new StartSessionEvent(this),
       );
-    } else {
-      console.log('Data collection is disabled.');
     }
+
+    // Initialize contentGeneratorConfig with default authType
+    this.contentGeneratorConfig = {
+      model: this.model,
+      actualModel: this.actualModel,
+      authType: AuthType.USE_GEMINI, // Default to Gemini API
+    };
   }
 
   async refreshAuth(authMethod: AuthType) {
@@ -413,11 +421,29 @@ export class Config {
   }
 
   getGeminiClient(): GeminiClient {
+    if (!this.geminiClient) {
+      this.geminiClient = new GeminiClient(this);
+    }
+    return this.geminiClient;
+  }
+
+  async getInitializedGeminiClient(): Promise<GeminiClient> {
+    if (!this.geminiClient) {
+      this.geminiClient = new GeminiClient(this);
+      // Ensure toolRegistry is created before initialization
+      if (!this.toolRegistry) {
+        this.toolRegistry = await createToolRegistry(this);
+      }
+      // Initialize with current configuration (including hijack settings)
+      if (this.contentGeneratorConfig) {
+        await this.geminiClient.initialize(this.contentGeneratorConfig);
+      }
+    }
     return this.geminiClient;
   }
 
   getGeminiDir(): string {
-    return path.join(this.targetDir, GEMINI_DIR);
+    return GEMINI_DIR;
   }
 
   getProjectTempDir(): string {
@@ -469,6 +495,15 @@ export class Config {
       await this.gitService.initialize();
     }
     return this.gitService;
+  }
+
+  async getGenerator(): Promise<ContentGenerator> {
+    if (this.contentGenerator) {
+      return this.contentGenerator;
+    }
+    const config = this.getContentGeneratorConfig();
+    this.contentGenerator = await createContentGenerator(config, this);
+    return this.contentGenerator;
   }
 }
 

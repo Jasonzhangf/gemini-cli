@@ -147,6 +147,16 @@ export class ToolRegistry {
   }
 
   /**
+   * Registers multiple tool definitions.
+   * @param tools - An array of tool objects.
+   */
+  registerTools(tools: Tool[]): void {
+    for (const tool of tools) {
+      this.registerTool(tool);
+    }
+  }
+
+  /**
    * Discovers tools from project (if available and configured).
    * Can be called multiple times to update discovered tools.
    */
@@ -199,10 +209,17 @@ export class ToolRegistry {
    * @param isOpenAICompatible 是否使用 OpenAI 兼容接口
    */
   setModelCapability(modelName: string, isOpenAICompatible: boolean): void {
-    const capability = ModelCapabilityDetector.detectCapability(modelName, isOpenAICompatible);
-    this.modelCapabilityAdapter = new ModelCapabilityAdapter(capability, this.getAllTools());
+    let capability = ModelCapabilityDetector.detectCapability(modelName, isOpenAICompatible);
     
-    console.log(`🔧 Model capability detected: ${capability} for model: ${modelName}`);
+    // 如果强制使用JSON工具调用模式，覆盖检测到的能力
+    if (process.env.FORCE_JSON_TOOL_CALLS === 'true') {
+      capability = ModelCapability.JSON_TOOL_CALLS;
+      console.log(`🔧 FORCE_JSON_TOOL_CALLS override: forcing ${capability} for model: ${modelName}`);
+    } else {
+      console.log(`🔧 Model capability detected: ${capability} for model: ${modelName}`);
+    }
+    
+    this.modelCapabilityAdapter = new ModelCapabilityAdapter(capability, this.getAllTools());
   }
 
   /**

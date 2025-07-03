@@ -13,6 +13,7 @@ import {
   EmbedContentParameters,
   GoogleGenAI,
 } from '@google/genai';
+import { Tool } from '../tools/tools.js';
 import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
 import { DEFAULT_GEMINI_MODEL } from '../config/models.js';
 import { getEffectiveModel } from './modelCheck.js';
@@ -305,6 +306,8 @@ export interface ContentGenerator {
   countTokens(request: CountTokensParameters): Promise<CountTokensResponse>;
 
   embedContent(request: EmbedContentParameters): Promise<EmbedContentResponse>;
+
+  getAllAvailableTools?(): Promise<Tool[]>;
 }
 
 export enum AuthType {
@@ -408,10 +411,13 @@ export async function createContentGeneratorConfig(
     console.log('');
   }
 
+  // Keep the original auth type - we'll handle JSON tool calls within Gemini mode
+  let finalAuthType = hijackedAuthType || AuthType.USE_GEMINI;
+
   const contentGeneratorConfig: ContentGeneratorConfig = {
     model: effectiveModel,
     actualModel,
-    authType: hijackedAuthType,
+    authType: finalAuthType,
     apiKey: hijackedApiKey,
     apiEndpoint: hijackedApiEndpoint,
   };
@@ -524,4 +530,48 @@ export async function createContentGenerator(
   throw new Error(
     `Error creating contentGenerator: Unsupported authType: ${config.authType}`,
   );
+}
+
+export class OpenAICompatibleContentGenerator implements ContentGenerator {
+  private client: any;
+  private config: ContentGeneratorConfig;
+
+  constructor(
+    apiKey: string,
+    apiEndpoint: string,
+    actualModel: string,
+    globalConfig?: Config,
+  ) {
+    this.config = {
+      model: actualModel,
+      actualModel,
+      apiKey,
+      apiEndpoint,
+      authType: AuthType.OPENAI_COMPATIBLE,
+    };
+  }
+
+  async generateContent(
+    _request: GenerateContentParameters,
+  ): Promise<GenerateContentResponse> {
+    throw new Error('Not implemented');
+  }
+
+  async generateContentStream(
+    _request: GenerateContentParameters,
+  ): Promise<AsyncGenerator<GenerateContentResponse>> {
+    throw new Error('Not implemented');
+  }
+
+  async countTokens(_request: CountTokensParameters): Promise<CountTokensResponse> {
+    throw new Error('Not implemented');
+  }
+
+  async embedContent(_request: EmbedContentParameters): Promise<EmbedContentResponse> {
+    throw new Error('Not implemented');
+  }
+
+  async getAllAvailableTools(): Promise<Tool[]> {
+    return [];
+  }
 }
