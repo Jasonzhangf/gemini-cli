@@ -351,65 +351,106 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   private extractJsonBlocks(content: string): string[] {
     const jsonBlocks: string[] = [];
     
+    console.log(`🔍 [DEBUG] Extracting JSON blocks from content (${content.length} chars)`);
+    console.log(`🔍 [DEBUG] Content preview: ${content.slice(0, 200)}...`);
+    
     // Pattern 1: JSON code blocks
     const codeBlockPattern = /```(?:json)?\s*({[\s\S]*?})\s*```/gi;
     let match;
     while ((match = codeBlockPattern.exec(content)) !== null) {
       jsonBlocks.push(match[1]);
+      console.log(`🔧 [DEBUG] Found JSON in code block: ${match[1].slice(0, 100)}...`);
     }
     
     // If we found something in a code block, assume that's the definitive source.
     if (jsonBlocks.length > 0) {
+        console.log(`🔧 [DEBUG] Using ${jsonBlocks.length} JSON blocks from code blocks`);
         return jsonBlocks;
     }
     
-    // Pattern 2: Standalone JSON objects (improved to handle braces balance)
-    const jsonPattern = /{\s*["'](?:tool_calls?|tool|analysis)["'][\s\S]*?}/gi;
-    const resetContent = content; // Reset regex state
-    const lines = resetContent.split('\n');
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line.startsWith('{') && (line.includes('tool_calls') || line.includes('analysis') || line.includes('tool'))) {
-        // Try to find the complete JSON object
-        let jsonStr = '';
-        let braceCount = 0;
-        let startFound = false;
-        
-        for (let j = i; j < lines.length; j++) {
-          const currentLine = lines[j];
-          jsonStr += currentLine + '\n';
-          
-          for (const char of currentLine) {
-            if (char === '{') {
-              braceCount++;
-              startFound = true;
-            } else if (char === '}') {
-              braceCount--;
-            }
-          }
-          
-          if (startFound && braceCount === 0) {
-            const cleanJson = jsonStr.trim();
-            if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
-              jsonBlocks.push(cleanJson);
-              console.log(`🔧 Found complete JSON object: ${cleanJson.slice(0, 100)}...`);
-            }
-            break;
-          }
+    // Pattern 2: Single-line JSON objects (improved for large content)
+    // Look for JSON that might be on a single very long line
+    const singleLinePattern = /{[\s\S]*?"tool_calls?"[\s\S]*?}/gi;
+    while ((match = singleLinePattern.exec(content)) !== null) {
+      const jsonCandidate = match[0];
+      // Validate this looks like proper JSON
+      try {
+        const parsed = JSON.parse(jsonCandidate);
+        if (parsed.tool_calls || parsed.tool) {
+          jsonBlocks.push(jsonCandidate);
+          console.log(`🔧 [DEBUG] Found single-line JSON: ${jsonCandidate.slice(0, 100)}...`);
         }
-        break; // Only process the first JSON object found
+      } catch (e) {
+        console.log(`🔧 [DEBUG] Invalid JSON candidate: ${jsonCandidate.slice(0, 50)}...`);
       }
     }
     
-    // Pattern 3: Fallback regex pattern
+    // Pattern 3: Multi-line JSON objects using brace counting
     if (jsonBlocks.length === 0) {
-      while ((match = jsonPattern.exec(content)) !== null) {
-        jsonBlocks.push(match[0]);
+      const lines = content.split('\n');
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.startsWith('{') && (line.includes('tool_calls') || line.includes('analysis') || line.includes('tool'))) {
+          // Try to find the complete JSON object
+          let jsonStr = '';
+          let braceCount = 0;
+          let startFound = false;
+          
+          for (let j = i; j < lines.length; j++) {
+            const currentLine = lines[j];
+            jsonStr += currentLine + (j < lines.length - 1 ? '\n' : '');
+            
+            for (const char of currentLine) {
+              if (char === '{') {
+                braceCount++;
+                startFound = true;
+              } else if (char === '}') {
+                braceCount--;
+              }
+            }
+            
+            if (startFound && braceCount === 0) {
+              const cleanJson = jsonStr.trim();
+              if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
+                jsonBlocks.push(cleanJson);
+                console.log(`🔧 [DEBUG] Found multi-line JSON object: ${cleanJson.slice(0, 100)}...`);
+              }
+              break;
+            }
+          }
+          break; // Only process the first JSON object found
+        }
+      }
+    }
+    
+    // Pattern 4: Desperate fallback - look for any JSON-like structure with tool_calls
+    if (jsonBlocks.length === 0) {
+      console.log(`🔧 [DEBUG] No JSON found with standard patterns, trying fallback...`);
+      
+      // Try to find JSON that starts with tool_calls
+      const fallbackPattern = /{.*?["']tool_calls?["'].*?}/gs;
+      while ((match = fallbackPattern.exec(content)) !== null) {
+        try {
+          // Attempt to balance braces manually
+          const candidate = match[0];
+          const parsed = JSON.parse(candidate);
+          if (parsed.tool_calls || parsed.tool) {
+            jsonBlocks.push(candidate);
+            console.log(`🔧 [DEBUG] Found fallback JSON: ${candidate.slice(0, 100)}...`);
+          }
+        } catch (e) {
+          // Try to extract partial JSON
+          console.log(`🔧 [DEBUG] Fallback pattern failed to parse: ${match[0].slice(0, 50)}...`);
+        }
       }
     }
     
     console.log(`🔍 Found ${jsonBlocks.length} JSON blocks in response`);
+    if (jsonBlocks.length === 0) {
+      console.log(`❌ [DEBUG] No JSON blocks found. Content does not contain recognizable tool calls.`);
+    }
+    
     return jsonBlocks;
   }
 
