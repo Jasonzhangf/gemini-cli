@@ -1,3 +1,28 @@
+## ⚠️ 关键架构原则：劫持系统测试和开发规范
+
+**这些原则必须严格遵守，避免架构错误和调试困难：**
+
+### 1. 测试环境配置原则
+- **测试阶段不使用第三方模型API**，必须使用标准Gemini API作为后端
+- **劫持架构测试**：配置劫持系统将请求发送给真实的Gemini API，而不是第三方服务
+- **一致的模型供应方式**：确保测试环境与生产环境的模型行为一致，避免第三方模型训练偏差影响架构验证
+- 配置示例：`HIJACK_API_ENDPOINT=https://generativelanguage.googleapis.com/v1beta`
+
+### 2. 工具调用验证原则  
+- **期望行为**：模型应该返回JSON格式的工具调用请求，而不是直接执行工具
+- **错误信号**：如果模型返回工具调用结果而不是工具调用请求，说明我们的引导逻辑有问题
+- **验证方式**：在劫持环境下，Gemini应该返回`{"tool_calls": [...]}`格式，然后我们的系统转换为function calls执行
+
+### 3. 内部实现原则
+- **禁止词语解析**：原则上内部不做文本内容的工具关键词检测和解析
+- **最小化补丁**：避免复杂的文本模式匹配、正则表达式解析等补丁式解决方案  
+- **专注核心**：只专注于JSON工具调用解析和角色转换劫持
+- **架构纯净**：让模型负责工具需求识别，系统负责工具执行转换
+
+这些原则确保劫持架构的正确性和可维护性。
+
+---
+
 ## Building and running
 
 Before submitting any changes, it is crucial to validate them by running the full preflight check. This command will build the repository, run all tests, check for type errors, and lint the code.
