@@ -110,8 +110,19 @@ export class ParameterMappingManager {
     // Apply parameter mappings
     for (const [originalParam, standardParam] of Object.entries(toolMapping)) {
       if (originalParam in args) {
+        let mappedValue = args[originalParam];
+        
+        // Special handling for path parameters - convert relative to absolute
+        if ((standardParam === 'path' || standardParam === 'absolute_path' || standardParam === 'file_path') && 
+            typeof mappedValue === 'string' && 
+            !path.isAbsolute(mappedValue)) {
+          const absolutePath = path.resolve(process.cwd(), mappedValue);
+          mappedValue = absolutePath;
+          console.log(`🔄 Converted relative path to absolute: "${args[originalParam]}" → "${absolutePath}"`);
+        }
+        
         // Move the value from original parameter name to standard parameter name
-        result.mappedArgs[standardParam] = args[originalParam];
+        result.mappedArgs[standardParam] = mappedValue;
         
         // Only delete the original parameter if it's different from the mapped parameter
         if (originalParam !== standardParam) {
