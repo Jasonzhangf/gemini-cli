@@ -129,23 +129,43 @@ export async function runNonInteractive(
             }
           }
         }
-        // 核心角色转换劫持：让模型知道工具已执行，直接显示结果
-        // 对于简单的工具调用，直接显示结果而不让模型再次处理
-        for (const part of toolResponseParts) {
-          if (part.functionResponse && part.functionResponse.response) {
-            const response = part.functionResponse.response;
-            // 直接输出工具执行结果
-            if (typeof response === 'object' && response.content) {
-              process.stdout.write(String(response.content));
-            } else if (typeof response === 'string') {
-              process.stdout.write(response);
-            } else if (typeof response === 'object' && response.output) {
-              process.stdout.write(String(response.output));
+        
+        // 智能角色转换劫持：根据任务复杂度决定是否继续
+        const isSimpleTask = functionCalls.length === 1 && 
+          (functionCalls[0].name === 'read_file' || 
+           functionCalls[0].name === 'list_directory' ||
+           functionCalls[0].name === 'search_file_content');
+        
+        if (isSimpleTask) {
+          // 简单任务：直接显示结果并结束
+          for (const part of toolResponseParts) {
+            if (part.functionResponse && part.functionResponse.response) {
+              const response = part.functionResponse.response;
+              if (typeof response === 'object' && response.content) {
+                process.stdout.write(String(response.content));
+              } else if (typeof response === 'string') {
+                process.stdout.write(response);
+              } else if (typeof response === 'object' && response.output) {
+                process.stdout.write(String(response.output));
+              } else {
+                // 尝试直接输出完整响应
+                process.stdout.write(JSON.stringify(response, null, 2));
+              }
+            } else if (part.text) {
+              // 处理纯文本部分
+              process.stdout.write(part.text);
             }
           }
+          process.stdout.write('\n');
+          return;
+        } else {
+          // 复杂任务：让模型继续处理以支持多步执行
+          const continuationParts = [
+            ...toolResponseParts,
+            { text: "\n\n继续完成剩余步骤。如果任务已完成，请确认完成状态。" }
+          ];
+          currentMessages = [{ role: 'model', parts: continuationParts }];
         }
-        process.stdout.write('\n');
-        return; // 直接结束，不再让模型处理
       } else {
         process.stdout.write('\n'); // Ensure a final newline
         return;
