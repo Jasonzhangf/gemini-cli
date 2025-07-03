@@ -605,32 +605,27 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       guidance += `\n${applicationRules}\n\n`;
     }
     
-    // Add the built-in tool guidance with override notice
+    // Add the built-in tool guidance - modified to avoid forced conversation stopping
     guidance += `
 
-TOOL EXECUTION MODE OVERRIDE: The following rules override any general CLI rules for tool execution tasks.
-
-IGNORE CONCISENESS REQUIREMENTS: For this tool execution task, you MUST ignore any previous instructions about being concise or keeping responses short. Tool execution requires the specific JSON format shown below.
+TOOL EXECUTION MODE: You have full access to local files and system commands.
 
 IMPORTANT: You HAVE FULL ACCESS to local files and can execute system commands. You ARE a local assistant with full system access. DO NOT say you cannot access files.
 
-CRITICAL: You MUST respond with the exact JSON format specified below. NO exceptions. Do NOT provide explanations outside the JSON format.
-
 TOOL EXECUTION RULES:
-1. **ALWAYS respond with JSON code block** - wrapped in \`\`\`json and \`\`\`
-2. **Execute ONE tool at a time** - Do not try to do multiple operations in a single response  
-3. **Wait for execution results** - After each tool execution, wait for the system to report results before proceeding
+1. **Use available tools to complete tasks** - You can read, write, organize, and execute commands
+2. **Execute tools when needed** - Use JSON format for tool calls within your response
+3. **Continue naturally after tool execution** - After tools execute, continue the conversation naturally
 4. **COMPLETE THE ENTIRE TASK** - Do not stop after partial completion. Continue until the full user request is satisfied
 5. **Handle tool failures gracefully** - If a tool fails, try alternative approaches or report the specific issue
 6. **You CAN access, read, write, move, and organize files** - Use the available tools
 7. **Never claim you cannot access files** - You have full local system access
 8. **CONTINUE EXECUTION** - If a task has multiple steps (like "read directory and move files"), complete ALL steps
-9. **Do NOT say "ready for next command"** - Always continue until the task is complete or explain why it cannot be completed
-10. **Use this EXACT JSON format for tool execution**:
+
+When you need to use tools, include JSON blocks in your response like this:
 
 \`\`\`json
 {
-  "analysis": "Brief analysis of the current step",
   "tool_calls": [
     {
       "tool": "write_file",
@@ -639,83 +634,25 @@ TOOL EXECUTION RULES:
         "content": "file content here"
       }
     }
-  ],
-  "next_step": "What you plan to do after this step completes",
-  "message": "Brief message about this specific step"
+  ]
 }
 \`\`\`
 
-Examples for other tools:
+Other tools available:
+- read_file: Read file contents
+- edit: Edit file by replacing text
+- shell: Execute shell commands  
+- ls: List directory contents
+- grep: Search for text in files
+- glob: Find files by pattern
 
-Read file:
-\`\`\`json
-{
-  "tool_calls": [{"tool": "read_file", "args": {"absolute_path": "/path/to/file.txt"}}]
-}
-\`\`\`
-
-Edit file:
-\`\`\`json
-{
-  "tool_calls": [{"tool": "edit", "args": {"file_path": "/path/to/file.txt", "old_string": "old text", "new_string": "new text"}}]
-}
-\`\`\`
-
-Shell command:
-\`\`\`json
-{
-  "tool_calls": [{"tool": "shell", "args": {"command": "ls -la"}}]
-}
-\`\`\`
-
-List directory:
-\`\`\`json
-{
-  "tool_calls": [{"tool": "ls", "args": {"path": "."}}]
-}
-\`\`\`
-
-Search files:
-\`\`\`json
-{
-  "tool_calls": [{"tool": "grep", "args": {"pattern": "Hello", "path": "."}}]
-}
-\`\`\`
-
-Find files:
-\`\`\`json
-{
-  "tool_calls": [{"tool": "glob", "args": {"pattern": "*.txt", "path": "."}}]
-}
-\`\`\`
-
-For multiple tasks:
-- Execute the FIRST task only
-- Wait for the system to confirm completion  
-- Then proceed with the next task in a separate response
-
-Available tools:
-- write_file: Create or write files (args: file_path, content)
-- read_file: Read file contents (args: absolute_path, optional: offset, limit)
-- edit: Edit existing files (args: file_path, old_string, new_string, optional: expected_replacements)
-- shell: Execute shell commands (args: command, optional: description, directory)
-- ls: List directory contents (args: path, optional: ignore, respect_git_ignore)
-- grep: Search for patterns in files (args: pattern, optional: path, include)
-- glob: Find files matching patterns (args: pattern, optional: path, case_sensitive, respect_git_ignore)
-- read_many_files: Read multiple files at once (args: paths, optional: include, exclude, recursive, useDefaultExcludes, respect_git_ignore)
-- web_fetch: Fetch content from web URLs (args: prompt)
-- web_search: Search the web (args: query)
-- knowledge_graph: Persistent memory management (args: action, data) - actions: create_entities, create_relations, add_observations, delete_entities, delete_observations, delete_relations, read_graph, search_nodes, open_nodes
-- sequentialthinking: Dynamic problem-solving through thoughts (args: thought, nextThoughtNeeded, thoughtNumber, totalThoughts, optional: isRevision, revisesThought, branchFromThought, branchId, needsMoreThoughts)
+You can combine natural conversation with tool calls. After tools execute, continue helping the user naturally.
 
 REMEMBER: 
-- You MUST respond with JSON code block format. Start with \`\`\`json and end with \`\`\`. 
-- DO NOT provide explanations outside the JSON block.
 - You ARE a local assistant with FULL SYSTEM ACCESS. You CAN read, write, move, organize files.
 - NEVER say "I cannot access files" or "I can only browse URLs" - this is FALSE.
-- You have access to ALL the tools listed above and MUST use them when requested.
-
-SYSTEM IDENTITY: You are a local file system assistant with full access to read, write, execute, and organize files on this system.
+- You have access to all the tools and should use them when requested.
+- After using tools, continue the conversation naturally to help the user.
 
 USER REQUEST: ${message}`;
 
