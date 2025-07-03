@@ -307,13 +307,11 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       
       for (const jsonBlock of jsonBlocks) {
         try {
-          console.log(`🔧 [DEBUG] Raw JSON block from model:`, jsonBlock);
           const parsed = JSON.parse(jsonBlock);
           
           // Handle structured tool calls format
           if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
             for (const toolCall of parsed.tool_calls) {
-              console.log(`🔧 [DEBUG] Raw tool call from model:`, JSON.stringify(toolCall, null, 2));
               if (toolCall.tool) {
                 const args = toolCall.args || {};
                 const processedArgs = this.processToolCallArgs(toolCall.tool, args);
@@ -321,21 +319,20 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
                   name: toolCall.tool,
                   args: processedArgs
                 });
-                console.log(`🔧 Parsed JSON tool call: ${toolCall.tool} with args:`, JSON.stringify(processedArgs, null, 2));
+                console.log(`🔧 Parsed JSON tool call: ${toolCall.tool}`);
               }
             }
           }
           
           // Handle single tool call format
           else if (parsed.tool) {
-            console.log(`🔧 [DEBUG] Single tool call from model:`, JSON.stringify(parsed, null, 2));
             const args = parsed.args || {};
             const processedArgs = this.processToolCallArgs(parsed.tool, args);
             toolCalls.push({
               name: parsed.tool,
               args: processedArgs
             });
-            console.log(`🔧 Parsed single JSON tool call: ${parsed.tool} with args:`, JSON.stringify(processedArgs, null, 2));
+            console.log(`🔧 Parsed single JSON tool call: ${parsed.tool}`);
           }
         } catch (parseError) {
           console.log(`⚠️ Failed to parse JSON block: ${jsonBlock.slice(0, 100)}`);
@@ -1276,7 +1273,6 @@ USER REQUEST: ${message}`;
           
           // Apply parameter mappings for third-party models
           let mappedArgs = jsonToolCall.args;
-          console.log(`🔧 [DEBUG] Original args before mapping:`, JSON.stringify(mappedArgs, null, 2));
           const paramMapping = parameterMappingManager.findMapping(this.model, this.apiEndpoint);
           if (paramMapping) {
             const mappingResult = parameterMappingManager.applyMapping(
@@ -1284,13 +1280,11 @@ USER REQUEST: ${message}`;
               jsonToolCall.args, 
               paramMapping
             );
-            console.log(`🔧 [DEBUG] Mapping result for ${actualToolName}:`, JSON.stringify(mappingResult, null, 2));
             if (mappingResult.mapped) {
               mappedArgs = mappingResult.mappedArgs;
               console.log(`🔧 Applied ${mappingResult.appliedMappings.length} parameter mappings for ${actualToolName}`);
             }
           }
-          console.log(`🔧 [DEBUG] Final mapped args:`, JSON.stringify(mappedArgs, null, 2));
           
           // Add to OpenAI format for conversion
           if (!firstMessage.tool_calls) {

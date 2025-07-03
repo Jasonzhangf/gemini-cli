@@ -83,6 +83,104 @@ This project uses **Vitest** as its primary testing framework. When writing test
 
 The main branch for this project is called "main"
 
+# 新功能更新 (2025-07-03)
+
+## 参数映射系统 (Parameter Mapping System)
+
+### 核心功能
+为第三方模型提供参数名称标准化，确保所有工具都能正确工作，无论底层模型如何命名参数。
+
+### 工作原理
+```typescript
+// 第三方模型返回: {"absolute_path": "/path/to/file", "content": "text"}
+// 映射转换为: {"file_path": "/path/to/file", "content": "text"}
+// 工具成功执行: write_file工具接收到正确的参数名
+```
+
+### 配置位置
+- **AIStudio代理**: `packages/core/src/config/parameter-mappings/aistudio-proxy.json`
+- **LM Studio**: `packages/core/src/config/parameter-mappings/lm-studio-qwen.json`
+
+### 支持的工具映射
+所有13个内置工具均已配置完整的参数映射，包括：
+- `write_file`, `list_directory`, `search_file_content`, `glob`, `replace`
+- `run_shell_command`, `knowledge_graph`, `sequentialthinking`, `save_memory`
+
+### 关键修复
+- **同名参数bug**: 修复了`"action": "action"`等同名映射导致参数被意外删除的关键bug
+- **复杂嵌套结构**: 支持`knowledge_graph`等工具的复杂嵌套数据结构正确映射
+
+## # 前缀知识图谱激活系统
+
+### 功能说明
+使用`#`前缀可以自动激活knowledge_graph工具进行各种知识图谱操作。
+
+### 使用方法
+```bash
+# 保存信息
+gemini -p "# 今天完成了参数映射功能开发"
+
+# 读取信息  
+gemini -p "# 显示所有保存的项目信息"
+
+# 搜索信息
+gemini -p "# 搜索关于参数映射的信息"
+```
+
+### 支持的操作类型
+- **create_entities**: 创建实体和保存信息
+- **read_graph**: 读取整个知识图谱  
+- **search_nodes**: 搜索特定内容
+- **open_nodes**: 打开特定节点
+- **create_relations**: 创建关系
+- **add_observations**: 添加观察信息
+
+### 智能操作选择
+模型会根据用户意图自动选择合适的knowledge_graph操作类型，无需手动指定action参数。
+
+## 内存系统对比说明
+
+### save_memory vs knowledge_graph
+
+| 特性 | save_memory | knowledge_graph |
+|------|-------------|-----------------|
+| **激发方式** | 用户明确要求记住某事 | # 前缀自动激活 |
+| **存储位置** | `~/.gemini/GEMINI.md` | `当前项目/memory.json` |
+| **作用域** | 全局个人偏好和事实 | 项目相关信息 |
+| **数据结构** | 简单列表项 | 复杂图谱结构 |
+| **自动激发** | ❌ 仅手动触发 | ✅ # 前缀触发 |
+
+### save_memory激发条件
+**手动激发方式**：
+1. **用户命令**: `/memory add <text>`
+2. **明确请求**: "请记住我喜欢咖啡"
+3. **模型判断**: 根据系统提示识别重要个人事实
+
+**不会自动激发**：
+- 系统没有自动上下文分析来决定何时保存记忆
+- 不会主动分析对话内容并自动保存
+- 完全依赖用户明确请求或模型基于提示的判断
+
+### knowledge_graph激发条件
+**自动激发方式**：
+1. **# 前缀**: 任何以`#`开头的消息
+2. **智能识别**: 自动分析用户意图选择合适操作
+3. **项目范围**: 专注于当前项目相关的信息管理
+
+## 测试验证结果
+
+### 工具兼容性测试
+- **✅ 13/13 工具** 通过参数映射测试  
+- **✅ 100% 成功率** 在第三方模型环境下
+- **✅ 复杂参数结构** 正确处理嵌套对象和数组
+
+### # 前缀功能测试
+- **✅ 自动工具激活** 正确识别并调用knowledge_graph
+- **✅ 多操作支持** create_entities, read_graph, search_nodes等
+- **✅ 参数映射集成** 所有参数正确传递到工具执行
+
+---
+
 ## Architecture
 
 For a detailed explanation of the system architecture, please see the [architecture overview](./docs/architecture.md).
