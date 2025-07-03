@@ -129,7 +129,9 @@ export async function runNonInteractive(
             }
           }
         }
-        currentMessages = [{ role: 'user', parts: toolResponseParts }];
+        // Tool responses should not be marked as 'user' role - this confuses the model
+        // The toolResponseParts already contain functionResponse objects with the correct format
+        currentMessages = [{ role: 'model', parts: toolResponseParts }];
       } else {
         process.stdout.write('\n'); // Ensure a final newline
         return;
