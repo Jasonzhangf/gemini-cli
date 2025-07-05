@@ -18,7 +18,7 @@
 // limitations under the License.
 
 import { execSync } from 'child_process';
-import { writeFileSync } from 'fs';
+import { writeFileSync, chmodSync, existsSync } from 'fs';
 import { join } from 'path';
 
 if (!process.cwd().includes('packages')) {
@@ -31,6 +31,16 @@ execSync('tsc --build', { stdio: 'inherit' });
 
 // copy .{md,json} files
 execSync('node ../../scripts/copy_files.js', { stdio: 'inherit' });
+
+// Set executable permission for CLI entry point if this is the CLI package
+const packageName = process.cwd().split('/').pop();
+if (packageName === 'cli') {
+  const indexPath = join(process.cwd(), 'dist', 'index.js');
+  if (existsSync(indexPath)) {
+    chmodSync(indexPath, 0o755); // rwxr-xr-x
+    console.log('✅ Set executable permission for CLI index.js');
+  }
+}
 
 // touch dist/.last_build
 writeFileSync(join(process.cwd(), 'dist', '.last_build'), '');

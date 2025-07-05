@@ -1,0 +1,58 @@
+{
+  "name": "LM Studio Qwen Mapping",
+  "models": ["qwen", "unsloth"],
+  "endpoints": ["http://192.168.123.149:1234/v1"],
+  "mappings": {
+    "write_file": {
+      "absolute_path": "file_path"
+    },
+    "list_directory": {
+      "absolute_path": "path",
+      "directory_path": "path"
+    },
+    "read_file": {
+      "path": "absolute_path",
+      "file_path": "absolute_path"
+    },
+    "search_file_content": {
+      "file_path": "file_path",
+      "search_pattern": "pattern",
+      "query": "pattern"
+    },
+    "glob": {
+      "glob_pattern": "pattern"
+    },
+    "replace": {
+      "absolute_path": "file_path",
+      "old_content": "old_string",
+      "new_content": "new_string"
+    },
+    "run_shell_command": {
+      "shell_command": "command"
+    },
+    "knowledge_graph": {
+      "action": "action",
+      "data": "data",
+      "operation": "action",
+      "params": "data",
+      "entities": "data",
+      "entity_data": "data"
+    },
+    "sequentialthinking": {
+      "thought": "thought",
+      "nextThoughtNeeded": "nextThoughtNeeded",
+      "thoughtNumber": "thoughtNumber",
+      "totalThoughts": "totalThoughts",
+      "content": "thought",
+      "step": "thoughtNumber",
+      "total": "totalThoughts",
+      "continue": "nextThoughtNeeded"
+    },
+    "save_memory": {
+      "fact": "fact",
+      "memory": "fact",
+      "content": "fact",
+      "information": "fact"
+    }
+  }
+}

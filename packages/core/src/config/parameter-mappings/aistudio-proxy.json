@@ -1,0 +1,65 @@
+{
+  "name": "AI Studio Proxy Mapping",
+  "models": ["gemini"],
+  "endpoints": ["https://generativelanguage.googleapis.com", "http://127.0.0.1:2048/v1", "http://100.67.129.64:2048/v1"],
+  "mappings": {
+    "write_file": {
+      "absolute_path": "file_path",
+      "file_content": "content",
+      "content": "content",
+      "path": "file_path"
+    },
+    "read_file": {
+      "path": "absolute_path",
+      "file_path": "absolute_path"
+    },
+    "list_directory": {
+      "absolute_path": "path",
+      "directory_path": "path"
+    },
+    "search_file_content": {
+      "file_path": "file_path",
+      "search_pattern": "pattern",
+      "query": "pattern",
+      "pattern": "pattern"
+    },
+    "glob": {
+      "glob_pattern": "pattern",
+      "pattern": "pattern"
+    },
+    "replace": {
+      "absolute_path": "file_path",
+      "old_content": "old_string",
+      "new_content": "new_string",
+      "path": "file_path",
+      "file_path": "file_path"
+    },
+    "run_shell_command": {
+      "shell_command": "command"
+    },
+    "knowledge_graph": {
+      "action": "action",
+      "data": "data",
+      "operation": "action",
+      "params": "data",
+      "entities": "data",
+      "entity_data": "data"
+    },
+    "sequentialthinking": {
+      "thought": "thought",
+      "nextThoughtNeeded": "nextThoughtNeeded",
+      "thoughtNumber": "thoughtNumber",
+      "totalThoughts": "totalThoughts",
+      "content": "thought",
+      "step": "thoughtNumber",
+      "total": "totalThoughts",
+      "continue": "nextThoughtNeeded"
+    },
+    "save_memory": {
+      "fact": "fact",
+      "memory": "fact",
+      "content": "fact",
+      "information": "fact"
+    }
+  }
+}

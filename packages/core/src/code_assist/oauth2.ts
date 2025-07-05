@@ -53,7 +53,7 @@ export interface OauthWebLogin {
   loginCompletePromise: Promise<void>;
 }
 
-export async function getOauthClient(): Promise<OAuth2Client> {
+export async function getOauthClient(forceAccountSelection: boolean = false): Promise<OAuth2Client> {
   const client = new OAuth2Client({
     clientId: OAUTH_CLIENT_ID,
     clientSecret: OAUTH_CLIENT_SECRET,
@@ -62,7 +62,8 @@ export async function getOauthClient(): Promise<OAuth2Client> {
     await cacheCredentials(tokens);
   });
 
-  if (await loadCachedCredentials(client)) {
+  // Skip cached credentials if we're forcing account selection
+  if (!forceAccountSelection && await loadCachedCredentials(client)) {
     // Found valid cached credentials.
     // Check if we need to retrieve Google Account ID
     if (!getCachedGoogleAccountId()) {
@@ -82,7 +83,7 @@ export async function getOauthClient(): Promise<OAuth2Client> {
     return client;
   }
 
-  const webLogin = await authWithWeb(client);
+  const webLogin = await authWithWeb(client, forceAccountSelection);
 
   console.log(
     `\n\nCode Assist login required.\n` +
@@ -97,16 +98,25 @@ export async function getOauthClient(): Promise<OAuth2Client> {
   return client;
 }
 
-async function authWithWeb(client: OAuth2Client): Promise<OauthWebLogin> {
+async function authWithWeb(client: OAuth2Client, forceAccountSelection: boolean = false): Promise<OauthWebLogin> {
   const port = await getAvailablePort();
   const redirectUri = `http://localhost:${port}/oauth2callback`;
   const state = crypto.randomBytes(32).toString('hex');
-  const authUrl: string = client.generateAuthUrl({
+  
+  const authUrlParams: any = {
     redirect_uri: redirectUri,
     access_type: 'offline',
     scope: OAUTH_SCOPE,
     state,
-  });
+  };
+  
+  // Force account selection when newid mode is enabled
+  if (forceAccountSelection) {
+    authUrlParams.prompt = 'select_account';
+    console.log('🔄 Forcing Google account selection...');
+  }
+  
+  const authUrl: string = client.generateAuthUrl(authUrlParams);
 
   const loginCompletePromise = new Promise<void>((resolve, reject) => {
     const server = http.createServer(async (req, res) => {
