@@ -9,6 +9,50 @@ import {
   DEFAULT_GEMINI_FLASH_MODEL,
 } from '../config/models.js';
 
+// List of known available models (as of January 2025)
+export const AVAILABLE_GEMINI_MODELS = [
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+  'gemini-1.5-pro',
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
+] as const;
+
+// List of deprecated or experimental models
+export const DEPRECATED_MODELS = [
+  'gemini-2.0-flash-exp',
+  'gemini-2.0-flash-thinking-exp',
+  'gemini-exp-1114',
+  'gemini-exp-1121',
+] as const;
+
+/**
+ * Validates if a model is available and suggests alternatives if deprecated
+ */
+export function validateModel(modelName: string): { 
+  isValid: boolean; 
+  suggestion?: string; 
+  reason?: string; 
+} {
+  if (AVAILABLE_GEMINI_MODELS.includes(modelName as any)) {
+    return { isValid: true };
+  }
+  
+  if (DEPRECATED_MODELS.includes(modelName as any)) {
+    return {
+      isValid: false,
+      reason: 'Model is deprecated or experimental and may no longer be available',
+      suggestion: DEFAULT_GEMINI_FLASH_MODEL
+    };
+  }
+  
+  return {
+    isValid: false,
+    reason: 'Model name not recognized',
+    suggestion: DEFAULT_GEMINI_FLASH_MODEL
+  };
+}
+
 /**
  * Checks if the default "pro" model is rate-limited and returns a fallback "flash"
  * model if necessary. This function is designed to be silent.
@@ -21,6 +65,16 @@ export async function getEffectiveModel(
   apiKey: string,
   currentConfiguredModel: string,
 ): Promise<string> {
+  // First validate the model
+  const validation = validateModel(currentConfiguredModel);
+  if (!validation.isValid) {
+    console.warn(`⚠️  Model '${currentConfiguredModel}' ${validation.reason}`);
+    if (validation.suggestion) {
+      console.warn(`💡 Suggested alternative: ${validation.suggestion}`);
+      console.warn(`   Use: gemini -m ${validation.suggestion} [your command]`);
+    }
+  }
+  
   if (currentConfiguredModel !== DEFAULT_GEMINI_MODEL) {
     // Only check if the user is trying to use the specific pro model we want to fallback from.
     return currentConfiguredModel;

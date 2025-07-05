@@ -18,6 +18,7 @@ import {
   DEFAULT_GEMINI_EMBEDDING_MODEL,
   FileDiscoveryService,
   TelemetryTarget,
+  validateModel,
 } from '@google/gemini-cli-core';
 import { Settings } from './settings.js';
 
