@@ -1,9 +1,9 @@
 name: Gemini Scheduled Issue Triage
 
 on:
-  schedule:
-    - cron: '0 * * * *' # Runs every hour
-  workflow_dispatch: {}
+  # schedule:
+  #   - cron: '0 * * * *' # Runs every hour - DISABLED due to failures
+  workflow_dispatch: {} # Manual trigger only
 
 jobs:
   triage-issues:
