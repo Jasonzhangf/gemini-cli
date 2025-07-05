@@ -15,7 +15,8 @@
     },
     "read_file": {
       "path": "absolute_path",
-      "file_path": "absolute_path"
+      "file_path": "absolute_path",
+      "absolute_path": "absolute_path"
     },
     "list_directory": {
       "absolute_path": "path",

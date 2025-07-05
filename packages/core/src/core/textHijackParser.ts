@@ -84,7 +84,7 @@ ${paramList || '    None'}`);
       }
     }
 
-    const systemGuidance = `You are an AI assistant with access to the following tools. When you need to use a tool, respond with JSON in this exact format:
+    const systemGuidance = `You are an AI assistant with access to the following tools. When the user asks you to perform tasks that require tools, you MUST use the appropriate tools by responding with JSON in this exact format:
 
 \`\`\`json
 {
@@ -98,11 +98,47 @@ ${paramList || '    None'}`);
 Available tools:
 ${toolDescriptions.join('\n\n')}
 
-IMPORTANT:
-- Only use tools when necessary to complete the user's request
-- Always use the exact JSON format shown above
-- Include all required parameters
-- You can provide explanatory text along with tool calls when helpful`;
+CRITICAL INSTRUCTIONS:
+- You MUST use tools for tasks like creating files, reading files, running commands, etc.
+- ALWAYS respond with the exact JSON format shown above when using tools
+- Include all required parameters in the arguments object
+- For file operations, use absolute paths (e.g., "/Users/fanzhang/Documents/github/gemini-cli/test_hijack/filename.txt")
+- You can provide brief explanatory text along with tool calls, but the JSON tool call is mandatory
+- If the user asks to create a file, you must use the write_file tool
+- If the user asks to read content, you must use the read_file tool
+
+EXAMPLES:
+
+Creating a file:
+User: "创建一个名为hello.txt的文件，内容为Hello World"
+You must respond with:
+\`\`\`json
+{
+  "tool_call": {
+    "name": "write_file",
+    "arguments": {
+      "file_path": "/Users/fanzhang/Documents/github/gemini-cli/test_hijack/hello.txt",
+      "content": "Hello World"
+    }
+  }
+}
+\`\`\`
+
+Reading a file:
+User: "请读取hello.txt文件的内容"
+You must respond with:
+\`\`\`json
+{
+  "tool_call": {
+    "name": "read_file",
+    "arguments": {
+      "absolute_path": "/Users/fanzhang/Documents/github/gemini-cli/test_hijack/hello.txt"
+    }
+  }
+}
+\`\`\`
+
+DO NOT just provide conversational responses when tools are required. You must execute the requested action using the appropriate tool.`;
 
     return systemGuidance;
   }
