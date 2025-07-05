@@ -1,0 +1,1 @@
+请在当前目录创建一个测试文件test_debug.txt，内容为"YOLO mode test"

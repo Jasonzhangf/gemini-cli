@@ -1,0 +1,18 @@
+--- Problem: WriteFileTool is excluded even in YOLO mode in hijack non-interactive mode
+
+The issue is in packages/cli/src/gemini.tsx around line 244:
+The condition `if (config.getApprovalMode() !== ApprovalMode.YOLO)` should exclude tools,
+but somehow tools are still being excluded even in YOLO mode.
+
+Current symptoms:
+- Model says "I can only access browse tool"
+- Tool calls are parsed but not executed
+- No files are actually created
+
+Recommended fix:
+1. Add debug logging to confirm YOLO mode detection
+2. Ensure tool registry includes WriteFileTool in YOLO mode
+3. Verify the exclusion logic works correctly
+
+The core issue is that in hijack mode + non-interactive + YOLO, 
+WriteFileTool should be available but currently isn't.
