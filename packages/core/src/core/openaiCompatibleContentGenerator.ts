@@ -476,35 +476,48 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       const openaiRequest = this.convertGeminiToOpenAI(request);
 
       
-      // Add timeout to prevent hanging
+      // Add timeout to prevent hanging (extended for complex operations)
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
         controller.abort();
-        console.error('🚨 API call timed out after 30 seconds');
-      }, 30000);
+        console.error('🚨 API call timed out after 120 seconds');
+      }, 120000); // Increased to 2 minutes
 
-      const response = await fetch(`${this.apiEndpoint}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(openaiRequest),
-        signal: controller.signal,
-      });
+      try {
+        const response = await fetch(`${this.apiEndpoint}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(openaiRequest),
+          signal: controller.signal,
+        });
 
-      clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        throw new Error(
-          `OpenAI API error: ${response.status} ${response.statusText}`,
-        );
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => 'Unknown error');
+          throw new Error(
+            `OpenAI API error: ${response.status} ${response.statusText} - ${errorText}`,
+          );
+        }
+
+        const openaiResponse: OpenAIResponse = await response.json();
+        console.log('✅ OpenAI API call successful');
+
+        return this.convertOpenAIToGemini(openaiResponse);
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+          console.error('🚨 API request was aborted (likely due to timeout)');
+          throw new Error('API request timed out after 2 minutes');
+        }
+        
+        console.error('🚨 API call failed:', fetchError);
+        throw fetchError;
       }
-
-      const openaiResponse: OpenAIResponse = await response.json();
-      console.log('✅ OpenAI API call successful');
-
-      return this.convertOpenAIToGemini(openaiResponse);
     } catch (error) {
       console.error('❌ OpenAI API call failed:', error);
       throw error;

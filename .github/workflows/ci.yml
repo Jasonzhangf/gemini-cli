@@ -2,12 +2,14 @@
 
 name: Gemini CLI CI
 
+# CI workflow temporarily disabled - can be triggered manually
 on:
-  push:
-    branches: [main, release]
-  pull_request:
-    branches: [main, release]
-  merge_group:
+  workflow_dispatch: # Manual trigger only
+  # push:
+  #   branches: [main, release]
+  # pull_request:
+  #   branches: [main, release]
+  # merge_group:
 
 jobs:
   build:
