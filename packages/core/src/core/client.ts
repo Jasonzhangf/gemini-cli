@@ -300,7 +300,16 @@ export class GeminiClient {
         throw error;
       }
       try {
-        return JSON.parse(text);
+        // Try to extract JSON from markdown code blocks first
+        let jsonText = text;
+        
+        // Check for markdown-wrapped JSON (common in text hijack mode)
+        const jsonBlockMatch = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/i.exec(text);
+        if (jsonBlockMatch) {
+          jsonText = jsonBlockMatch[1];
+        }
+        
+        return JSON.parse(jsonText);
       } catch (parseError) {
         await reportError(
           parseError,
