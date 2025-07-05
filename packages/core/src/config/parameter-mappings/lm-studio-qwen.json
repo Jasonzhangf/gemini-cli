@@ -1,6 +1,6 @@
 {
   "name": "LM Studio Qwen Mapping",
-  "models": ["qwen", "unsloth"],
+  "models": ["qwen", "unsloth", "Qwen3-235B-A22B-GGUF", "qwq", "qwen/qwq-32b"],
   "endpoints": ["http://192.168.123.149:1234/v1"],
   "mappings": {
     "write_file": {

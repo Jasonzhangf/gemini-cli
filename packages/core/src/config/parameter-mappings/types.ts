@@ -18,19 +18,19 @@ export interface ToolParameterMapping {
 export interface ModelParameterMapping {
   /** Model identifier (actual model name) */
   model: string;
-  
+
   /** Provider/endpoint identifier */
   provider: string;
-  
+
   /** API endpoint pattern for matching */
   endpointPattern?: string;
-  
+
   /** Human readable description */
   description?: string;
-  
+
   /** When this mapping was last verified */
   lastVerified?: string;
-  
+
   /** Mapping rules for each tool */
   toolMappings: {
     [toolName: string]: ToolParameterMapping;
@@ -50,10 +50,10 @@ export interface ParameterMappingRegistry {
 export interface MappingResult {
   /** Whether any mappings were applied */
   mapped: boolean;
-  
+
   /** The transformed arguments */
   mappedArgs: Record<string, unknown>;
-  
+
   /** List of mappings that were applied */
   appliedMappings: Array<{
     toolName: string;

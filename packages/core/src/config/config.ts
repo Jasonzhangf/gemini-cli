@@ -130,6 +130,11 @@ export interface ConfigParameters {
   bugCommand?: BugCommandSettings;
   model: string;
   extensionContextFilePaths?: string[];
+  hijack?: boolean;
+  fc_hijack?: boolean;
+  userId?: string;
+  newUserId?: boolean;
+  think?: boolean;
 }
 
 export class Config {
@@ -168,6 +173,11 @@ export class Config {
   private readonly bugCommand: BugCommandSettings | undefined;
   private readonly model: string;
   private readonly extensionContextFilePaths: string[];
+  private readonly hijack: boolean;
+  private readonly fc_hijack: boolean;
+  private readonly userId: string | undefined;
+  private readonly newUserId: boolean;
+  private readonly think: boolean;
   private modelSwitchedDuringSession: boolean = false;
   flashFallbackHandler?: FlashFallbackHandler;
 
@@ -211,6 +221,11 @@ export class Config {
     this.bugCommand = params.bugCommand;
     this.model = params.model;
     this.extensionContextFilePaths = params.extensionContextFilePaths ?? [];
+    this.hijack = params.hijack ?? false;
+    this.fc_hijack = params.fc_hijack ?? false;
+    this.userId = params.userId;
+    this.newUserId = params.newUserId ?? false;
+    this.think = params.think ?? false;
 
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
@@ -267,6 +282,26 @@ export class Config {
 
   getModel(): string {
     return this.contentGeneratorConfig?.model || this.model;
+  }
+
+  getHijack(): boolean | undefined {
+    return this.hijack;
+  }
+
+  getFcHijack(): boolean | undefined {
+    return this.fc_hijack;
+  }
+
+  getUserId(): string | undefined {
+    return this.userId;
+  }
+
+  getNewUserId(): boolean | undefined {
+    return this.newUserId;
+  }
+
+  getThink(): boolean {
+    return this.think;
   }
 
   setModel(newModel: string): void {

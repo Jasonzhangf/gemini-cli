@@ -53,6 +53,11 @@ interface CliArgs {
   telemetryTarget: string | undefined;
   telemetryOtlpEndpoint: string | undefined;
   telemetryLogPrompts: boolean | undefined;
+  hijack: boolean | undefined;
+  fc_hijack: boolean | undefined;
+  id: string | undefined;
+  newid: boolean | undefined;
+  think: boolean | undefined;
 }
 
 async function parseArguments(): Promise<CliArgs> {
@@ -128,6 +133,35 @@ async function parseArguments(): Promise<CliArgs> {
       description: 'Enables checkpointing of file edits',
       default: false,
     })
+    .option('hijack', {
+      type: 'boolean',
+      description:
+        'Enable hijacking to third-party APIs. When enabled, all models including Gemini are redirected to configured endpoints.',
+      default: false,
+    })
+    .option('fc_hijack', {
+      type: 'boolean',
+      description:
+        'Use official Gemini API but hijack function call logic. Only works when --hijack is not used.',
+      default: false,
+    })
+    .option('id', {
+      type: 'string',
+      description:
+        'Specify user ID for multi-user authentication rotation. Use "list" to show all available users.',
+    })
+    .option('newid', {
+      type: 'boolean',
+      description:
+        'Start without loading any existing user ID, triggering a fresh login process for new user authentication.',
+      default: false,
+    })
+    .option('think', {
+      type: 'boolean',
+      description:
+        'Enable thinking mode for Qwen models (shows reasoning process). By default, Qwen models use <no_think> to hide reasoning.',
+      default: false,
+    })
     .version(await getCliVersion()) // This will enable the --version flag based on package.json
     .alias('v', 'version')
     .help()
@@ -169,6 +203,14 @@ export async function loadCliConfig(
   loadEnvironment();
 
   const argv = await parseArguments();
+
+  // Handle special user ID commands
+  if (argv.id === 'list') {
+    const { userAuthManager } = await import('@google/gemini-cli-core');
+    userAuthManager.listUsers();
+    process.exit(0);
+  }
+
   const debugMode = argv.debug || false;
 
   // Set the context filename in the server's memoryTool module BEFORE loading memory
@@ -246,6 +288,11 @@ export async function loadCliConfig(
     bugCommand: settings.bugCommand,
     model: argv.model!,
     extensionContextFilePaths,
+    hijack: argv.hijack || false,
+    fc_hijack: argv.fc_hijack || false,
+    userId: argv.id,
+    newUserId: argv.newid || false,
+    think: argv.think || false,
   });
 }
 

@@ -251,6 +251,141 @@ export const useSlashCommandProcessor = (
         },
       },
       {
+        name: 'user',
+        description:
+          'manage authenticated users. Usage: /user [list|switch <id>|current]',
+        completion: async () => {
+          try {
+            const { userAuthManager } = await import('@google/gemini-cli-core');
+            const users = userAuthManager.getAllUsers();
+            return [
+              'list',
+              'current',
+              ...users.map((u) => `switch ${u.userId}`),
+            ];
+          } catch (error) {
+            return ['list', 'current'];
+          }
+        },
+        action: async (_mainCommand, subCommand, args) => {
+          try {
+            const { userAuthManager } = await import('@google/gemini-cli-core');
+
+            if (!subCommand || subCommand === 'list') {
+              // List all users
+              const users = userAuthManager.getAllUsers();
+              if (users.length === 0) {
+                addMessage({
+                  type: MessageType.INFO,
+                  content:
+                    'No authenticated users found. Use /auth to authenticate.',
+                  timestamp: new Date(),
+                });
+                return;
+              }
+
+              let userListMessage = '📋 Available Users:\n\n';
+              users.forEach((user, index) => {
+                const status = user.isActive ? '🟢 ACTIVE' : '⚪ Inactive';
+                const lastUsed = new Date(user.lastUsed).toLocaleString();
+                const email = user.email ? ` (${user.email})` : '';
+
+                userListMessage += `${index + 1}. ${status} ${user.userId}${email}\n`;
+                userListMessage += `   Last used: ${lastUsed}\n`;
+
+                // Show model usage
+                if (Object.keys(user.modelUsage).length > 0) {
+                  userListMessage += '   Model usage:\n';
+                  Object.entries(user.modelUsage).forEach(([model, usage]) => {
+                    const rateLimitStatus = usage.rateLimited
+                      ? ' (RATE LIMITED)'
+                      : '';
+                    userListMessage += `     - ${model}: ${usage.requestCount} requests${rateLimitStatus}\n`;
+                  });
+                }
+                userListMessage += '\n';
+              });
+
+              addMessage({
+                type: MessageType.INFO,
+                content: userListMessage,
+                timestamp: new Date(),
+              });
+            } else if (subCommand === 'current') {
+              // Show current user
+              const currentUser = userAuthManager.getCurrentUser();
+              if (currentUser) {
+                const primaryId = currentUser.readableId || currentUser.email || currentUser.displayName || currentUser.userId;
+                const additionalInfo = [];
+                
+                if (currentUser.email && currentUser.email !== primaryId) {
+                  additionalInfo.push(currentUser.email);
+                }
+                if (currentUser.userId !== primaryId) {
+                  additionalInfo.push(`ID: ${currentUser.userId}`);
+                }
+                
+                const infoString = additionalInfo.length > 0 ? ` (${additionalInfo.join(', ')})` : '';
+                
+                addMessage({
+                  type: MessageType.INFO,
+                  content: `🎯 Current user: ${primaryId}${infoString}`,
+                  timestamp: new Date(),
+                });
+              } else {
+                addMessage({
+                  type: MessageType.INFO,
+                  content: 'No active user. Use /auth to authenticate.',
+                  timestamp: new Date(),
+                });
+              }
+            } else if (subCommand === 'switch' && args && args.length > 0) {
+              // Switch to specific user
+              const targetUserId = args[0];
+              const switchedUser = userAuthManager.switchToUser(targetUserId);
+
+              if (switchedUser) {
+                const primaryId = switchedUser.readableId || switchedUser.email || switchedUser.displayName || switchedUser.userId;
+                const additionalInfo = [];
+                
+                if (switchedUser.email && switchedUser.email !== primaryId) {
+                  additionalInfo.push(switchedUser.email);
+                }
+                if (switchedUser.userId !== primaryId) {
+                  additionalInfo.push(`ID: ${switchedUser.userId}`);
+                }
+                
+                const infoString = additionalInfo.length > 0 ? ` (${additionalInfo.join(', ')})` : '';
+                
+                addMessage({
+                  type: MessageType.INFO,
+                  content: `✅ Switched to user: ${primaryId}${infoString}`,
+                  timestamp: new Date(),
+                });
+              } else {
+                addMessage({
+                  type: MessageType.ERROR,
+                  content: `❌ User not found: ${targetUserId}`,
+                  timestamp: new Date(),
+                });
+              }
+            } else {
+              addMessage({
+                type: MessageType.INFO,
+                content: 'Usage: /user [list|switch <id>|current]',
+                timestamp: new Date(),
+              });
+            }
+          } catch (_error) {
+            addMessage({
+              type: MessageType.ERROR,
+              content: `Failed to manage users: ${_error instanceof Error ? _error.message : 'Unknown error'}`,
+              timestamp: new Date(),
+            });
+          }
+        },
+      },
+      {
         name: 'editor',
         description: 'set external editor preference',
         action: (_mainCommand, _subCommand, _args) => {

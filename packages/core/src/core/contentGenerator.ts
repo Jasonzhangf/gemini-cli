@@ -165,6 +165,7 @@ export type ContentGeneratorConfig = {
   vertexai?: boolean;
   authType?: AuthType | undefined;
   forceAccountSelection?: boolean;
+  think?: boolean;
 };
 
 export async function createContentGeneratorConfig(
@@ -176,6 +177,7 @@ export async function createContentGeneratorConfig(
     getFcHijack?: () => boolean | undefined;
     getUserId?: () => string | undefined;
     getNewUserId?: () => boolean | undefined;
+    getThink?: () => boolean | undefined;
   },
 ): Promise<ContentGeneratorConfig> {
   const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -194,6 +196,7 @@ export async function createContentGeneratorConfig(
   const fcHijackEnabled = config?.getFcHijack?.() || false;
   const specifiedUserId = config?.getUserId?.();
   const newUserIdMode = config?.getNewUserId?.() || false;
+  const thinkMode = config?.getThink?.() || false;
 
   // Handle multi-user authentication and smart fallback
   if (
@@ -322,6 +325,7 @@ export async function createContentGeneratorConfig(
     apiKey: hijackedApiKey,
     apiEndpoint: hijackedApiEndpoint,
     forceAccountSelection: newUserIdMode, // Force account selection in newUserId mode
+    think: thinkMode,
   };
 
   // if we are using google auth nothing else to validate for now
@@ -410,6 +414,7 @@ export async function createContentGenerator(
       config.apiKey,
       config.apiEndpoint,
       config.actualModel,
+      config.think,
     );
   }
 
@@ -417,6 +422,26 @@ export async function createContentGenerator(
     config.authType === AuthType.USE_GEMINI ||
     config.authType === AuthType.USE_VERTEX_AI
   ) {
+    // Check if we should force text hijacking for function calls
+    const forceTextHijacking = process.env.HIJACK_FORCE_FUNCTION_CALLS === 'true';
+    
+    if (forceTextHijacking) {
+      console.log('🔧 ===== FORCE TEXT HIJACKING FOR GEMINI API ===== 🔧');
+      console.log(`🎯 Using Gemini API ${config.model} with forced text hijacking for function calls`);
+      console.log(`🛠️  Text content: Official Gemini API | Function calls: Text parsing mode`);
+      console.log('========================================');
+      
+      // Import the special Gemini wrapper that handles forced text hijacking
+      const { GeminiWithForcedTextHijack } = await import('./geminiWithForcedTextHijack.js');
+      return new GeminiWithForcedTextHijack(
+        config.apiKey || '',
+        config.model,
+        config.vertexai || false,
+        httpOptions,
+        config.think
+      );
+    }
+    
     const googleGenAI = new GoogleGenAI({
       apiKey: config.apiKey === '' ? undefined : config.apiKey,
       vertexai: config.vertexai,

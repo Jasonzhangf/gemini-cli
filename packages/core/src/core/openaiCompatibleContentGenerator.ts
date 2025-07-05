@@ -13,67 +13,39 @@ import {
   EmbedContentParameters,
   FinishReason,
   Tool,
-  FunctionDeclaration,
 } from '@google/genai';
 import { ContentGenerator } from './contentGenerator.js';
-import { Config, ApprovalMode } from '../config/config.js';
-import { parameterMappingManager } from '../config/parameter-mappings/index.js';
-import { FullJsonParser, FullJsonResponse } from './fullJsonParser.js';
-import path from 'path';
-import * as fs from 'fs';
-import * as os from 'os';
+import { TextHijackParser } from './textHijackParser.js';
 
 interface OpenAIFunction {
   name: string;
   description?: string;
-  parameters?: any;
+  parameters?: Record<string, unknown>;
 }
 
 interface OpenAITool {
-  type: 'function';
+  type: string;
   function: OpenAIFunction;
 }
 
 interface OpenAIMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
-  tool_calls?: Array<{
+  role: string;
+  content: string;
+  tool_calls?: {
     id: string;
-    type: 'function';
+    type: string;
     function: {
       name: string;
       arguments: string;
     };
-  }>;
-  tool_call_id?: string;
-  name?: string;
+  }[];
 }
 
 interface OpenAIRequest {
   model: string;
   messages: OpenAIMessage[];
   tools?: OpenAITool[];
-  tool_choice?: string | { type: string; function?: { name: string } };
   stream?: boolean;
-  max_tokens?: number;
-  temperature?: number;
-}
-
-interface OpenAIChoice {
-  index: number;
-  message: {
-    role: string;
-    content: string;
-    tool_calls?: Array<{
-      id: string;
-      type: 'function';
-      function: {
-        name: string;
-        arguments: string;
-      };
-    }>;
-  };
-  finish_reason: string;
 }
 
 interface OpenAIResponse {
@@ -81,7 +53,22 @@ interface OpenAIResponse {
   object: string;
   created: number;
   model: string;
-  choices: OpenAIChoice[];
+  choices: {
+    index: number;
+    message: {
+      role: string;
+      content: string | null;
+      tool_calls?: {
+        id: string;
+        type: string;
+        function: {
+          name: string;
+          arguments: string;
+        };
+      }[];
+    };
+    finish_reason: string;
+  }[];
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;
@@ -89,1329 +76,366 @@ interface OpenAIResponse {
   };
 }
 
-interface ApplicationRule {
-  filename: string;
-  description: string;
-  globs: string[];
-  alwaysApply: boolean;
-  content: string;
-}
-
+/**
+ * OpenAI Compatible Content Generator for Hijacking
+ * Provides basic hijacking functionality to redirect requests to OpenAI-compatible endpoints
+ */
 export class OpenAICompatibleContentGenerator implements ContentGenerator {
   private apiKey: string;
   private apiEndpoint: string;
   private model: string;
-  private config: Config | null = null;
-  
-  // Full JSON parser for the new architecture
-  private fullJsonParser: FullJsonParser;
-  
-  // Model retry mechanism
-  private failureCount: number = 0;
-  private readonly maxFailures: number = 3;
-  private availableModels: string[] = [];
-  
-  // Application rules cache
-  private applicationRulesCache: ApplicationRule[] | null = null;
+  private supportsFunctionCalls: boolean;
+  private thinkMode: boolean;
+  private textHijackParser: TextHijackParser;
 
-  constructor(apiKey: string, apiEndpoint: string, model: string, config?: Config) {
+  constructor(apiKey: string, apiEndpoint: string, model: string, thinkMode?: boolean) {
     this.apiKey = apiKey;
     this.apiEndpoint = apiEndpoint;
     this.model = model;
-    this.config = config || null;
+    this.thinkMode = thinkMode ?? false;
+
+    // Initialize shared text hijack parser
+    this.textHijackParser = new TextHijackParser(model, apiEndpoint);
+
+    // Auto-detect function call support based on endpoint/model
+    this.supportsFunctionCalls = this.detectFunctionCallSupport();
+
+    console.log('🚀 OpenAI Compatible Generator initialized (minimal version)');
+    console.log(`   Model: ${model}`);
+    console.log(`   Endpoint: ${apiEndpoint}`);
+    console.log(
+      `   Function Call Support: ${this.supportsFunctionCalls ? 'YES' : 'NO - using text hijack'}`,
+    );
     
-    // Initialize the full JSON parser
-    this.fullJsonParser = new FullJsonParser();
-    
-    // 模型能力适配器将在 client 初始化时设置
-    
-    // Ensure tools are available through the config's tool registry
-    // The hijacking system needs access to all tools for proper execution
-    console.log('🚀 OpenAI Compatible Generator initialized with hijacking approach');
+    // Check for parameter mapping
+    const textHijackParser = new TextHijackParser(model, apiEndpoint);
+    console.log('🔧 Shared text hijack parser initialized');
   }
 
   /**
-   * Check if content contains analysis-only JSON (indicating task completion)
-   * This helps distinguish between tool calls needed vs. completion status
+   * Determine if we should use text hijacking instead of native function calls
    */
-  private hasAnalysisOnlyJson(content: string): boolean {
-    try {
-      const jsonBlocks = this.extractJsonBlocks(content);
-      
-      for (const jsonBlock of jsonBlocks) {
-        try {
-          const parsed = JSON.parse(jsonBlock);
-          
-          // Only consider it analysis-only if it explicitly indicates completion
-          // Look for clear completion indicators in the message or analysis
-          const hasCompletionIndicators = 
-            (parsed.message && 
-             (parsed.message.toLowerCase().includes('完成') || 
-              parsed.message.toLowerCase().includes('finished') ||
-              parsed.message.toLowerCase().includes('done') ||
-              parsed.message.toLowerCase().includes('ready for your next'))) ||
-            (parsed.analysis && 
-             (parsed.analysis.toLowerCase().includes('task completed') ||
-              parsed.analysis.toLowerCase().includes('operation finished') ||
-              parsed.analysis.toLowerCase().includes('waiting for next instruction')));
-          
-          // Only treat as completion if there are clear completion indicators
-          // AND no tool calls, AND it's not asking for more information or clarification
-          if (parsed.analysis && 
-              (!parsed.tool_calls || 
-               (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length === 0)) &&
-              hasCompletionIndicators &&
-              !content.toLowerCase().includes('需要') &&
-              !content.toLowerCase().includes('请') &&
-              !content.toLowerCase().includes('should') &&
-              !content.toLowerCase().includes('need')) {
-            console.log('🎯 Detected analysis-only JSON response with completion indicators');
-            return true;
-          }
-        } catch (e) {
-          // Skip invalid JSON blocks
-          continue;
-        }
-      }
-      
-      return false;
-    } catch (error) {
-      return false;
+  private shouldUseTextHijacking(): boolean {
+    // If HIJACK_FORCE_FUNCTION_CALLS is set, always use text hijacking
+    if (process.env.HIJACK_FORCE_FUNCTION_CALLS === 'true') {
+      return true;
     }
-  }
-
-  /**
-   * Map JSON tool names to actual registry tool names
-   * This bridges the gap between what the model expects and what's registered
-   */
-  private mapToolName(jsonToolName: string): string {
-    const toolNameMap: Record<string, string> = {
-      'shell': 'run_shell_command',
-      'edit': 'replace', 
-      'ls': 'list_directory',
-      'grep': 'search_file_content',
-      'web_search': 'google_web_search',
-      // These don't need mapping as they match
-      'write_file': 'write_file',
-      'read_file': 'read_file', 
-      'glob': 'glob',
-      'web_fetch': 'web_fetch',
-      'read_many_files': 'read_many_files',
-      'knowledge_graph': 'knowledge_graph',
-      'sequentialthinking': 'sequentialthinking'
-    };
     
-    const mappedName = toolNameMap[jsonToolName] || jsonToolName;
-    if (mappedName !== jsonToolName) {
-      console.log(`🔄 Mapped tool name: "${jsonToolName}" → "${mappedName}"`);
+    // For known non-function-calling endpoints, use text hijacking
+    const knownNonFunctionEndpoints = [
+      'http://localhost:1234',
+      'http://127.0.0.1:1234',
+      'http://192.168.',  // Local network endpoints
+    ];
+    
+    const isNonFunctionEndpoint = knownNonFunctionEndpoints.some(pattern =>
+      this.apiEndpoint.includes(pattern)
+    );
+    
+    if (isNonFunctionEndpoint) {
+      return true;
     }
-    return mappedName;
-  }
-
-
-  /**
-   * Check if we're in non-interactive mode (YOLO mode)
-   */
-  private isNonInteractiveMode(): boolean {
-    return this.config?.getApprovalMode() === ApprovalMode.YOLO;
+    
+    // For native function calling endpoints (OpenAI, Gemini, etc.), use native calls
+    return false;
   }
 
   /**
-   * Fetch available models from the API endpoint
+   * Process Qwen model think mode - add <no_think> if think mode is disabled
    */
-  private async fetchAvailableModels(): Promise<string[]> {
-    try {
-      const response = await fetch(`${this.apiEndpoint}/models`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      });
+  private processQwenThinkMode(userMessage: string): string {
+    // Check if model is Qwen series
+    const isQwenModel = this.model.toLowerCase().includes('qwen') || 
+                       this.model.toLowerCase().includes('qwq');
+    
+    if (!isQwenModel) {
+      return userMessage;
+    }
 
-      if (!response.ok) {
-        console.warn(`⚠️ Failed to fetch models: ${response.status} ${response.statusText}`);
-        return [];
-      }
+    console.log(`🧠 [Qwen Think Mode] Think mode: ${this.thinkMode ? 'ENABLED' : 'DISABLED'}`);
 
-      const data = await response.json();
-      const models = data.data?.map((model: any) => model.id) || [];
-      console.log(`📋 Available models: ${models.join(', ')}`);
-      return models;
-    } catch (error) {
-      console.warn(`⚠️ Error fetching models:`, error);
-      return [];
+    if (!this.thinkMode) {
+      // Add <no_think> instruction for Qwen models when think mode is disabled
+      const noThinkInstruction = `<no_think>\n\n${userMessage}`;
+      console.log(`🚫 [Qwen Think Mode] Added <no_think> tag to disable reasoning output`);
+      return noThinkInstruction;
+    } else {
+      console.log(`💭 [Qwen Think Mode] Think mode enabled - showing reasoning process`);
+      return userMessage;
     }
   }
 
   /**
-   * Handle model failure and attempt to switch to alternative model
+   * Auto-detect if the endpoint/model supports function calls
+   * We support function calls either natively or through text hijacking
    */
-  private async handleModelFailure(): Promise<boolean> {
-    this.failureCount++;
-    console.warn(`⚠️ Model failure ${this.failureCount}/${this.maxFailures} for model: ${this.model}`);
-
-    if (this.failureCount >= this.maxFailures) {
-      console.log(`🔄 Attempting to switch model after ${this.maxFailures} failures...`);
-      
-      if (this.availableModels.length === 0) {
-        console.log(`📋 Fetching available models...`);
-        this.availableModels = await this.fetchAvailableModels();
-      }
-
-      // Find alternative models (prefer ones with 'gemini' or 'gpt' in the name)
-      const alternatives = this.availableModels.filter(m => 
-        m !== this.model && 
-        (m.toLowerCase().includes('gemini') || m.toLowerCase().includes('gpt'))
-      );
-
-      if (alternatives.length > 0) {
-        const newModel = alternatives[0];
-        console.log(`🔄 Switching from ${this.model} to ${newModel}`);
-        const oldModel = this.model;
-        this.model = newModel;
-        this.failureCount = 0; // Reset failure count for new model
-        
-        // Display model switch information
-        console.log(`\n🔄 ===== MODEL AUTO-SWITCHED ===== 🔄`);
-        console.log(`❌ Previous Model: ${oldModel} (failed ${this.maxFailures} times)`);
-        console.log(`✅ New Model: ${newModel}`);
-        console.log(`📋 Available alternatives: ${alternatives.slice(1).join(', ') || 'none'}`);
-        console.log(`🎯 Target Model (displayed): gemini-2.5-flash`);
-        console.log(`🔗 Endpoint: ${this.apiEndpoint}`);
-        console.log(`=======================================\n`);
-        
-        return true; // Model switched
-      } else {
-        console.error(`❌ No alternative models available. Current model: ${this.model}`);
-        return false; // No alternatives
-      }
-    }
-
-    return false; // Not yet time to switch
-  }
-
-  /**
-   * Reset failure count on successful response
-   */
-  private resetFailureCount(): void {
-    if (this.failureCount > 0) {
-      console.log(`✅ Model ${this.model} recovered, resetting failure count`);
-      this.failureCount = 0;
-    }
-  }
-
-  /**
-   * Processes a successfully parsed JSON object to extract tool calls.
-   */
-  private processParsedJson(parsed: any, toolCalls: Array<{name: string, args: any}>): void {
-    // Handle structured tool calls format
-    if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
-      for (const toolCall of parsed.tool_calls) {
-        if (toolCall.tool) {
-          const args = toolCall.args || {};
-          const processedArgs = this.processToolCallArgs(toolCall.tool, args);
-          toolCalls.push({
-            name: toolCall.tool,
-            args: processedArgs
-          });
-          console.log(`🔧 Parsed JSON tool call: ${toolCall.tool}`);
-        }
-      }
-    }
-    
-    // Handle single tool call format
-    else if (parsed.tool) {
-      const args = parsed.args || {};
-      const processedArgs = this.processToolCallArgs(parsed.tool, args);
-      toolCalls.push({
-        name: parsed.tool,
-        args: processedArgs
-      });
-      console.log(`🔧 Parsed single JSON tool call: ${parsed.tool}`);
-    }
-  }
-
-  /**
-   * Parse JSON tool calls from model response
-   * New architecture: Model returns structured JSON, we execute tools and provide feedback
-   */
-  private parseJsonToolCalls(content: string): Array<{name: string, args: any}> {
-    const toolCalls: Array<{name:string, args: any}> = [];
-    
-    try {
-      // Look for JSON blocks in the response
-      const jsonBlocks = this.extractJsonBlocks(content);
-      
-      for (const jsonBlock of jsonBlocks) {
-        try {
-          const parsed = JSON.parse(jsonBlock);
-          this.processParsedJson(parsed, toolCalls);
-        } catch (parseError) {
-          console.log(`⚠️ Failed to parse JSON block, attempting to fix...`);
-          try {
-            let correctedBlock = jsonBlock;
-            const startIndex = correctedBlock.indexOf('{');
-            if (startIndex === -1) {
-              throw new Error("No opening brace '{' found.");
-            }
-
-            let braceCount = 0;
-            let endIndex = -1;
-            for (let i = startIndex; i < correctedBlock.length; i++) {
-              if (correctedBlock[i] === '{') {
-                braceCount++;
-              } else if (correctedBlock[i] === '}') {
-                braceCount--;
-              }
-
-              if (braceCount === 0) {
-                endIndex = i;
-                break;
-              }
-            }
-
-            if (endIndex === -1) {
-              throw new Error("Could not find matching closing brace '}'.");
-            }
-            
-            correctedBlock = correctedBlock.substring(startIndex, endIndex + 1);
-            const parsed = JSON.parse(correctedBlock);
-            console.log('✅ Successfully parsed fixed JSON.');
-            this.processParsedJson(parsed, toolCalls);
-          } catch(fixError) {
-            const err = fixError as Error;
-            console.log(`❌ Failed to fix and parse JSON block. Error: ${err.message}. Preview: ${jsonBlock.slice(0, 100)}`);
-          }
-        }
-      }
-    } catch (error) {
-      console.log(`⚠️ JSON parsing error: ${error}`);
-    }
-    
-    return toolCalls;
-  }
-  
-  /**
-   * Extract JSON blocks from text content
-   */
-  private extractJsonBlocks(content: string): string[] {
-    const jsonBlocks: string[] = [];
-    
-    console.log(`🔍 [DEBUG] Extracting JSON blocks from content (${content.length} chars)`);
-    console.log(`🔍 [DEBUG] Content preview: ${content.slice(0, 200)}...`);
-    
-    // Pattern 1: JSON code blocks
-    const codeBlockPattern = /```(?:json)?\s*({[\s\S]*?})\s*```/gi;
-    let match;
-    while ((match = codeBlockPattern.exec(content)) !== null) {
-      jsonBlocks.push(match[1]);
-      console.log(`🔧 [DEBUG] Found JSON in code block: ${match[1].slice(0, 100)}...`);
-    }
-    
-    // If we found something in a code block, assume that's the definitive source.
-    if (jsonBlocks.length > 0) {
-        console.log(`🔧 [DEBUG] Using ${jsonBlocks.length} JSON blocks from code blocks`);
-        return jsonBlocks;
-    }
-    
-    // Pattern 2: Single-line JSON objects (improved for large content)
-    // Look for JSON that might be on a single very long line
-    const singleLinePattern = /{[\s\S]*?"tool_calls?"[\s\S]*?}/gi;
-    while ((match = singleLinePattern.exec(content)) !== null) {
-      const jsonCandidate = match[0];
-      // Validate this looks like proper JSON
-      try {
-        const parsed = JSON.parse(jsonCandidate);
-        if (parsed.tool_calls || parsed.tool) {
-          jsonBlocks.push(jsonCandidate);
-          console.log(`🔧 [DEBUG] Found single-line JSON: ${jsonCandidate.slice(0, 100)}...`);
-        }
-      } catch (e) {
-        console.log(`🔧 [DEBUG] Invalid JSON candidate: ${jsonCandidate.slice(0, 50)}...`);
-      }
-    }
-    
-    // Pattern 3: Multi-line JSON objects using brace counting
-    if (jsonBlocks.length === 0) {
-      const lines = content.split('\n');
-      
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line.startsWith('{') && (line.includes('tool_calls') || line.includes('analysis') || line.includes('tool'))) {
-          // Try to find the complete JSON object
-          let jsonStr = '';
-          let braceCount = 0;
-          let startFound = false;
-          
-          for (let j = i; j < lines.length; j++) {
-            const currentLine = lines[j];
-            jsonStr += currentLine + (j < lines.length - 1 ? '\n' : '');
-            
-            for (const char of currentLine) {
-              if (char === '{') {
-                braceCount++;
-                startFound = true;
-              } else if (char === '}') {
-                braceCount--;
-              }
-            }
-            
-            if (startFound && braceCount === 0) {
-              const cleanJson = jsonStr.trim();
-              if (cleanJson.startsWith('{') && cleanJson.endsWith('}')) {
-                jsonBlocks.push(cleanJson);
-                console.log(`🔧 [DEBUG] Found multi-line JSON object: ${cleanJson.slice(0, 100)}...`);
-              }
-              break;
-            }
-          }
-          break; // Only process the first JSON object found
-        }
-      }
-    }
-    
-    // Pattern 4: Desperate fallback - look for any JSON-like structure with tool_calls
-    if (jsonBlocks.length === 0) {
-      console.log(`🔧 [DEBUG] No JSON found with standard patterns, trying fallback...`);
-      
-      // Try to find JSON that starts with tool_calls
-      const fallbackPattern = /{.*?["']tool_calls?["'].*?}/gs;
-      while ((match = fallbackPattern.exec(content)) !== null) {
-        try {
-          // Attempt to balance braces manually
-          const candidate = match[0];
-          const parsed = JSON.parse(candidate);
-          if (parsed.tool_calls || parsed.tool) {
-            jsonBlocks.push(candidate);
-            console.log(`🔧 [DEBUG] Found fallback JSON: ${candidate.slice(0, 100)}...`);
-          }
-        } catch (e) {
-          // Try to extract partial JSON
-          console.log(`🔧 [DEBUG] Fallback pattern failed to parse: ${match[0].slice(0, 50)}...`);
-        }
-      }
-    }
-    
-    console.log(`🔍 Found ${jsonBlocks.length} JSON blocks in response`);
-    if (jsonBlocks.length === 0) {
-      console.log(`❌ [DEBUG] No JSON blocks found. Content does not contain recognizable tool calls.`);
-    }
-    
-    return jsonBlocks;
-  }
-
-
-
-  /**
-   * Add tool call guidance to user message
-   */
-  private async addToolCallGuidance(message: string): Promise<string> {
-    // Load applicable application rules (user-defined rules)
-    const currentWorkingDir = process.cwd();
-    const applicationRules = await this.getApplicableRules(currentWorkingDir);
-    
-    let guidance = '';
-    
-    // Add application rules if available (these come BEFORE system guidance but with override notice)
-    if (applicationRules && applicationRules.trim()) {
-      guidance += `\n${applicationRules}\n\n`;
-    }
-    
-    // Add the built-in tool guidance - modified to avoid forced conversation stopping
-    guidance += `
-
-CRITICAL: You MUST respond in JSON format only. No exceptions.
-
-Required JSON structure:
-{
-  "thinking": "Your reasoning process (optional)",
-  "message": "Your response to the user",
-  "tool_calls": [
-    {
-      "tool": "tool_name",
-      "args": {"param": "value"}
-    }
-  ]
-}
-
-Available tools:
-- read_file: Read file contents
-- write_file: Write content to file
-- list_directory: List directory contents
-- run_shell_command: Execute shell commands
-- search_file_content: Search for content in files
-- glob: Find files matching patterns
-- web_fetch: Fetch web content
-- And other file and system tools
-
-IMPORTANT RULES:
-1. ALL responses must be valid JSON in the exact format above
-2. If you need tools, add them to "tool_calls" array
-3. If no tools needed, use empty array: "tool_calls": []
-4. Your "message" field will be shown to the user
-5. For multi-step tasks, execute one tool at a time, then CONTINUE automatically to next step
-6. After each tool execution, you will receive results and MUST continue until the entire task is complete
-7. Only stop when the complete task is finished
-
-Request: ${message}
-
-RESPOND IN JSON FORMAT ONLY:`;
-
-    return guidance;
-  }
-
-  /**
-   * Add natural tool guidance that mimics Gemini's behavior pattern
-   */
-  private async addNaturalToolGuidance(message: string): Promise<string> {
-    // 检测以 # 开头的消息，自动激活 knowledge_graph 工具模式
-    if (message.trim().startsWith('#')) {
-      const knowledgeRequest = message.trim().substring(1).trim(); // 移除 # 前缀
-      
-      const guidance = `${message}
-
-检测到以 # 开头的命令，这表示需要使用 knowledge_graph 工具进行知识图谱操作。
-
-请根据用户的具体需求选择合适的操作：
-
-**可用操作类型：**
-- create_entities: 创建实体
-- read_graph: 读取整个知识图谱
-- search_nodes: 搜索节点
-- open_nodes: 打开特定节点
-- create_relations: 创建关系
-- add_observations: 添加观察信息
-- delete_entities: 删除实体
-- delete_observations: 删除观察信息
-- delete_relations: 删除关系
-
-**用户请求**: "${knowledgeRequest.replace(/"/g, '\\"')}"
-
-请使用 knowledge_graph 工具响应用户的具体需求：
-
-\`\`\`json
-{
-  "tool_calls": [
-    {
-      "tool": "knowledge_graph",
-      "args": {
-        "action": "适当的操作类型",
-        "data": "根据用户需求构造的数据"
-      }
-    }
-  ]
-}
-\`\`\`
-
-**示例：**
-- 如果用户要保存信息，使用 create_entities
-- 如果用户要查看所有信息，使用 read_graph  
-- 如果用户要搜索特定内容，使用 search_nodes
-- 如果用户要查看特定节点，使用 open_nodes`;
-      
-      return guidance;
-    }
-    
-    // 自然引导：使用标准函数调用，强调相对路径使用
-    const guidance = `${message}
-
-你可以使用以下工具来完成任务。请在需要时调用相应的工具：
-
-**可用工具：**
-- read_file: 读取文件内容
-- write_file: 创建或写入文件  
-- list_directory: 列出目录内容
-- run_shell_command: 执行shell命令
-- search_file_content: 搜索文件内容
-- glob: 使用模式匹配查找文件
-- replace: 替换文件中的内容
-
-**重要说明：**
-- 当需要操作文件或系统时，请调用相应的工具
-- **所有路径必须使用相对路径，不要使用绝对路径**
-- 项目根目录是当前工作目录，所有文件操作都基于此目录
-- shell命令中涉及路径时，请使用 "." 或相对路径，避免使用 "/Users/..." 等绝对路径
-- 每次只调用一个工具，等待结果后再继续
-
-请开始执行任务。`;
-
-    return guidance;
-  }
-
-  /**
-   * Helper method to clean up file paths
-   */
-  private cleanupPath(filePath: string): string {
-    // Remove surrounding quotes and clean up path
-    filePath = filePath.replace(/^['"""']|['"""']$/g, '').trim();
-    
-    // Handle home directory expansion
-    if (filePath.startsWith('~')) {
-      const homeDir = os.homedir();
-      filePath = filePath.replace(/^~/, homeDir);
-    }
-    
-    // Convert relative paths to absolute paths
-    if (!filePath.startsWith('/') && !filePath.includes(':')) {
-      filePath = path.resolve(process.cwd(), filePath);
-    }
-    return filePath;
-  }
-  
-  /**
-   * Process tool call arguments to ensure proper path handling
-   */
-  private processToolCallArgs(toolName: string, args: any): any {
-    if (!args || typeof args !== 'object') {
-      return args;
-    }
-    
-    const processedArgs = { ...args };
-    
-    // Process file path arguments for different tools
-    const pathFields: Record<string, string[]> = {
-      'write_file': ['file_path'],
-      'read_file': ['absolute_path', 'file_path'],
-      'edit': ['file_path'],
-      'replace': ['file_path'],
-      'shell': ['command'], // Special handling for shell commands
-      'run_shell_command': ['command'],
-      'list_directory': ['path'],
-      'ls': ['path'],
-      'glob': ['path'],
-      'grep': ['path'],
-      'search_file_content': ['path']
-    };
-    
-    const fieldsToProcess = pathFields[toolName] || [];
-    
-    for (const field of fieldsToProcess) {
-      if (processedArgs[field] && typeof processedArgs[field] === 'string') {
-        if (field === 'command') {
-          // Special handling for shell commands - process file paths within commands
-          processedArgs[field] = this.processShellCommand(processedArgs[field]);
-        } else {
-          // Regular path field processing
-          processedArgs[field] = this.cleanupPath(processedArgs[field]);
-        }
-        console.log(`🛠️ Processed ${field}: ${args[field]} → ${processedArgs[field]}`);
-      }
-    }
-    
-    return processedArgs;
-  }
-  
-  /**
-   * Process shell commands to convert relative paths to absolute paths
-   */
-  private processShellCommand(command: string): string {
-    // For now, disable shell command path processing to avoid regex issues
-    // The AI model is primarily using dedicated tools (list_directory, read_file, etc.)
-    // rather than shell commands, so this complex processing isn't needed
-    return command;
-  }
-  
-  /**
-   * Load application rules from ~/.gemini/rules/*.md
-   */
-  private async loadApplicationRules(): Promise<ApplicationRule[]> {
-    // Use cache to avoid reading files multiple times
-    if (this.applicationRulesCache !== null) {
-      return this.applicationRulesCache;
-    }
-    
-    const rules: ApplicationRule[] = [];
-    
-    try {
-      const homeDir = os.homedir();
-      const rulesDir = path.join(homeDir, '.gemini', 'rules');
-      
-      const files = await fs.promises.readdir(rulesDir);
-      const mdFiles = files.filter(file => file.endsWith('.md'));
-      
-      for (const filename of mdFiles) {
-        try {
-          const filePath = path.join(rulesDir, filename);
-          const content = await fs.promises.readFile(filePath, 'utf8');
-          
-          const rule = this.parseRuleFile(filename, content);
-          if (rule) {
-            rules.push(rule);
-          }
-        } catch (error) {
-          console.warn(`⚠️ Failed to load rule file ${filename}: ${error}`);
-        }
-      }
-      
-      this.applicationRulesCache = rules;
-      console.log(`📋 Loaded ${rules.length} application rules from ~/.gemini/rules/`);
-      
-      // Log which rules will be applied
-      for (const rule of rules) {
-        if (rule.alwaysApply) {
-          console.log(`📜 Applying application rule: ${rule.filename} (${rule.description})`);
-        }
-      }
-      
-      return rules;
-    } catch (error) {
-      if ((error as any).code === 'ENOENT') {
-        console.log(`💡 No application rules directory found at ~/.gemini/rules/`);
-        console.log(`💡 Create this directory and add .md files with application rules`);
-      } else {
-        console.warn(`⚠️ Failed to load application rules: ${error}`);
-      }
-      
-      this.applicationRulesCache = [];
-      return [];
-    }
-  }
-  
-  /**
-   * Parse a rule file to extract metadata and content
-   */
-  private parseRuleFile(filename: string, content: string): ApplicationRule | null {
-    try {
-      // Look for YAML frontmatter
-      const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-      
-      if (!frontmatterMatch) {
-        // Handle files without proper frontmatter - treat as alwaysApply=true
-        console.log(`📝 Rule file ${filename} has no frontmatter, treating as alwaysApply=true`);
-        return {
-          filename,
-          description: 'Auto-applied rule (no frontmatter)',
-          globs: [],
-          alwaysApply: true,
-          content: content.trim()
-        };
-      }
-      
-      const [, frontmatter, ruleContent] = frontmatterMatch;
-      
-      // Parse YAML frontmatter manually (simple key-value parsing)
-      const metadata: any = {};
-      const lines = frontmatter.split('\n');
-      
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        
-        if (trimmed.includes(':')) {
-          const [key, ...valueParts] = trimmed.split(':');
-          const value = valueParts.join(':').trim();
-          
-          if (key.trim() === 'globs') {
-            // Parse array format
-            if (value.startsWith('[') && value.endsWith(']')) {
-              const arrayContent = value.slice(1, -1);
-              metadata.globs = arrayContent.split(',').map(s => s.trim().replace(/['"]/g, ''));
-            } else if (value) {
-              metadata.globs = [value.replace(/['"]/g, '')];
-            } else {
-              metadata.globs = [];
-            }
-          } else if (key.trim() === 'alwaysApply') {
-            metadata.alwaysApply = value.toLowerCase() === 'true';
-          } else {
-            metadata[key.trim()] = value.replace(/['"]/g, '');
-          }
-        }
-      }
-      
-      return {
-        filename,
-        description: metadata.description || 'No description',
-        globs: metadata.globs || [],
-        alwaysApply: metadata.alwaysApply !== undefined ? metadata.alwaysApply : true, // Default to true if not specified
-        content: ruleContent.trim()
-      };
-    } catch (error) {
-      console.warn(`⚠️ Failed to parse rule file ${filename}: ${error}`);
-      return null;
-    }
-  }
-  
-  /**
-   * Get applicable application rules based on current context
-   */
-  private async getApplicableRules(currentFile?: string): Promise<string> {
-    const rules = await this.loadApplicationRules();
-    const applicableRules: string[] = [];
-    
-    for (const rule of rules) {
-      let shouldApply = rule.alwaysApply;
-      
-      // Check glob patterns if file is provided
-      if (!shouldApply && currentFile && rule.globs.length > 0) {
-        for (const glob of rule.globs) {
-          // Simple glob matching - for more complex patterns, consider using a glob library
-          const globRegex = new RegExp(
-            glob.replace(/\*/g, '.*').replace(/\?/g, '.'), 'i'
-          );
-          if (globRegex.test(currentFile)) {
-            shouldApply = true;
-            break;
-          }
-        }
-      }
-      
-      if (shouldApply) {
-        // Only log once when rules are first loaded, not every time they're applied
-        applicableRules.push(rule.content);
-      }
-    }
-    
-    return applicableRules.join('\n\n');
-  }
-  
-  /**
-   * Helper method to clean up file content
-   */
-  private cleanupContent(fileContent: string): string {
-    // Remove surrounding quotes and clean up content
-    fileContent = fileContent.replace(/^['"""']|['"""']$/g, '').trim();
-    // Remove trailing punctuation that might have been captured, but preserve intentional punctuation
-    fileContent = fileContent.replace(/[，,]+$/, '').trim();
-    return fileContent;
-  }
-
-  /**
-   * Extract user message content from GenerateContentParameters
-   * Returns the LAST user message (which contains the actual user prompt)
-   */
-  private extractUserMessage(request: GenerateContentParameters): string | null {
-    if (!request.contents) return null;
-    
-    let lastUserMessage: string | null = null;
-    
-    if (Array.isArray(request.contents)) {
-      for (const content of request.contents) {
-        if (typeof content === 'object' && content !== null && 'role' in content && content.role === 'user') {
-          if ('parts' in content && Array.isArray(content.parts)) {
-            for (const part of content.parts) {
-              if (typeof part === 'object' && part !== null && 'text' in part && typeof part.text === 'string') {
-                lastUserMessage = part.text;  // Keep updating to get the last one
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    return lastUserMessage;
-  }
-
-  /**
-   * Create a synthetic response for tool-only operations when API is unavailable
-   */
-  private createToolOnlyResponse(toolCalls: Array<{name: string, args: any}>): GenerateContentResponse {
-    const result = new GenerateContentResponse();
-    const parts: any[] = [];
-    const functionCalls: any[] = [];
-
-    // Create function call parts for each tool call
-    for (const toolCall of toolCalls) {
-      const callId = `${toolCall.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      
-      parts.push({
-        functionCall: {
-          name: toolCall.name,
-          args: toolCall.args,
-          id: callId,
-        },
-      });
-
-      functionCalls.push({
-        name: toolCall.name,
-        args: toolCall.args,
-        id: callId,
-      });
-    }
-
-    result.candidates = [
-      {
-        content: {
-          parts,
-          role: 'model',
-        },
-        finishReason: FinishReason.STOP,
-        index: 0,
-      },
+  private detectFunctionCallSupport(): boolean {
+    // Known endpoints that support function calls natively
+    const supportedEndpoints = [
+      'https://api.openai.com',
+      'https://api.anthropic.com',
+      'https://generativelanguage.googleapis.com',
     ];
 
-    // Note: functionCalls is set through the parts array (functionCall objects)
-    // No need to set a separate functionCalls property as it's handled by the parts
+    // Check if it's a known supported endpoint
+    const isKnownEndpoint = supportedEndpoints.some((endpoint) =>
+      this.apiEndpoint.startsWith(endpoint),
+    );
 
-    result.usageMetadata = {
-      promptTokenCount: 0,
-      candidatesTokenCount: 0, 
-      totalTokenCount: 0,
-    };
+    if (isKnownEndpoint) {
+      // For Gemini API, check if we want to force text hijacking for debugging
+      if (this.apiEndpoint.includes('generativelanguage.googleapis.com') && 
+          process.env.HIJACK_FORCE_FUNCTION_CALLS === 'true') {
+        console.log('🔧 Forcing text hijack mode for Gemini API (debugging)');
+        return true; // We'll handle via text hijacking
+      }
+      return true; // Native function call support
+    }
 
-    console.log('🔧 Created synthetic tool-only response');
-    return result;
+    // For other endpoints, we can provide function call support via text hijacking
+    const forceSupport = process.env.HIJACK_FORCE_FUNCTION_CALLS === 'true';
+    if (forceSupport) {
+      console.log(
+        '🔧 Text hijack mode: System believes model supports function calls (using text guidance)',
+      );
+      return true; // Tell system we support tools via hijacking
+    }
+
+    return false;
   }
 
-
-  private async convertGeminiToOpenAI(
+  /**
+   * Convert Gemini request to OpenAI format
+   */
+  private convertGeminiToOpenAI(
     request: GenerateContentParameters,
-  ): Promise<OpenAIRequest> {
-    const messages: OpenAIMessage[] = [];
-    const toolResponses: { name: string; content: string }[] = [];
-
-    // Handle different content formats
+  ): OpenAIRequest {
+    // Extract user message from Gemini format
+    let userMessage = '';
     if (request.contents) {
-      if (Array.isArray(request.contents)) {
-        for (const content of request.contents) {
-          if (
-            typeof content === 'object' &&
-            content !== null &&
-            'role' in content
-          ) {
-            let messageContent = '';
-            let toolCalls: any[] = [];
-
-            // Extract text and function calls from parts if available
-            if ('parts' in content && Array.isArray(content.parts)) {
-              for (const part of content.parts) {
-                if (typeof part === 'object' && part !== null) {
-                  if ('text' in part && typeof part.text === 'string') {
-                    messageContent += part.text;
-                  }
-                  // Handle function calls (from model)
-                  else if ('functionCall' in part && part.functionCall) {
-                    const funcCall = part.functionCall;
-                    toolCalls.push({
-                      id:
-                        funcCall.id ||
-                        `call_${Date.now()}_${Math.random()
-                          .toString(16)
-                          .slice(2)}`,
-                      type: 'function',
-                      function: {
-                        name: funcCall.name,
-                        arguments: JSON.stringify(funcCall.args || {}),
-                      },
-                    });
-                  }
-                  // Handle function responses (from user/tool execution)
-                  else if (
-                    'functionResponse' in part &&
-                    part.functionResponse
-                  ) {
-                    const funcResp = part.functionResponse;
-                    const functionName = funcResp.name || '';
-                    const toolContent = JSON.stringify(funcResp.response || {});
-                    console.log(
-                      `🔄 HIJACK: Collecting tool response for '${functionName}' to aggregate.`,
-                    );
-                    toolResponses.push({
-                      name: functionName,
-                      content: toolContent,
-                    });
-                  }
-                }
-              }
-            }
-
-            // After processing all parts, create the message if it's not a tool response
-            // and it doesn't contain a tool response part.
-            const hasFunctionResponse =
-              content.parts &&
-              Array.isArray(content.parts) &&
-              content.parts.some(
-                p => typeof p === 'object' && p !== null && 'functionResponse' in p,
-              );
-
-            if (toolCalls.length > 0) {
-              // This is an assistant message with tool calls
-              messages.push({
-                role: 'assistant',
-                content: messageContent || null,
-                tool_calls: toolCalls,
-              });
-            } else if (messageContent && !hasFunctionResponse) {
-              // Regular user or assistant message that is NOT a tool response
-              const role = content.role === 'user' ? 'user' : 'assistant';
-
-              if (role === 'user') {
-                messageContent = await this.addNaturalToolGuidance(
-                  messageContent,
-                );
-                
-                // Special handling for qwen series models - add /no_think prefix to disable thinking mode
-                if (this.model.toLowerCase().includes('qwen')) {
-                  if (!messageContent.startsWith('/no_think ')) {
-                    messageContent = '/no_think ' + messageContent;
-                    console.log('🔧 Added /no_think prefix for qwen series model');
-                  }
-                }
-              }
-
-              messages.push({
-                role,
-                content: messageContent,
-              });
-            }
+      // Handle both array and single content
+      const contents = Array.isArray(request.contents)
+        ? request.contents
+        : [request.contents];
+      if (contents.length > 0) {
+        const content = contents[0];
+        // Handle content that has parts (object format)
+        if (
+          content &&
+          typeof content === 'object' &&
+          'parts' in content &&
+          content.parts &&
+          content.parts.length > 0
+        ) {
+          const part = content.parts[0];
+          if ('text' in part && part.text) {
+            userMessage = part.text;
           }
+        } else if (typeof content === 'string') {
+          // Handle direct string content
+          userMessage = content;
         }
       }
     }
 
-    // Skip adding tool responses as messages - let them be handled in the next call
-    if (toolResponses.length > 0) {
-      console.log(
-        `🔄 HIJACK: Tool responses collected, but not adding to messages. Will be handled by caller.`,
-      );
-    }
+    // Add <no_think> for Qwen models if think mode is disabled
+    userMessage = this.processQwenThinkMode(userMessage);
 
-    const openaiRequest: OpenAIRequest = {
-      model: this.model,
-      messages,
-      max_tokens: 4096,
-      temperature: 0.7,
-    };
+    // Handle tools based on function call support
+    const tools: OpenAITool[] = [];
+    let enhancedMessage = userMessage;
 
-    // Check if tools should be disabled based on conversation context
-    const lastMessage = messages[messages.length - 1];
-    const shouldDisableTools = lastMessage?.content?.includes('Do NOT call any more tools') || 
-                              lastMessage?.content?.includes('do not call any more tools') ||
-                              lastMessage?.content?.includes('TASK COMPLETE - NO MORE TOOLS NEEDED');
-
-    // Check if tools are actually needed - skip for simple conversational requests
-    const lastMessageContent = messages[messages.length - 1]?.content || '';
-    const isSimpleConversation = /^[\s\S]{1,100}$/.test(lastMessageContent) && 
-      !/(?:创建|写入|建立|文件|read|write|create|tool|function|search|list|glob)/i.test(lastMessageContent);
+    // Handle tools from request (they come from toolRegistry in config)
+    const requestTools = (request as any).config?.tools; // Tools are in config.tools, not request.tools
     
-    // Convert tools from Gemini format to OpenAI format (only when needed)
-    if (!shouldDisableTools && !isSimpleConversation && request.config?.tools && Array.isArray(request.config.tools)) {
-      const openaiTools: OpenAITool[] = [];
-      console.log('🔧 Processing tools for complex request...');
+    if (requestTools && requestTools.length > 0) {
+      // Determine if we should use text hijacking or native function calls
+      const shouldUseTextHijacking = this.shouldUseTextHijacking();
       
-      for (const toolItem of request.config.tools) {
-        // Handle both Tool and CallableTool types
-        let tool: Tool;
+      if (shouldUseTextHijacking) {
+        console.log('🎯 Using text hijacking mode (sending text guidance instead of function definitions)');
+        enhancedMessage = this.textHijackParser.convertToolsToTextGuidance(
+          userMessage,
+          requestTools,
+        );
         
-        if ('tool' in toolItem && typeof toolItem.tool === 'function') {
-          try {
-            tool = await toolItem.tool();
-          } catch (error) {
-            console.warn('Failed to get tool definition from CallableTool:', error);
-            continue;
-          }
-        } else {
-          tool = toolItem as Tool;
-        }
+        console.log('📝 Enhanced message length:', enhancedMessage.length);
+        console.log('📝 Tool guidance section:', enhancedMessage.split('🔧 TOOL CALL REQUIRED:')[1]?.substring(0, 200) + '...');
         
-        if (tool.functionDeclarations && Array.isArray(tool.functionDeclarations)) {
-          for (const funcDecl of tool.functionDeclarations) {
-            if (funcDecl.name) {
-              const parameters: any = {
-                type: 'object',
-                properties: {},
-                additionalProperties: false
-              };
-              
-              if (funcDecl.parameters && typeof funcDecl.parameters === 'object' && funcDecl.parameters !== null) {
-                if (funcDecl.parameters.properties && typeof funcDecl.parameters.properties === 'object') {
-                  parameters.properties = funcDecl.parameters.properties;
-                }
-                if (Array.isArray(funcDecl.parameters.required)) {
-                  parameters.required = funcDecl.parameters.required;
-                }
-              }
-              
-              const openaiTool: OpenAITool = {
+        // Don't send actual function definitions to the model - use text guidance instead
+        // tools array stays empty for the actual API call
+      } else {
+        console.log('🔧 Using native function call mode (sending actual function definitions)');
+        // Convert Gemini tools to OpenAI format
+        for (const tool of requestTools) {
+          if (tool.functionDeclarations) {
+            for (const func of tool.functionDeclarations) {
+              tools.push({
                 type: 'function',
                 function: {
-                  name: funcDecl.name,
-                  description: funcDecl.description || `Function: ${funcDecl.name}`,
-                  parameters: {
-                    type: 'object',
-                    properties: parameters.properties || {},
-                    ...(parameters.required && { required: parameters.required }),
-                    ...(parameters.additionalProperties !== undefined && { additionalProperties: parameters.additionalProperties })
-                  },
+                  name: func.name,
+                  description: func.description,
+                  parameters: func.parameters,
                 },
-              };
-              
-              openaiTools.push(openaiTool);
+              });
             }
           }
         }
       }
-      
-      if (openaiTools.length > 0) {
-        openaiRequest.tools = openaiTools;
-        openaiRequest.tool_choice = 'auto';
-        console.log(`✅ Added ${openaiTools.length} tools to request`);
-        console.log(`🔧 Tool names: ${openaiTools.map(t => t.function.name).join(', ')}`);
-      } else {
-        console.log(`⚠️ No tools were converted from ${request.config?.tools?.length || 0} config tools`);
-      }
-    } else if (isSimpleConversation) {
-      console.log('🚀 Skipping tool processing for simple conversation');
     }
 
-    return openaiRequest;
+    return {
+      model: this.model,
+      messages: [
+        {
+          role: 'user',
+          content: enhancedMessage,
+        },
+      ],
+      tools: this.supportsFunctionCalls && tools.length > 0 ? tools : undefined,
+    };
   }
 
+
+  /**
+   * Convert OpenAI response to Gemini format
+   * This includes the KEY TEXT HIJACK PARSER for non-function-call models
+   */
   private convertOpenAIToGemini(
-    response: OpenAIResponse,
+    openaiResponse: OpenAIResponse,
   ): GenerateContentResponse {
-    const choice = response.choices[0];
-    const content = choice?.message?.content || '';
-    const toolCalls = choice?.message?.tool_calls;
-
-    // Create parts array starting with text content
-    const parts: any[] = [];
-    const functionCalls: any[] = [];
-
-    if (content) {
-      // Clean up think tags from qwen model responses
-      let cleanedContent = content;
-      
-      // For qwen series models: Filter out content before </think> tag as requested
-      if (this.model.toLowerCase().includes('qwen')) {
-        // Look for closing think tag and remove everything before it
-        const thinkEndMatch = cleanedContent.match(/<\/think>/i);
-        if (thinkEndMatch) {
-          const endIndex = thinkEndMatch.index! + thinkEndMatch[0].length;
-          cleanedContent = cleanedContent.substring(endIndex).trim();
-          console.log('🔧 Filtered out content before </think> tag for qwen model');
-        }
-        
-        // Also remove any remaining think blocks (opening and closing tags)
-        cleanedContent = cleanedContent.replace(/<think>[\s\S]*?<\/think>/gi, '');
-      } else {
-        // For other models: Remove empty think tags with various whitespace patterns
-        cleanedContent = cleanedContent.replace(/<think>\s*<\/think>/gi, '');
-        cleanedContent = cleanedContent.replace(/<think>[\s\n\r]*<\/think>/gi, '');
-        cleanedContent = cleanedContent.replace(/<think>[\s\n\r\t]*<\/think>/gi, '');
-      }
-      
-      // Trim any leading/trailing whitespace after cleanup
-      cleanedContent = cleanedContent.trim();
-      
-      if (cleanedContent) {
-        parts.push({ text: cleanedContent });
-      }
-    }
-
-    // Convert tool calls from OpenAI format to Gemini format
-    if (toolCalls && Array.isArray(toolCalls)) {
-      for (const toolCall of toolCalls) {
-        if (toolCall.type === 'function') {
-          // Generate unique ID for function call
-          const callId = toolCall.id || `${toolCall.function.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-          const functionCallArgs = JSON.parse(toolCall.function.arguments || '{}');
-
-          // Add to parts array for content
-          parts.push({
-            functionCall: {
-              name: toolCall.function.name,
-              args: functionCallArgs,
-              id: callId,
-            },
-          });
-
-          // Add to functionCalls array for direct access
-          functionCalls.push({
-            name: toolCall.function.name,
-            args: functionCallArgs,
-            id: callId,
-          });
-        }
-      }
-    }
-
-    // Create a proper GenerateContentResponse structure with all required properties
     const result = new GenerateContentResponse();
-    
-    // Role conversion logic: When we have function calls, they should be processed by the tool registry
-    const hasToolCalls = functionCalls.length > 0;
-    const role = hasToolCalls ? 'model' : 'model'; // Always model role - let tool registry handle execution
-    
-    result.candidates = [
-      {
-        content: {
-          parts,
-          role: role,
-        },
-        finishReason: FinishReason.STOP,
-        index: 0,
-      },
-    ];
 
-    // Add functionCalls array to response for direct access
-    if (functionCalls.length > 0) {
-      console.log('🔧 Setting functionCalls on result for tool registry execution:', JSON.stringify(functionCalls, null, 2));
-      // Debug: check each function call structure
-      for (let i = 0; i < functionCalls.length; i++) {
-        const fc = functionCalls[i];
-        console.log(`🔍 FunctionCall[${i}]:`, {
-          name: fc.name,
-          args: fc.args,
-          id: fc.id,
-          argsType: typeof fc.args,
-          argsKeys: fc.args ? Object.keys(fc.args) : 'null'
+    if (openaiResponse.choices && openaiResponse.choices.length > 0) {
+      const choice = openaiResponse.choices[0];
+      const message = choice.message;
+
+      // Handle text content and extract tool calls if needed
+      const parts: { text: string }[] = [];
+      let functionCalls: {
+        name: string;
+        args: Record<string, unknown>;
+        id: string;
+      }[] = [];
+
+      if (message.content) {
+        // Determine which parsing mode to use
+        const shouldUseTextHijacking = this.shouldUseTextHijacking();
+        
+        if (shouldUseTextHijacking) {
+          // TEXT HIJACK PARSER: Parse tool calls from text content using shared parser
+          console.log('🎯 Parsing text content for hijacked tool calls');
+          const parseResult = this.textHijackParser.parseTextForToolCalls(message.content);
+
+          if (parseResult.toolCalls.length > 0) {
+            console.log(
+              `✅ Found ${parseResult.toolCalls.length} hijacked tool calls in text response`,
+            );
+            functionCalls = parseResult.toolCalls;
+
+            // Include any remaining text as content
+            if (parseResult.cleanText.trim()) {
+              parts.push({ text: parseResult.cleanText });
+            }
+          } else {
+            // No tool calls found, treat as regular text
+            parts.push({ text: message.content });
+          }
+        } else {
+          // NATIVE FUNCTION CALL PARSER: Handle standard OpenAI function calls
+          console.log('🔧 Using native function call parsing');
+          parts.push({ text: message.content });
+
+          // Handle standard function calls from tool_calls field
+          if (message.tool_calls && message.tool_calls.length > 0) {
+            console.log(`✅ Found ${message.tool_calls.length} native function calls`);
+            for (const toolCall of message.tool_calls) {
+              if (toolCall.type === 'function' && toolCall.function) {
+                let args = {};
+                try {
+                  args = JSON.parse(toolCall.function.arguments);
+                } catch (_e) {
+                  console.warn(
+                    'Failed to parse function arguments:',
+                    toolCall.function.arguments,
+                  );
+                }
+
+                functionCalls.push({
+                  name: toolCall.function.name,
+                  args,
+                  id: toolCall.id,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      result.candidates = [
+        {
+          content: {
+            parts,
+            role: 'model',
+          },
+          finishReason:
+            choice.finish_reason === 'stop'
+              ? FinishReason.STOP
+              : FinishReason.OTHER,
+          index: 0,
+        },
+      ];
+
+      // Set function calls if any (this is the key hijack result)
+      if (functionCalls.length > 0) {
+        // Use Object.defineProperty to work around readonly restriction
+        Object.defineProperty(result, 'functionCalls', {
+          value: functionCalls,
+          writable: true,
+          enumerable: true,
+          configurable: true,
         });
       }
-      // Function calls are already set through the parts array
-      console.log('✅ Successfully set function calls through parts array for tool execution');
     }
 
+    // Set usage metadata
     result.usageMetadata = {
-      promptTokenCount: response.usage?.prompt_tokens || 0,
-      candidatesTokenCount: response.usage?.completion_tokens || 0,
-      totalTokenCount: response.usage?.total_tokens || 0,
+      promptTokenCount: openaiResponse.usage?.prompt_tokens || 0,
+      candidatesTokenCount: openaiResponse.usage?.completion_tokens || 0,
+      totalTokenCount: openaiResponse.usage?.total_tokens || 0,
     };
 
-    // Hide the real model name from system logs - replace with target model name
-    const sanitizedResult = JSON.stringify(result, (key, value) => {
-      if (typeof value === 'string' && value.includes('unsloth/qwen3-235b-a22b-gguf')) {
-        return value.replace(/unsloth\/qwen3-235b-a22b-gguf\/qwen3-235b-a22b-ud-q4_k_xl-00001-of-00003\.gguf/g, 'gemini-2.5-flash');
-      }
-      return value;
-    }, 2);
-    
-    console.log('🔍 Converted Gemini Response with role conversion:', sanitizedResult);
     return result;
   }
+
 
   async generateContent(
     request: GenerateContentParameters,
   ): Promise<GenerateContentResponse> {
     try {
       console.log('🚀 Making OpenAI compatible API call...');
-      
-      // New architecture: Check user message for tool requests
-      const userMessage = this.extractUserMessage(request);
-      // Always guide model to return JSON tool calls when tools are available
-      console.log('🎯 Guiding model to use JSON tool calls for any tool operations');
-      
-      const openaiRequest = await this.convertGeminiToOpenAI(request);
 
-      let response: Response;
-      try {
-        response = await fetch(`${this.apiEndpoint}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(openaiRequest),
-        });
-      } catch (fetchError) {
-        console.error('🌐 Network error, falling back to direct tool execution:', fetchError);
-        
-        // Network error - no fallback in new architecture
-        
-        throw fetchError;
-      }
+      const openaiRequest = this.convertGeminiToOpenAI(request);
+
+      
+      const response = await fetch(`${this.apiEndpoint}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(openaiRequest),
+      });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        
-        // Create error with status code for proper retry handling
-        const error = new Error(
-          `OpenAI API request failed: ${response.status} ${response.statusText} - ${errorText}`,
-        ) as Error & { status: number };
-        error.status = response.status;
-        
-        // Log specific error types
-        if (response.status === 429) {
-          console.warn(`⚠️ Rate limit exceeded (429): ${errorText}`);
-        } else if (response.status >= 500 && response.status < 600) {
-          console.error(`🚨 Server error (${response.status}): ${errorText}`);
-        }
-        
-        throw error;
+        throw new Error(
+          `OpenAI API error: ${response.status} ${response.statusText}`,
+        );
       }
 
       const openaiResponse: OpenAIResponse = await response.json();
-      
-      // Debug: Log the response structure
-      console.log('🔍 [DEBUG] OpenAI Response structure:');
-      console.log(`   - choices.length: ${openaiResponse.choices?.length || 0}`);
-      console.log(`   - usage: ${JSON.stringify(openaiResponse.usage)}`);
-      if (openaiResponse.choices?.[0]) {
-        const firstChoice = openaiResponse.choices[0];
-        console.log(`   - choice[0].message.content: "${firstChoice.message?.content?.slice(0, 100) || 'NULL'}..."`);
-        console.log(`   - choice[0].message.tool_calls: ${firstChoice.message?.tool_calls?.length || 0} calls`);
-        console.log(`   - choice[0].finish_reason: ${firstChoice.finish_reason}`);
-      }
-      
-      // Display real model information to user (transparent to system)
-      const realModel = openaiResponse.model || this.model;
-      console.log(`🤖 Response from model: ${realModel} (displayed as: gemini-2.5-flash)`);
-      
-      // Hide the real model name from the response - replace with target model name
-      if (openaiResponse.model) {
-        openaiResponse.model = 'gemini-2.5-flash';
-      }
-      
       console.log('✅ OpenAI API call successful');
-      
-      // Check for empty or problematic responses that indicate model failure
-      const firstChoice = openaiResponse.choices?.[0];
-      const firstMessage = firstChoice?.message;
-      const modelContent = firstMessage?.content || '';
-      
-      const isEmptyResponse = !modelContent.trim();
-      // Remove system format error detection since we no longer inject system messages
-      const isModelFailure = isEmptyResponse;
-      
-      if (isModelFailure) {
-        console.warn(`⚠️ Detected model failure: empty=${isEmptyResponse}`);
-        const shouldRetry = await this.handleModelFailure();
-        
-        if (shouldRetry) {
-          console.log(`🔄 Retrying with new model: ${this.model}`);
-          return this.generateContent(request); // Recursive retry with new model
-        }
-      } else {
-        this.resetFailureCount(); // Reset on successful response
-      }
-      
-      // Standard OpenAI function call processing with parameter mapping
-      const toolCalls = firstMessage?.tool_calls || [];
-      if (toolCalls.length > 0) {
-        console.log(`🎯 Model returned ${toolCalls.length} standard function calls`);
-        
-        // Apply parameter mapping to function calls in hijack mode
-        console.log(`🔍 Looking for parameter mapping for model: '${this.model}', endpoint: '${this.apiEndpoint}'`);
-        const paramMapping = parameterMappingManager.findMapping(this.model, this.apiEndpoint);
-        
-        if (paramMapping) {
-          // Apply parameter mapping to each function call
-          for (let i = 0; i < toolCalls.length; i++) {
-            const toolCall = toolCalls[i];
-            const originalArgs = JSON.parse(toolCall.function.arguments);
-            
-            console.log(`🔍 Original args for ${toolCall.function.name}:`, originalArgs);
-            
-            const mappingResult = parameterMappingManager.applyMapping(
-              toolCall.function.name, 
-              originalArgs, 
-              paramMapping
-            );
-            
-            if (mappingResult.mapped) {
-              toolCall.function.arguments = JSON.stringify(mappingResult.mappedArgs);
-              console.log(`🔧 Applied ${mappingResult.appliedMappings.length} parameter mappings for ${toolCall.function.name}: ${mappingResult.appliedMappings.join(', ')}`);
-              console.log(`🔧 Mapped args:`, mappingResult.mappedArgs);
-            } else {
-              console.log(`ℹ️  No parameter mapping needed for ${toolCall.function.name}`);
-            }
-          }
-        } else {
-          console.log(`ℹ️  No parameter mapping configuration found for this model/endpoint`);
-        }
-      }
-      
+
       return this.convertOpenAIToGemini(openaiResponse);
     } catch (error) {
       console.error('❌ OpenAI API call failed:', error);
@@ -1420,214 +444,58 @@ RESPOND IN JSON FORMAT ONLY:`;
   }
 
   async generateContentStream(
-    request: GenerateContentParameters,
+    _request: GenerateContentParameters,
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
-    const self = this; // Capture 'this'
-    
+    // For now, use non-streaming version
+    const response = await this.generateContent(_request);
+
     return (async function* () {
-      try {
-        console.log('🚀 Making OpenAI compatible streaming API call...');
-        
-        // Standard OpenAI streaming with function calls
-        const userMessage = self.extractUserMessage(request);
-        console.log('🎯 [STREAMING] Using standard function calls for tool operations');
-        
-        const openaiRequest = await self.convertGeminiToOpenAI(request);
-        openaiRequest.stream = false; // Temporarily disable streaming to fix timeout issues
-
-        let response: Response;
-        try {
-          response = await fetch(`${self.apiEndpoint}/chat/completions`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${self.apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(openaiRequest),
-          });
-        } catch (fetchError) {
-          console.error('🌐 Network error, falling back to direct tool execution:', fetchError);
-          
-          // Network error - no fallback in new architecture
-          
-          throw fetchError;
-        }
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          
-          // Create error with status code for proper retry handling
-          const error = new Error(
-            `OpenAI API request failed: ${response.status} ${response.statusText} - ${errorText}`,
-          ) as Error & { status: number };
-          error.status = response.status;
-          
-          // Log specific error types
-          if (response.status === 429) {
-            console.warn(`⚠️ Rate limit exceeded (429): ${errorText}`);
-          } else if (response.status >= 500 && response.status < 600) {
-            console.error(`🚨 Server error (${response.status}): ${errorText}`);
-          }
-          
-          throw error;
-        }
-
-        // Process non-streaming response
-        console.log('📥 Processing non-streaming OpenAI API response...');
-        const openaiResponse = await response.json();
-        console.log('🔍 Raw OpenAI response:', JSON.stringify(openaiResponse, null, 2));
-        
-        const choice = openaiResponse.choices?.[0];
-        if (!choice) {
-          throw new Error('No choices in OpenAI response');
-        }
-        
-        const message = choice.message;
-        const content = message?.content;
-        const toolCalls = message?.tool_calls;
-        
-        // Handle text content
-        if (content && typeof content === 'string') {
-          console.log('📝 [STREAMING] Text content received:', content);
-          
-          // Regular text content - yield it
-          const result = new GenerateContentResponse();
-          result.candidates = [
-            {
-              content: {
-                parts: [{ text: content }],
-                role: 'model',
-              },
-              finishReason: FinishReason.STOP,
-              index: 0,
-            },
-          ];
-          
-          result.usageMetadata = {
-            promptTokenCount: openaiResponse.usage?.prompt_tokens || 0,
-            candidatesTokenCount: openaiResponse.usage?.completion_tokens || 0,
-            totalTokenCount: openaiResponse.usage?.total_tokens || 0,
-          };
-          
-          yield result;
-        }
-        
-        // Handle tool calls
-        const finalToolCalls = message?.tool_calls || toolCalls;
-        if (finalToolCalls && Array.isArray(finalToolCalls) && finalToolCalls.length > 0) {
-          console.log('🔧 [STREAMING] Tool calls received:', JSON.stringify(finalToolCalls, null, 2));
-          
-          const functionCalls: any[] = [];
-          const parts: any[] = [];
-          
-          for (const toolCall of finalToolCalls) {
-            if (toolCall.type === 'function' && toolCall.function) {
-              let functionCallArgs = {};
-              try {
-                functionCallArgs = JSON.parse(toolCall.function.arguments || '{}');
-              } catch (e) {
-                console.error('❌ Failed to parse tool call arguments:', e);
-                continue;
-              }
-              
-              const callId = toolCall.id || `${toolCall.function.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-              
-              // Add to parts array for content
-              parts.push({
-                functionCall: {
-                  name: toolCall.function.name,
-                  args: functionCallArgs,
-                  id: callId,
-                },
-              });
-              
-              // Add to functionCalls array for direct access
-              functionCalls.push({
-                name: toolCall.function.name,
-                args: functionCallArgs,
-                id: callId,
-              });
-            }
-          }
-          
-          if (functionCalls.length > 0) {
-            console.log('🔧 Setting functionCalls on result:', JSON.stringify(functionCalls, null, 2));
-            
-            const result = new GenerateContentResponse();
-            result.candidates = [
-              {
-                content: {
-                  parts,
-                  role: 'model',
-                },
-                finishReason: FinishReason.STOP,
-                index: 0,
-              },
-            ];
-            
-            result.usageMetadata = {
-              promptTokenCount: openaiResponse.usage?.prompt_tokens || 0,
-              candidatesTokenCount: openaiResponse.usage?.completion_tokens || 0,
-              totalTokenCount: openaiResponse.usage?.total_tokens || 0,
-            };
-            
-            // Function calls are already set through the parts array
-            
-            yield result;
-          }
-        }
-        
-        console.log('✅ OpenAI non-streaming API call completed');
-      } catch (error) {
-        console.error('❌ OpenAI streaming API call failed:', error);
-        throw error;
-      }
+      yield response;
     })();
   }
 
   async countTokens(
     request: CountTokensParameters,
   ): Promise<CountTokensResponse> {
-    // For OpenAI compatible APIs, we'll estimate token count
-    // This is a simple approximation - real implementation would use tiktoken or similar
+    // Basic implementation - just estimate
     let text = '';
     if (request.contents) {
-      if (Array.isArray(request.contents)) {
-        for (const content of request.contents) {
-          if (
-            typeof content === 'object' &&
-            content !== null &&
-            'parts' in content &&
-            Array.isArray(content.parts)
-          ) {
-            for (const part of content.parts) {
-              if (
-                typeof part === 'object' &&
-                part !== null &&
-                'text' in part &&
-                typeof part.text === 'string'
-              ) {
-                text += part.text;
-              }
-            }
+      // Handle both array and single content
+      const contents = Array.isArray(request.contents)
+        ? request.contents
+        : [request.contents];
+      if (contents.length > 0) {
+        const content = contents[0];
+        // Handle content that has parts (object format)
+        if (
+          content &&
+          typeof content === 'object' &&
+          'parts' in content &&
+          content.parts &&
+          content.parts.length > 0
+        ) {
+          const part = content.parts[0];
+          if ('text' in part && part.text) {
+            text = part.text;
           }
+        } else if (typeof content === 'string') {
+          // Handle direct string content
+          text = content;
         }
       }
     }
 
-    // Rough approximation: 1 token ≈ 4 characters
-    const estimatedTokens = Math.ceil(text.length / 4);
+    // Rough estimation: 1 token per 4 characters
+    const tokenCount = Math.ceil(text.length / 4);
 
     return {
-      totalTokens: estimatedTokens,
+      totalTokens: tokenCount,
     };
   }
 
   async embedContent(
     _request: EmbedContentParameters,
   ): Promise<EmbedContentResponse> {
-    // Most OpenAI compatible APIs don't support embeddings in the same endpoint
-    // This would need to be implemented separately if needed
     throw new Error('Embedding not supported in OpenAI compatible mode');
   }
 }
