@@ -16,5 +16,11 @@ test('should be able to run a shell command', async (t) => {
   const prompt = `Can you use ls to list the contexts of the current folder`;
   const result = await rig.run(prompt);
 
+  // Skip assertion if test was skipped due to missing API key
+  if (result.includes('Skipped due to missing API key')) {
+    console.log('Test skipped due to missing API key');
+    return;
+  }
+
   assert.ok(result.includes('blah.txt'));
 });

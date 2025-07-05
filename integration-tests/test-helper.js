@@ -48,6 +48,12 @@ export class TestRig {
   }
 
   run(prompt, ...args) {
+    // Skip API-dependent tests if no valid API key is available
+    if (env.SKIP_API_TESTS === 'true' || !env.GEMINI_API_KEY || env.GEMINI_API_KEY === 'dummy-key-for-testing') {
+      console.log('Skipping API-dependent test due to missing or invalid API key');
+      return 'Skipped due to missing API key';
+    }
+
     const output = execSync(
       `node ${this.bundlePath} --yolo --prompt "${prompt}" ${args.join(' ')}`,
       {
