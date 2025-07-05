@@ -480,8 +480,8 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
         controller.abort();
-        console.error('🚨 API call timed out after 120 seconds');
-      }, 120000); // Increased to 2 minutes
+        console.error('🚨 API call timed out after 300 seconds');
+      }, 300000); // Increased to 5 minutes
 
       try {
         const response = await fetch(`${this.apiEndpoint}/chat/completions`, {
@@ -512,7 +512,7 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
         
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {
           console.error('🚨 API request was aborted (likely due to timeout)');
-          throw new Error('API request timed out after 2 minutes');
+          throw new Error('API request timed out after 5 minutes');
         }
         
         console.error('🚨 API call failed:', fetchError);

@@ -138,7 +138,7 @@ export class GeminiClient {
               paths: ['**/*'], // Read everything recursively
               useDefaultExcludes: true, // Use default excludes
             },
-            AbortSignal.timeout(30000),
+            AbortSignal.timeout(300000), // Increased to 5 minutes
           );
           if (result.llmContent) {
             initialParts.push({
