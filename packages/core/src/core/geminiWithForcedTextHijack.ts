@@ -69,7 +69,10 @@ export class GeminiWithForcedTextHijack implements ContentGenerator {
       return this.generateContentWithTextHijacking(request, requestTools);
     } else {
       console.log('📝 Regular text request - using official Gemini API');
-      return this.googleGenAI.models.generateContent(request);
+      const response = await this.googleGenAI.models.generateContent(request);
+      
+      // Still apply Qwen think filtering for regular responses
+      return this.filterQwenThinkInResponse(response);
     }
   }
 
@@ -99,31 +102,41 @@ export class GeminiWithForcedTextHijack implements ContentGenerator {
     request: GenerateContentParameters,
     tools: Tool[]
   ): Promise<GenerateContentResponse> {
-    // Extract user message
-    let userMessage = '';
+    // Process the FULL conversation history (same as standard Gemini API)
+    // Add system-level tool guidance (like native function definitions)
+    const allContents: any[] = [];
+    
+    // Add system message with tool guidance at the beginning
+    const systemToolGuidance = this.textHijackParser.createSystemToolGuidance(tools);
+    allContents.push({
+      role: 'user',
+      parts: [{ text: systemToolGuidance }]
+    });
+    
     if (request.contents) {
       const contents = Array.isArray(request.contents) ? request.contents : [request.contents];
-      if (contents.length > 0) {
-        const content = contents[0];
-        if (content && typeof content === 'object' && 'parts' in content && content.parts && content.parts.length > 0) {
-          const part = content.parts[0];
-          if ('text' in part && part.text) {
-            userMessage = part.text;
-          }
+      console.log(`🔄 Processing ${contents.length} contents from full conversation history`);
+      
+      // Keep ALL conversation history as-is (no per-message enhancement)
+      for (const content of contents) {
+        if (content && typeof content === 'object' && 'role' in content) {
+          allContents.push(content);
         } else if (typeof content === 'string') {
-          userMessage = content;
+          // Handle direct string content (legacy)
+          allContents.push({
+            role: 'user',
+            parts: [{ text: content }]
+          });
         }
       }
     }
+    
+    console.log('📝 Added system tool guidance (like native function definitions)');
 
-    // Convert tools to text guidance using shared parser
-    const enhancedMessage = this.textHijackParser.convertToolsToTextGuidance(userMessage, tools);
-    console.log('📝 Enhanced message with tool guidance created');
-
-    // Create modified request without tools (pure text request)
+    // Create modified request with system guidance + FULL conversation history
     const modifiedRequest = {
       ...request,
-      contents: enhancedMessage,
+      contents: allContents,
     };
 
     // Remove tools from the request to make it a pure text request
@@ -131,7 +144,9 @@ export class GeminiWithForcedTextHijack implements ContentGenerator {
       delete (modifiedRequest as any).config.tools;
     }
 
-    // Call official Gemini API with text-only request
+    console.log(`📚 Sending system guidance + full conversation history (${allContents.length} contents) to Gemini API`);
+
+    // Call official Gemini API with system guidance + full conversation history
     const response = await this.googleGenAI.models.generateContent(modifiedRequest);
 
     // Parse the response for tool calls
@@ -166,8 +181,9 @@ export class GeminiWithForcedTextHijack implements ContentGenerator {
       return response;
     }
 
-    // Parse tool calls from text using shared parser
-    const parseResult = this.textHijackParser.parseTextForToolCalls(textContent);
+    // Parse tool calls from text using shared parser with context preservation for multi-turn conversations
+    const preserveContext = true; // Always preserve context in Gemini forced text hijacking
+    const parseResult = this.textHijackParser.parseTextForToolCalls(textContent, preserveContext);
     
     if (parseResult.toolCalls.length > 0) {
       console.log(`✅ Found ${parseResult.toolCalls.length} text-hijacked tool calls in Gemini response`);
@@ -192,7 +208,7 @@ export class GeminiWithForcedTextHijack implements ContentGenerator {
         configurable: true,
       });
       
-      // Update candidates with cleaned text
+      // Update candidates with cleaned text (preserve reasoning context)
       modifiedResponse.candidates = [{
         ...candidate,
         content: {
@@ -201,10 +217,50 @@ export class GeminiWithForcedTextHijack implements ContentGenerator {
         }
       }];
 
+      console.log(`📝 Preserved conversation context with tool calls for multi-turn continuity`);
       return modifiedResponse;
     }
 
     return response;
+  }
+
+  /**
+   * Filter Qwen <think></think> blocks from regular Gemini responses
+   */
+  private filterQwenThinkInResponse(response: GenerateContentResponse): GenerateContentResponse {
+    if (!response.candidates || response.candidates.length === 0) {
+      return response;
+    }
+
+    const candidate = response.candidates[0];
+    const content = candidate.content;
+    
+    if (!content?.parts || content.parts.length === 0) {
+      return response;
+    }
+
+    // Filter <think> blocks from text parts
+    const filteredParts = content.parts.map(part => {
+      if ('text' in part && part.text) {
+        const filteredText = this.textHijackParser.filterQwenThinkBlocks(part.text);
+        return { ...part, text: filteredText };
+      }
+      return part;
+    });
+
+    // Create modified response with filtered content
+    const modifiedResponse = new GenerateContentResponse();
+    Object.assign(modifiedResponse, response);
+    
+    modifiedResponse.candidates = [{
+      ...candidate,
+      content: {
+        ...content,
+        parts: filteredParts,
+      }
+    }];
+
+    return modifiedResponse;
   }
 
 }

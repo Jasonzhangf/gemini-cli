@@ -16,6 +16,7 @@ export interface ParsedToolCall {
 export interface TextParseResult {
   toolCalls: ParsedToolCall[];
   cleanText: string;
+  originalText?: string; // Preserve original text for context analysis
 }
 
 /**
@@ -34,7 +35,81 @@ export class TextHijackParser {
   }
 
   /**
+   * Filter content for Qwen models - removes <think></think> blocks
+   * This should be called for ALL Qwen model responses, not just tool calls
+   */
+  filterQwenThinkBlocks(content: string): string {
+    const isQwenModel = this.model.toLowerCase().includes('qwen') || 
+                       this.model.toLowerCase().includes('qwq');
+    
+    if (!isQwenModel) {
+      return content;
+    }
+
+    // Remove all <think>...</think> blocks (including nested content)
+    const filteredContent = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    
+    if (filteredContent !== content) {
+      console.log('🧠 Filtered out <think> blocks from Qwen model response');
+    }
+
+    return filteredContent;
+  }
+
+  /**
+   * Create system-level tool guidance (like native function definitions)
+   * This provides tool information globally, not per-message
+   */
+  createSystemToolGuidance(tools: Tool[]): string {
+    const toolDescriptions: string[] = [];
+
+    for (const tool of tools) {
+      if (tool.functionDeclarations) {
+        for (const func of tool.functionDeclarations) {
+          const params = func.parameters?.properties || {};
+          const required = func.parameters?.required || [];
+
+          const paramList = Object.keys(params)
+            .map((param) => {
+              const paramInfo = params[param];
+              const isRequired = required.includes(param) ? ' (required)' : ' (optional)';
+              return `    "${param}": ${paramInfo.type}${isRequired} - ${paramInfo.description}`;
+            })
+            .join('\n');
+
+          toolDescriptions.push(`**${func.name}**: ${func.description}
+  Parameters:
+${paramList || '    None'}`);
+        }
+      }
+    }
+
+    const systemGuidance = `You are an AI assistant with access to the following tools. When you need to use a tool, respond with JSON in this exact format:
+
+\`\`\`json
+{
+  "tool_call": {
+    "name": "tool_name",
+    "arguments": {"param": "value"}
+  }
+}
+\`\`\`
+
+Available tools:
+${toolDescriptions.join('\n\n')}
+
+IMPORTANT:
+- Only use tools when necessary to complete the user's request
+- Always use the exact JSON format shown above
+- Include all required parameters
+- You can provide explanatory text along with tool calls when helpful`;
+
+    return systemGuidance;
+  }
+
+  /**
    * Convert tools to text guidance for models that don't support native function calls
+   * @deprecated Use createSystemToolGuidance for better architecture
    */
   convertToolsToTextGuidance(userMessage: string, tools: Tool[]): string {
     const toolDescriptions: string[] = [];
@@ -95,21 +170,13 @@ ${toolDescriptions.join('\n')}
    * Parse text content for JSON tool calls
    * This is the CORE TEXT HIJACK PARSER shared by all implementations
    */
-  parseTextForToolCalls(content: string): TextParseResult {
+  parseTextForToolCalls(content: string, preserveContext: boolean = false): TextParseResult {
     const toolCalls: ParsedToolCall[] = [];
-    let cleanText = content;
-
-    // Step 1: Remove <think></think> blocks for Qwen models
-    const isQwenModel = this.model.toLowerCase().includes('qwen') || 
-                       this.model.toLowerCase().includes('qwq');
+    let originalCleanText = '';
     
-    if (isQwenModel) {
-      // Remove all <think>...</think> blocks (including nested content)
-      cleanText = cleanText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-      if (cleanText !== content) {
-        console.log('🧠 Filtered out <think> blocks from model response');
-      }
-    }
+    // Step 1: Always filter <think></think> blocks for Qwen models first
+    let cleanText = this.filterQwenThinkBlocks(content);
+    originalCleanText = cleanText; // Preserve original for context
 
     // Step 2: Look for JSON code blocks or inline JSON
     const jsonPatterns = [
@@ -165,30 +232,71 @@ ${toolDescriptions.join('\n')}
       }
     }
 
-    // Step 3: Clean up remaining content to match function call behavior
-    // If we found tool calls, we should minimize remaining text content
-    // to match the behavior of native function calls (which typically have minimal or no text)
+    // Step 3: Handle text content based on context preservation settings
     if (toolCalls.length > 0) {
-      // Remove common instruction/guidance text that might remain
-      cleanText = cleanText
-        .replace(/User Request:[\s\S]*?(?=\n\n|\n$|$)/g, '') // Remove "User Request:" sections
-        .replace(/🔧 TOOL CALL REQUIRED:[\s\S]*?(?=\n\n|\n$|$)/g, '') // Remove tool guidance
-        .replace(/FORMAT:[\s\S]*?(?=\n\n|\n$|$)/g, '') // Remove format instructions
-        .replace(/EXAMPLE[\s\S]*?(?=\n\n|\n$|$)/g, '') // Remove examples
-        .replace(/Available tools:[\s\S]*?(?=\n\n|\n$|$)/g, '') // Remove tool lists
-        .replace(/⚠️ CRITICAL:[\s\S]*?(?=\n\n|\n$|$)/g, '') // Remove critical instructions
-        .trim();
-      
-      // If after cleanup there's only whitespace or common filler text, remove it entirely
-      if (!cleanText || cleanText.match(/^[\s\n\r]*$/) || 
-          cleanText.includes('I\'ll help') || 
-          cleanText.includes('Let me')) {
+      if (preserveContext) {
+        // CONTEXT PRESERVATION MODE: Keep explanatory text for multi-turn conversation continuity
+        // This helps maintain conversation context between turns
+        console.log(`📝 Preserving context text with ${toolCalls.length} tool calls for conversation continuity`);
+        // cleanText already has JSON removed but retains explanatory text
+      } else {
+        // STANDARD MODE: Remove all text content to match native function call behavior
+        // Native function calls typically have empty or minimal text content
         cleanText = '';
+        console.log(`🧹 Removed all text content for tool calls (matching native function call behavior)`);
       }
-      
-      console.log(`🧹 Cleaned text content: ${cleanText.length > 0 ? `"${cleanText.substring(0, 100)}..."` : 'empty (function call only)'}`);
     }
 
-    return { toolCalls, cleanText };
+    return { 
+      toolCalls, 
+      cleanText,
+      originalText: originalCleanText // Preserve original for context analysis
+    };
+  }
+
+  /**
+   * Convert user/tool role bidirectionally for proper conversation flow
+   * This handles the role conversion needed in text hijacking mode
+   */
+  convertMessageRole(message: any, hasToolCalls: boolean): any {
+    // If the message contains tool calls, convert user role to assistant role
+    if (hasToolCalls && message.role === 'user') {
+      console.log('🔄 Converting role: user → assistant (due to tool calls)');
+      return {
+        ...message,
+        role: 'assistant'
+      };
+    }
+    
+    // If this is a tool response, ensure it has the correct tool role
+    if (message.tool_call_id && message.role !== 'tool') {
+      console.log('🔄 Converting role: → tool (tool response)');
+      return {
+        ...message,
+        role: 'tool'
+      };
+    }
+    
+    return message;
+  }
+
+  /**
+   * Ensure proper conversation flow by validating and fixing role sequences
+   * Standard conversation should be: user → assistant [with tool_calls] → tool → assistant → ...
+   */
+  validateConversationRoles(messages: any[]): any[] {
+    const fixedMessages = [];
+    
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      const hasToolCalls = message.tool_calls && message.tool_calls.length > 0;
+      
+      // Apply role conversion
+      const convertedMessage = this.convertMessageRole(message, hasToolCalls);
+      fixedMessages.push(convertedMessage);
+    }
+    
+    console.log(`🔄 Validated conversation roles for ${fixedMessages.length} messages`);
+    return fixedMessages;
   }
 }

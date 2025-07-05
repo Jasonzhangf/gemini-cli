@@ -30,7 +30,7 @@ interface OpenAITool {
 
 interface OpenAIMessage {
   role: string;
-  content: string;
+  content: string | null;
   tool_calls?: {
     id: string;
     type: string;
@@ -39,6 +39,7 @@ interface OpenAIMessage {
       arguments: string;
     };
   }[];
+  tool_call_id?: string; // For tool responses
 }
 
 interface OpenAIRequest {
@@ -205,45 +206,77 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
   }
 
   /**
-   * Convert Gemini request to OpenAI format
+   * Convert Gemini request to OpenAI format with full conversation history support
+   * This matches the standard Gemini API behavior: request.contents contains the FULL conversation history
+   * Tools are provided via config (like native function definitions), not embedded in messages
    */
   private convertGeminiToOpenAI(
     request: GenerateContentParameters,
   ): OpenAIRequest {
-    // Extract user message from Gemini format
-    let userMessage = '';
+    // Convert Gemini conversation history to OpenAI messages format
+    const messages: OpenAIMessage[] = [];
+    
     if (request.contents) {
-      // Handle both array and single content
+      // Handle both array and single content - request.contents is the FULL conversation history
       const contents = Array.isArray(request.contents)
         ? request.contents
         : [request.contents];
-      if (contents.length > 0) {
-        const content = contents[0];
-        // Handle content that has parts (object format)
-        if (
-          content &&
-          typeof content === 'object' &&
-          'parts' in content &&
-          content.parts &&
-          content.parts.length > 0
-        ) {
-          const part = content.parts[0];
-          if ('text' in part && part.text) {
-            userMessage = part.text;
+      
+      console.log(`🔄 Converting ${contents.length} Gemini contents to OpenAI messages`);
+      
+      for (const content of contents) {
+        if (content && typeof content === 'object' && 'role' in content) {
+          // Extract text from parts
+          let text = '';
+          if (content.parts && content.parts.length > 0) {
+            for (const part of content.parts) {
+              if ('text' in part && part.text) {
+                text += part.text;
+              }
+              // Handle function responses
+              if ('functionResponse' in part && part.functionResponse) {
+                // Convert function response to tool response format
+                messages.push({
+                  role: 'tool',
+                  content: JSON.stringify(part.functionResponse.response),
+                  tool_call_id: part.functionResponse.name || 'unknown'
+                });
+                continue;
+              }
+            }
+          }
+          
+          // Convert Gemini roles to OpenAI roles
+          if (content.role === 'user') {
+            if (text.trim()) {
+              // Add <no_think> for Qwen models if think mode is disabled
+              const processedText = this.processQwenThinkMode(text);
+              messages.push({
+                role: 'user',
+                content: processedText
+              });
+            }
+          } else if (content.role === 'model') {
+            if (text.trim()) {
+              messages.push({
+                role: 'assistant',
+                content: text
+              });
+            }
           }
         } else if (typeof content === 'string') {
-          // Handle direct string content
-          userMessage = content;
+          // Handle direct string content (legacy)
+          const processedText = this.processQwenThinkMode(content);
+          messages.push({
+            role: 'user',
+            content: processedText
+          });
         }
       }
     }
 
-    // Add <no_think> for Qwen models if think mode is disabled
-    userMessage = this.processQwenThinkMode(userMessage);
-
     // Handle tools based on function call support
     const tools: OpenAITool[] = [];
-    let enhancedMessage = userMessage;
 
     // Handle tools from request (they come from toolRegistry in config)
     const requestTools = (request as any).config?.tools; // Tools are in config.tools, not request.tools
@@ -253,14 +286,16 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       const shouldUseTextHijacking = this.shouldUseTextHijacking();
       
       if (shouldUseTextHijacking) {
-        console.log('🎯 Using text hijacking mode (sending text guidance instead of function definitions)');
-        enhancedMessage = this.textHijackParser.convertToolsToTextGuidance(
-          userMessage,
-          requestTools,
-        );
+        console.log('🎯 Using text hijacking mode (adding system message with tool guidance)');
         
-        console.log('📝 Enhanced message length:', enhancedMessage.length);
-        console.log('📝 Tool guidance section:', enhancedMessage.split('🔧 TOOL CALL REQUIRED:')[1]?.substring(0, 200) + '...');
+        // Add system message with tool guidance (like native function definitions)
+        const toolGuidance = this.textHijackParser.createSystemToolGuidance(requestTools);
+        messages.unshift({
+          role: 'system',
+          content: toolGuidance
+        });
+        
+        console.log('📝 Added system tool guidance message');
         
         // Don't send actual function definitions to the model - use text guidance instead
         // tools array stays empty for the actual API call
@@ -284,14 +319,14 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       }
     }
 
+    // Apply role validation and conversion for proper conversation flow
+    const validatedMessages = this.textHijackParser.validateConversationRoles(messages);
+
+    console.log(`📜 Full conversation history: ${validatedMessages.length} messages (matches standard Gemini API behavior)`);
+
     return {
       model: this.model,
-      messages: [
-        {
-          role: 'user',
-          content: enhancedMessage,
-        },
-      ],
+      messages: validatedMessages,
       tools: this.supportsFunctionCalls && tools.length > 0 ? tools : undefined,
     };
   }
@@ -325,7 +360,11 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
         if (shouldUseTextHijacking) {
           // TEXT HIJACK PARSER: Parse tool calls from text content using shared parser
           console.log('🎯 Parsing text content for hijacked tool calls');
-          const parseResult = this.textHijackParser.parseTextForToolCalls(message.content);
+          
+          // Use context preservation mode for multi-turn conversation continuity
+          // Always preserve context since we now handle full conversation history
+          const preserveContext = true;
+          const parseResult = this.textHijackParser.parseTextForToolCalls(message.content, preserveContext);
 
           if (parseResult.toolCalls.length > 0) {
             console.log(
@@ -333,18 +372,28 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
             );
             functionCalls = parseResult.toolCalls;
 
-            // Include any remaining text as content
+            // Include any remaining text as content to maintain conversation context
             if (parseResult.cleanText.trim()) {
               parts.push({ text: parseResult.cleanText });
             }
+            
+            // Note: We don't store in conversationHistory here because
+            // the full conversation history comes from request.contents (Gemini API standard)
           } else {
-            // No tool calls found, treat as regular text
-            parts.push({ text: message.content });
+            // No tool calls found, treat as regular text but still filter Qwen <think> blocks
+            const filteredContent = this.textHijackParser.filterQwenThinkBlocks(message.content);
+            parts.push({ text: filteredContent });
+            
+            // Note: We don't store in conversationHistory here because
+            // the full conversation history comes from request.contents (Gemini API standard)
           }
         } else {
           // NATIVE FUNCTION CALL PARSER: Handle standard OpenAI function calls
           console.log('🔧 Using native function call parsing');
-          parts.push({ text: message.content });
+          
+          // Always filter Qwen <think> blocks from content, even for native function calls
+          const filteredContent = this.textHijackParser.filterQwenThinkBlocks(message.content);
+          parts.push({ text: filteredContent });
 
           // Handle standard function calls from tool_calls field
           if (message.tool_calls && message.tool_calls.length > 0) {
@@ -368,6 +417,12 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
                 });
               }
             }
+            
+            // Note: We don't store in conversationHistory here because
+            // the full conversation history comes from request.contents (Gemini API standard)
+          } else {
+            // Note: We don't store in conversationHistory here because
+            // the full conversation history comes from request.contents (Gemini API standard)
           }
         }
       }
@@ -408,6 +463,9 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
     return result;
   }
 
+  // Note: Conversation history is now handled directly from request.contents
+  // This matches the standard Gemini API behavior where the full conversation
+  // history is passed in each request via contents array
 
   async generateContent(
     request: GenerateContentParameters,

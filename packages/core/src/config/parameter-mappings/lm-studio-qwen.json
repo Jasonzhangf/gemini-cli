@@ -28,7 +28,9 @@
       "new_content": "new_string"
     },
     "run_shell_command": {
-      "shell_command": "command"
+      "shell_command": "command",
+      "working_directory": "directory",
+      "cwd": "directory"
     },
     "knowledge_graph": {
       "action": "action",
