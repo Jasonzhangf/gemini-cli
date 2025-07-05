@@ -257,7 +257,16 @@ export async function loadCliConfig(
     mcpServers,
     userMemory: memoryContent,
     geminiMdFileCount: fileCount,
-    approvalMode: argv.yolo || false ? ApprovalMode.YOLO : ApprovalMode.DEFAULT,
+    approvalMode: (() => {
+      // Use pre-set approvalMode from settings if available, otherwise parse from argv
+      if ('approvalMode' in settings && settings.approvalMode !== undefined && settings.approvalMode !== null) {
+        console.log(`[DEBUG] Using pre-set approvalMode from settings: ${settings.approvalMode}`);
+        return settings.approvalMode as ApprovalMode;
+      }
+      const mode = argv.yolo || false ? ApprovalMode.YOLO : ApprovalMode.DEFAULT;
+      console.log(`[DEBUG] Setting approvalMode from argv: argv.yolo=${argv.yolo}, mode=${mode}`);
+      return mode;
+    })(),
     showMemoryUsage:
       argv.show_memory_usage || settings.showMemoryUsage || false,
     accessibility: settings.accessibility,

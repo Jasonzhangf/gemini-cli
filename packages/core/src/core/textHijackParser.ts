@@ -222,6 +222,13 @@ ${toolDescriptions.join('\n')}
       /(\{\s*"tool_call"\s*:\s*\{[\s\S]*?\}\s*\})/g,
     ];
 
+    console.log('🔍 Searching for tool calls in text:', {
+      textLength: cleanText.length,
+      hasJsonBlocks: cleanText.includes('```json'),
+      hasToolCallPattern: cleanText.includes('"tool_call"'),
+      preview: cleanText.substring(0, 200) + (cleanText.length > 200 ? '...' : '')
+    });
+
     for (const pattern of jsonPatterns) {
       let match;
       while ((match = pattern.exec(cleanText)) !== null) {
@@ -261,9 +268,13 @@ ${toolDescriptions.join('\n')}
             // Remove this JSON from the clean text
             cleanText = cleanText.replace(match[0], '').trim();
           }
-        } catch (_e) {
-          // Invalid JSON, skip
-          console.warn('Failed to parse potential tool call JSON:', match[1]);
+        } catch (parseError) {
+          // Invalid JSON, skip with detailed error
+          console.warn('🚨 Failed to parse potential tool call JSON:', {
+            jsonText: match[1], 
+            error: parseError instanceof Error ? parseError.message : String(parseError),
+            position: match.index
+          });
         }
       }
     }

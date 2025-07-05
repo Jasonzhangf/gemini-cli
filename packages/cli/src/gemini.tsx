@@ -241,14 +241,18 @@ async function loadNonInteractiveConfig(
   settings: LoadedSettings,
 ) {
   let finalConfig = config;
+  console.log(`[DEBUG] Current approval mode: ${config.getApprovalMode()}, YOLO mode: ${config.getApprovalMode() === ApprovalMode.YOLO}`);
+  
   if (config.getApprovalMode() !== ApprovalMode.YOLO) {
     // Everything is not allowed, ensure that only read-only tools are configured.
+    console.log(`[DEBUG] Not in YOLO mode - excluding interactive tools`);
     const existingExcludeTools = settings.merged.excludeTools || [];
     const interactiveTools = [
       ShellTool.Name,
       EditTool.Name,
       WriteFileTool.Name,
     ];
+    console.log(`[DEBUG] Excluding interactive tools: ${interactiveTools.join(', ')}`);
 
     const newExcludeTools = [
       ...new Set([...existingExcludeTools, ...interactiveTools]),
@@ -257,12 +261,16 @@ async function loadNonInteractiveConfig(
     const nonInteractiveSettings = {
       ...settings.merged,
       excludeTools: newExcludeTools,
+      // CRITICAL: Preserve the original approvalMode 
+      approvalMode: config.getApprovalMode(),
     };
     finalConfig = await loadCliConfig(
       nonInteractiveSettings,
       extensions,
       config.getSessionId(),
     );
+  } else {
+    console.log(`[DEBUG] YOLO mode enabled - allowing all tools including interactive ones`);
   }
 
   return await validateNonInterActiveAuth(

@@ -476,6 +476,13 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       const openaiRequest = this.convertGeminiToOpenAI(request);
 
       
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        console.error('🚨 API call timed out after 30 seconds');
+      }, 30000);
+
       const response = await fetch(`${this.apiEndpoint}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -483,7 +490,10 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(openaiRequest),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(
