@@ -135,6 +135,7 @@ export interface ConfigParameters {
   userId?: string;
   newUserId?: boolean;
   think?: boolean;
+  forceText?: boolean;
 }
 
 export class Config {
@@ -178,6 +179,7 @@ export class Config {
   private readonly userId: string | undefined;
   private readonly newUserId: boolean;
   private readonly think: boolean;
+  private readonly forceText: boolean;
   private modelSwitchedDuringSession: boolean = false;
   flashFallbackHandler?: FlashFallbackHandler;
 
@@ -226,6 +228,13 @@ export class Config {
     this.userId = params.userId;
     this.newUserId = params.newUserId ?? false;
     this.think = params.think ?? false;
+    this.forceText = params.forceText ?? false;
+    
+    // Set HIJACK_FORCE_FUNCTION_CALLS environment variable based on forceText parameter
+    // CLI parameter has higher priority than existing environment variable
+    if (this.forceText) {
+      process.env.HIJACK_FORCE_FUNCTION_CALLS = 'true';
+    }
 
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
@@ -302,6 +311,10 @@ export class Config {
 
   getThink(): boolean {
     return this.think;
+  }
+
+  getForceText(): boolean {
+    return this.forceText;
   }
 
   setModel(newModel: string): void {

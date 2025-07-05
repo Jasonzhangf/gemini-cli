@@ -59,6 +59,7 @@ interface CliArgs {
   id: string | undefined;
   newid: boolean | undefined;
   think: boolean | undefined;
+  forcetext: boolean | undefined;
 }
 
 async function parseArguments(): Promise<CliArgs> {
@@ -161,6 +162,12 @@ async function parseArguments(): Promise<CliArgs> {
       type: 'boolean',
       description:
         'Enable thinking mode for Qwen models (shows reasoning process). By default, Qwen models use <no_think> to hide reasoning.',
+      default: false,
+    })
+    .option('forcetext', {
+      type: 'boolean',
+      description:
+        'Force text hijacking mode for tool calls instead of native function calls. Useful for models that dont support native function calling.',
       default: false,
     })
     .version(await getCliVersion()) // This will enable the --version flag based on package.json
@@ -303,6 +310,7 @@ export async function loadCliConfig(
     userId: argv.id,
     newUserId: argv.newid || false,
     think: argv.think || false,
+    forceText: argv.forcetext || false,
   });
 }
 

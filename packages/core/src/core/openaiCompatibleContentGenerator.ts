@@ -122,22 +122,8 @@ export class OpenAICompatibleContentGenerator implements ContentGenerator {
       return true;
     }
     
-    // For known non-function-calling endpoints, use text hijacking
-    const knownNonFunctionEndpoints = [
-      'http://localhost:1234',
-      'http://127.0.0.1:1234',
-      'http://192.168.',  // Local network endpoints
-    ];
-    
-    const isNonFunctionEndpoint = knownNonFunctionEndpoints.some(pattern =>
-      this.apiEndpoint.includes(pattern)
-    );
-    
-    if (isNonFunctionEndpoint) {
-      return true;
-    }
-    
-    // For native function calling endpoints (OpenAI, Gemini, etc.), use native calls
+    // Default: use native function calls for OpenAI-compatible endpoints
+    // Text hijacking should be explicitly enabled via HIJACK_FORCE_FUNCTION_CALLS
     return false;
   }
 
