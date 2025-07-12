@@ -7,6 +7,7 @@
  * This module intercepts Gemini API calls and redirects them through OpenAI-compatible endpoints
  */
 
+import * as path from 'path';
 import { OpenAI } from 'openai';
 import { Content, Tool } from '@google/genai';
 import { ServerGeminiStreamEvent, GeminiEventType } from '../core/turn.js';
@@ -36,6 +37,16 @@ export class OpenAIHijackAdapter {
   private toolDeclarations: any[] = [];
   private conversationHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [];
   private debugMode: boolean = false;
+  private dangerousTools: Set<string> = new Set(['run_shell_command', 'write_file', 'replace']);
+  private pathArgsMap: Record<string, string[]> = {
+    'read_file': ['file_path'],
+    'write_file': ['file_path'],
+    'list_directory': ['path'],
+    'replace': ['file_path'],
+    'glob': ['patterns'],
+    'read_many_files': ['file_paths'],
+    'search_file_content': ['file_paths'],
+  };
 
   constructor(config: OpenAIHijackConfig, toolDeclarations: any[], coreConfig: Config) {
     this.config = config;
@@ -66,6 +77,7 @@ export class OpenAIHijackAdapter {
     const toolDescriptions = this.toolDeclarations.map(tool => {
       const params = tool.parameters?.properties || {};
       const required = tool.parameters?.required || [];
+      const isDangerous = this.dangerousTools.has(tool.name);
       
       // Build parameter descriptions
       const paramDescriptions = Object.entries(params).map(([name, prop]: [string, any]) => {
@@ -77,8 +89,11 @@ export class OpenAIHijackAdapter {
 
       // Create examples based on tool type
       const example = this.generateToolExample(tool.name, params);
+      
+      // Add dangerous tool warning
+      const dangerousWarning = isDangerous ? ' ⚠️ [DANGEROUS - Requires user approval]' : '';
 
-      return `• ${tool.name}: ${tool.description || 'No description'}
+      return `• ${tool.name}${dangerousWarning}: ${tool.description || 'No description'}
 ${paramDescriptions}
   Example: ${example}`;
     }).join('\n\n');
@@ -101,6 +116,13 @@ ${toolDescriptions}
 - You can chain multiple tool calls to complete complex tasks
 - Required parameters are marked with *
 
+🚨 DANGEROUS TOOLS:
+Tools marked with ⚠️ [DANGEROUS] can modify the system or files and require explicit user approval before execution. These include:
+- run_shell_command: Execute system commands
+- write_file: Create or overwrite files  
+- replace: Modify file contents
+Always ask for permission before using these tools and explain what you plan to do.
+
 The user will execute the tools and provide you with the results. Use the results to provide comprehensive analysis and insights.`;
   }
 
@@ -109,11 +131,11 @@ The user will execute the tools and provide you with the results. Use the result
    */
   private generateToolExample(toolName: string, params: any): string {
     const examples: Record<string, string> = {
-      'read_file': '✦ {"name": "read_file", "arguments": {"file_path": "./README.md"}}',
+      'read_file': '✦ {"name": "read_file", "arguments": {"file_path": "./src/main.js"}}',
       'list_directory': '✦ {"name": "list_directory", "arguments": {"path": "."}}',
       'search_file_content': '✦ {"name": "search_file_content", "arguments": {"query": "function", "file_paths": ["./src/**/*.js"]}}',
       'write_file': '✦ {"name": "write_file", "arguments": {"file_path": "./output.txt", "content": "Hello World"}}',
-      'run_shell_command': '✦ {"name": "run_shell_command", "arguments": {"command": "ls -la"}}',
+      'run_shell_command': '✦ {"name": "run_shell_command", "arguments": {"command": "ls -la", "directory": "./src"}}',
       'replace': '✦ {"name": "replace", "arguments": {"file_path": "./file.txt", "old_string": "old", "new_string": "new"}}',
       'glob': '✦ {"name": "glob", "arguments": {"patterns": ["**/*.js", "**/*.ts"]}}',
       'web_fetch': '✦ {"name": "web_fetch", "arguments": {"url": "https://example.com"}}',
@@ -160,6 +182,7 @@ The user will execute the tools and provide you with the results. Use the result
           
           if (toolCallJson && toolCallJson.name) {
             const callId = `text_guided_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            const toolName = this.normalizeToolName(toolCallJson.name);
             
             // Handle different argument formats
             let args = toolCallJson.arguments || toolCallJson.args || {};
@@ -171,15 +194,18 @@ The user will execute the tools and provide you with the results. Use the result
                 args = { input: args };
               }
             }
+            
+            // Resolve path arguments to be absolute
+            const transformedArgs = this.transformPathArguments(toolName, args);
 
             toolCalls.push({
               callId,
-              name: this.normalizeToolName(toolCallJson.name),
-              args,
+              name: toolName,
+              args: transformedArgs,
             });
 
             if (this.debugMode) {
-              console.log('[OpenAI Hijack] Parsed tool call:', toolCallJson.name, 'args:', Object.keys(args));
+              console.log('[OpenAI Hijack] Parsed tool call:', toolName, 'args:', Object.keys(transformedArgs));
             }
           }
         } catch (error) {
@@ -191,6 +217,44 @@ The user will execute the tools and provide you with the results. Use the result
     }
 
     return this.deduplicateToolCalls(toolCalls);
+  }
+
+  /**
+   * Resolve relative paths in tool arguments to absolute paths.
+   * This makes tool execution more robust.
+   */
+  private transformPathArguments(toolName: string, args: any): any {
+    const CWD = process.cwd();
+    const newArgs = JSON.parse(JSON.stringify(args));
+    const pathParams = this.pathArgsMap[toolName];
+
+    if (!pathParams) {
+      return args;
+    }
+
+    // `run_shell_command`'s `directory` param must be relative.
+    if (toolName === 'run_shell_command') {
+      if (newArgs.directory && path.isAbsolute(newArgs.directory)) {
+        newArgs.directory = path.relative(CWD, newArgs.directory);
+      }
+      return newArgs;
+    }
+
+    // For all other tools with path args, ensure the paths are absolute.
+    // This is required by `write_file` and `replace`, and makes other tools more robust.
+    for (const param of pathParams) {
+      if (newArgs[param]) {
+        if (Array.isArray(newArgs[param])) {
+          newArgs[param] = newArgs[param].map((p: any) =>
+            typeof p === 'string' && !path.isAbsolute(p) ? path.resolve(CWD, p) : p
+          );
+        } else if (typeof newArgs[param] === 'string' && !path.isAbsolute(newArgs[param])) {
+          newArgs[param] = path.resolve(CWD, newArgs[param]);
+        }
+      }
+    }
+
+    return newArgs;
   }
 
   /**
@@ -389,12 +453,6 @@ The user will execute the tools and provide you with the results. Use the result
         const content = chunk.choices[0]?.delta?.content || '';
         if (content) {
           fullResponse += content;
-          
-          // Yield content event
-          yield {
-            type: GeminiEventType.Content,
-            value: content,
-          };
 
           // Continuously check for tool calls in the accumulated response
           const currentToolCalls = this.parseTextGuidedToolCalls(fullResponse);
@@ -417,6 +475,7 @@ The user will execute the tools and provide you with the results. Use the result
                   args: toolCall.args,
                   isClientInitiated: false,
                   prompt_id: prompt_id,
+                  isDangerous: this.dangerousTools.has(toolCall.name),
                 },
               };
             }
@@ -424,7 +483,17 @@ The user will execute the tools and provide you with the results. Use the result
         }
       }
 
-      // Add assistant response to history
+      // If the response contained tool calls, do not yield any content.
+      // The UI should only show the tool call status.
+      // If there are no tool calls, it's a regular text response.
+      if (yieldedToolCalls.size === 0 && fullResponse.trim()) {
+        yield {
+          type: GeminiEventType.Content,
+          value: fullResponse,
+        };
+      }
+      
+      // Add assistant's raw response to history for context
       this.conversationHistory.push({ role: 'assistant' as const, content: fullResponse });
 
       if (this.debugMode) {
