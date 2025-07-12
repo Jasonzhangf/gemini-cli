@@ -54,6 +54,7 @@ export interface CliArgs {
   allowedMcpServerNames: string[] | undefined;
   extensions: string[] | undefined;
   listExtensions: boolean | undefined;
+  openai: boolean | undefined;
 }
 
 export async function parseArguments(): Promise<CliArgs> {
@@ -174,6 +175,11 @@ export async function parseArguments(): Promise<CliArgs> {
       alias: 'l',
       type: 'boolean',
       description: 'List all available extensions and exit.',
+    })
+    .option('openai', {
+      type: 'boolean',
+      description: 'Enable OpenAI hijack mode - transparently redirect through third-party providers while using Gemini interface',
+      default: false,
     })
 
     .version(await getCliVersion()) // This will enable the --version flag based on package.json
@@ -333,6 +339,7 @@ export async function loadCliConfig(
       version: e.config.version,
     })),
     noBrowser: !!process.env.NO_BROWSER,
+    openaiMode: argv.openai || false,
   });
 }
 

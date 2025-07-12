@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 
 export type PackageJson = BasePackageJson & {
+  nightly?: boolean;
   config?: {
     sandboxImageUri?: string;
   };

@@ -19,7 +19,8 @@ export const useAuthCommand = (
   config: Config,
 ) => {
   const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(
-    settings.merged.selectedAuthType === undefined,
+    // Don't auto-open auth dialog in OpenAI hijack mode
+    config.getOpenAIMode() ? false : settings.merged.selectedAuthType === undefined,
   );
 
   const openAuthDialog = useCallback(() => {
@@ -29,6 +30,27 @@ export const useAuthCommand = (
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   useEffect(() => {
+    // Initialize GeminiClient in OpenAI hijack mode without authentication
+    if (config.getOpenAIMode()) {
+      if (config.getDebugMode()) {
+        console.log('[Auth] Initializing GeminiClient in OpenAI hijack mode');
+      }
+      
+      const initializeHijackClient = async () => {
+        try {
+          await config.refreshAuth(AuthType.LOGIN_WITH_GOOGLE); // auth type doesn't matter for hijack mode
+          if (config.getDebugMode()) {
+            console.log('[Auth] GeminiClient initialized for hijack mode');
+          }
+        } catch (error) {
+          console.error('[Auth] Failed to initialize GeminiClient for hijack mode:', error);
+        }
+      };
+      
+      void initializeHijackClient();
+      return;
+    }
+
     const authFlow = async () => {
       const authType = settings.merged.selectedAuthType;
       if (isAuthDialogOpen || !authType) {

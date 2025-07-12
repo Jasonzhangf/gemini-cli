@@ -1,6 +1,6 @@
 {
   "name": "@google/gemini-cli-core",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Gemini CLI Core",
   "repository": {
     "type": "git",
@@ -40,6 +40,7 @@
     "ignore": "^7.0.0",
     "micromatch": "^4.0.8",
     "open": "^10.1.2",
+    "openai": "^4.47.1",
     "shell-quote": "^1.8.3",
     "simple-git": "^3.28.0",
     "strip-ansi": "^7.1.0",

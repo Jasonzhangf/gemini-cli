@@ -78,7 +78,7 @@ enum StreamProcessingStatus {
  * API interaction, and tool call lifecycle.
  */
 export const useGeminiStream = (
-  geminiClient: GeminiClient,
+  geminiClient: GeminiClient | null,
   history: HistoryItem[],
   addItem: UseHistoryManagerReturn['addItem'],
   setShowHelp: React.Dispatch<React.SetStateAction<boolean>>,
@@ -560,6 +560,9 @@ export const useGeminiStream = (
       setInitError(null);
 
       try {
+        if (!geminiClient) {
+          throw new Error('GeminiClient is not yet initialized. Please wait...');
+        }
         const stream = geminiClient.sendMessageStream(
           queryToSend,
           abortSignal,
@@ -702,10 +705,12 @@ export const useGeminiStream = (
               combinedParts.push(response);
             }
           }
-          geminiClient.addHistory({
-            role: 'user',
-            parts: combinedParts,
-          });
+          if (geminiClient) {
+            geminiClient.addHistory({
+              role: 'user',
+              parts: combinedParts,
+            });
+          }
         }
 
         const callIdsToMarkAsSubmitted = geminiTools.map(

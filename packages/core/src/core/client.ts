@@ -39,6 +39,8 @@ import {
 } from './contentGenerator.js';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { DEFAULT_GEMINI_FLASH_MODEL } from '../config/models.js';
+import { OpenAIHijackAdapter, OpenAIHijackConfig } from '../openai/hijack.js';
+import { loadOpenAIConfig, createDefaultEnvConfig } from '../openai/config.js';
 
 function isThinkingSupported(model: string) {
   if (model.startsWith('gemini-2.5')) return true;
@@ -81,6 +83,7 @@ export function findIndexAfterFraction(
 export class GeminiClient {
   private chat?: GeminiChat;
   private contentGenerator?: ContentGenerator;
+  private hijackAdapter?: OpenAIHijackAdapter;
   private embeddingModel: string;
   private generateContentConfig: GenerateContentConfig = {
     temperature: 0,
@@ -107,16 +110,91 @@ export class GeminiClient {
     this.embeddingModel = config.getEmbeddingModel();
   }
 
-  async initialize(contentGeneratorConfig: ContentGeneratorConfig) {
-    this.contentGenerator = await createContentGenerator(
-      contentGeneratorConfig,
-      this.config,
-      this.config.getSessionId(),
-    );
+  async initialize(contentGeneratorConfig: ContentGeneratorConfig | null) {
+    if (this.config.getDebugMode()) {
+      console.log('[Gemini Client] Initializing, OpenAI mode:', this.config.getOpenAIMode());
+    }
+    
+    // Check if OpenAI hijack mode is enabled
+    if (this.config.getOpenAIMode()) {
+      // Create default config if needed
+      createDefaultEnvConfig();
+      
+      // Load OpenAI configuration from ~/.gemini/.env
+      const envConfig = loadOpenAIConfig();
+      
+      // Initialize OpenAI hijack adapter
+      const openaiConfig: OpenAIHijackConfig = {
+        apiKey: envConfig.apiKey || 'not-needed',
+        baseURL: envConfig.baseURL || 'http://localhost:1234/v1',
+        model: envConfig.model || this.config.getModel(),
+        temperature: envConfig.temperature || 0.7,
+        maxTokens: envConfig.maxTokens || 4096,
+      };
+      
+      // Get tool declarations for hijacking
+      const toolRegistry = await this.config.getToolRegistry();
+      const toolDeclarations = toolRegistry.getFunctionDeclarations();
+      
+      try {
+        this.hijackAdapter = new OpenAIHijackAdapter(openaiConfig, toolDeclarations, this.config);
+        
+        if (this.config.getDebugMode()) {
+          console.log('[Gemini Client] OpenAI hijack adapter successfully created');
+          console.log('[Gemini Client] OpenAI hijack mode initialized with model:', openaiConfig.model);
+        }
+      } catch (error) {
+        console.error('[Gemini Client] Failed to create OpenAI hijack adapter:', error);
+        throw error;
+      }
+    } else {
+      // Normal Gemini mode
+      if (this.config.getDebugMode()) {
+        console.log('[Gemini Client] Normal Gemini mode, creating content generator');
+      }
+      if (!contentGeneratorConfig) {
+        throw new Error('ContentGeneratorConfig is required for normal Gemini mode');
+      }
+      this.contentGenerator = await createContentGenerator(
+        contentGeneratorConfig,
+        this.config,
+        this.config.getSessionId(),
+      );
+    }
+    
     this.chat = await this.startChat();
   }
 
   getContentGenerator(): ContentGenerator {
+    if (this.config.getOpenAIMode() && this.hijackAdapter) {
+      // Return a minimal ContentGenerator interface for hijack mode
+      return {
+        generateContent: async () => ({
+          text: '',
+          candidates: [],
+          data: undefined,
+          functionCalls: undefined,
+          executableCode: undefined,
+          codeExecutionResult: undefined,
+        }),
+        generateContentStream: async () => {
+          async function* gen() {
+            yield { 
+              text: '', 
+              candidates: [],
+              data: undefined,
+              functionCalls: undefined,
+              executableCode: undefined,
+              codeExecutionResult: undefined,
+            }; 
+          }
+          return gen();
+        },
+        countTokens: async () => ({ totalTokens: 1000 }),
+        embedContent: async () => ({ embedding: { values: [] } }),
+      } as ContentGenerator;
+    }
+    
     if (!this.contentGenerator) {
       throw new Error('Content generator not initialized');
     }
@@ -124,7 +202,11 @@ export class GeminiClient {
   }
 
   async addHistory(content: Content) {
-    this.getChat().addHistory(content);
+    if (this.config.getOpenAIMode() && this.hijackAdapter) {
+      this.hijackAdapter.addHistory(content);
+    } else {
+      this.getChat().addHistory(content);
+    }
   }
 
   getChat(): GeminiChat {
@@ -135,15 +217,33 @@ export class GeminiClient {
   }
 
   isInitialized(): boolean {
+    if (this.config.getOpenAIMode()) {
+      return this.chat !== undefined && this.hijackAdapter !== undefined;
+    }
     return this.chat !== undefined && this.contentGenerator !== undefined;
   }
 
   getHistory(): Content[] {
-    return this.getChat().getHistory();
+    if (this.config.getOpenAIMode() && this.hijackAdapter) {
+      return this.hijackAdapter.getHistory();
+    } else {
+      return this.getChat().getHistory();
+    }
   }
 
   setHistory(history: Content[]) {
-    this.getChat().setHistory(history);
+    if (this.config.getOpenAIMode() && this.hijackAdapter) {
+      this.hijackAdapter.setHistory(history);
+    } else {
+      this.getChat().setHistory(history);
+    }
+  }
+
+  getCurrentModel(): string {
+    if (this.config.getOpenAIMode() && this.hijackAdapter) {
+      return this.hijackAdapter.getCurrentModel();
+    }
+    return this.config.getModel();
   }
 
   async resetChat(): Promise<void> {
@@ -215,6 +315,30 @@ export class GeminiClient {
   }
 
   private async startChat(extraHistory?: Content[]): Promise<GeminiChat> {
+    // In OpenAI hijack mode, create a minimal chat instance
+    if (this.config.getOpenAIMode() && this.hijackAdapter) {
+      if (this.config.getDebugMode()) {
+        console.log('[Gemini Client] Creating hijack mode chat instance');
+      }
+      
+      // Set initial history in hijack adapter
+      const history: Content[] = [
+        ...(extraHistory ?? []),
+      ];
+      
+      if (history.length > 0) {
+        this.hijackAdapter.setHistory(history);
+      }
+      
+      // Return a minimal GeminiChat that won't be used for actual communication
+      return new GeminiChat(
+        this.config,
+        this.getContentGenerator(),
+        { tools: [] },
+        [],
+      );
+    }
+
     const envParts = await this.getEnvironment();
     const toolRegistry = await this.config.getToolRegistry();
     const toolDeclarations = toolRegistry.getFunctionDeclarations();
@@ -287,6 +411,31 @@ export class GeminiClient {
 
     // Track the original model from the first call to detect model switching
     const initialModel = originalModel || this.config.getModel();
+
+    // OpenAI hijack mode - redirect to OpenAI adapter
+    if (this.config.getOpenAIMode()) {
+      if (!this.hijackAdapter) {
+        const errorMsg = 'OpenAI hijack adapter not initialized. Please check your ~/.gemini/.env configuration.';
+        console.error('[Gemini Client]', errorMsg);
+        yield { 
+          type: GeminiEventType.Error, 
+          value: { 
+            error: { 
+              message: errorMsg,
+              status: undefined 
+            } 
+          } 
+        };
+        return new Turn(this.getChat(), prompt_id);
+      }
+      
+      if (this.config.getDebugMode()) {
+        console.log('[Gemini Client] Hijacking request to OpenAI adapter');
+      }
+      
+      yield* this.hijackAdapter.sendMessageStream(request, signal, prompt_id);
+      return new Turn(this.getChat(), prompt_id);
+    }
 
     const compressed = await this.tryCompressChat(prompt_id);
 

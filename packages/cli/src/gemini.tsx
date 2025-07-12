@@ -26,7 +26,7 @@ import { getUserStartupWarnings } from './utils/userStartupWarnings.js';
 import { runNonInteractive } from './nonInteractiveCli.js';
 import { loadExtensions, Extension } from './config/extension.js';
 import { cleanupCheckpoints } from './utils/cleanup.js';
-import { getCliVersion } from './utils/version.js';
+import { getCliVersion, isNightly } from './utils/version.js';
 import {
   ApprovalMode,
   Config,
@@ -36,7 +36,6 @@ import {
   sessionId,
   logUserPrompt,
   AuthType,
-  getOauthClient,
 } from '@google/gemini-cli-core';
 import { validateAuthMethod } from './config/auth.js';
 import { setMaxSizedBoxDebugging } from './ui/components/shared/MaxSizedBox.js';
@@ -102,21 +101,14 @@ export async function main() {
     process.exit(1);
   }
 
-  const argv = await parseArguments();
   const extensions = loadExtensions(workspaceRoot);
+  const argv = await parseArguments();
   const config = await loadCliConfig(
     settings.merged,
     extensions,
     sessionId,
     argv,
   );
-
-  if (argv.promptInteractive && !process.stdin.isTTY) {
-    console.error(
-      'Error: The --prompt-interactive flag is not supported when piping input from stdin.',
-    );
-    process.exit(1);
-  }
 
   if (config.getListExtensions()) {
     console.log('Installed extensions:');
@@ -140,6 +132,19 @@ export async function main() {
   setMaxSizedBoxDebugging(config.getDebugMode());
 
   await config.initialize();
+
+  // Always refresh auth to initialize the GeminiClient
+  if (settings.merged.selectedAuthType) {
+    try {
+      const err = validateAuthMethod(settings.merged.selectedAuthType);
+      if (err) {
+        throw new Error(err);
+      }
+      await config.refreshAuth(settings.merged.selectedAuthType);
+    } catch (err) {
+      // We can continue without auth, the auth dialog will show.
+    }
+  }
 
   if (settings.merged.theme) {
     if (!themeManager.setActiveTheme(settings.merged.theme)) {
@@ -180,28 +185,17 @@ export async function main() {
       }
     }
   }
-
-  if (
-    settings.merged.selectedAuthType === AuthType.LOGIN_WITH_GOOGLE &&
-    config.getNoBrowser()
-  ) {
-    // Do oauth before app renders to make copying the link possible.
-    await getOauthClient(settings.merged.selectedAuthType, config);
-  }
-
   let input = config.getQuestion();
   const startupWarnings = [
     ...(await getStartupWarnings()),
     ...(await getUserStartupWarnings(workspaceRoot)),
   ];
-
-  const shouldBeInteractive =
-    !!argv.promptInteractive || (process.stdin.isTTY && input?.length === 0);
+  const version = await getCliVersion();
+  const nightly = await isNightly();
 
   // Render UI, passing necessary config values. Check that there is no command line question.
-  if (shouldBeInteractive) {
-    const version = await getCliVersion();
-    setWindowTitle(basename(workspaceRoot), settings);
+  if (process.stdin.isTTY && input?.length === 0) {
+    setWindowTitle(basename(workspaceRoot), settings, config);
     render(
       <React.StrictMode>
         <AppWrapper
@@ -209,6 +203,7 @@ export async function main() {
           settings={settings}
           startupWarnings={startupWarnings}
           version={version}
+          nightly={nightly}
         />
       </React.StrictMode>,
       { exitOnCtrlC: false },
@@ -231,7 +226,6 @@ export async function main() {
     'event.timestamp': new Date().toISOString(),
     prompt: input,
     prompt_id,
-    auth_type: config.getContentGeneratorConfig()?.authType,
     prompt_length: input.length,
   });
 
@@ -247,9 +241,16 @@ export async function main() {
   process.exit(0);
 }
 
-function setWindowTitle(title: string, settings: LoadedSettings) {
+function setWindowTitle(
+  title: string,
+  settings: LoadedSettings,
+  config?: Config,
+) {
   if (!settings.merged.hideWindowTitle) {
-    const windowTitle = (process.env.CLI_TITLE || `Gemini - ${title}`).replace(
+    const appName = config?.getOpenAIMode() ? 'OpenAI' : 'Gemini';
+    const windowTitle = (
+      process.env.CLI_TITLE || `${appName} - ${title}`
+    ).replace(
       // eslint-disable-next-line no-control-regex
       /[\x00-\x1F\x7F]/g,
       '',
@@ -320,6 +321,11 @@ async function validateNonInterActiveAuth(
   selectedAuthType: AuthType | undefined,
   nonInteractiveConfig: Config,
 ) {
+  // Skip Gemini authentication for OpenAI mode
+  if (nonInteractiveConfig.getOpenAIMode()) {
+    return nonInteractiveConfig;
+  }
+
   // making a special case for the cli. many headless environments might not have a settings.json set
   // so if GEMINI_API_KEY is set, we'll use that. However since the oauth things are interactive anyway, we'll
   // still expect that exists

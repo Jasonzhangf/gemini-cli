@@ -28,6 +28,7 @@ import {
   GEMINI_CONFIG_DIR as GEMINI_DIR,
 } from '../tools/memoryTool.js';
 import { WebSearchTool } from '../tools/web-search.js';
+import { loadOpenAIConfig } from '../openai/config.js';
 import { GeminiClient } from '../core/client.js';
 import { FileDiscoveryService } from '../services/fileDiscoveryService.js';
 import { GitService } from '../services/gitService.js';
@@ -144,6 +145,7 @@ export interface ConfigParameters {
   listExtensions?: boolean;
   activeExtensions?: ActiveExtension[];
   noBrowser?: boolean;
+  openaiMode?: boolean;
 }
 
 export class Config {
@@ -189,6 +191,7 @@ export class Config {
   private readonly _activeExtensions: ActiveExtension[];
   flashFallbackHandler?: FlashFallbackHandler;
   private quotaErrorOccurred: boolean = false;
+  private readonly openaiMode: boolean;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -234,6 +237,11 @@ export class Config {
     this.listExtensions = params.listExtensions ?? false;
     this._activeExtensions = params.activeExtensions ?? [];
     this.noBrowser = params.noBrowser ?? false;
+    this.openaiMode = params.openaiMode ?? false;
+
+    if (this.debugMode) {
+      console.log(`[Gemini Client] Initializing, OpenAI mode: ${this.openaiMode}`);
+    }
 
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
@@ -266,6 +274,16 @@ export class Config {
   }
 
   async refreshAuth(authMethod: AuthType) {
+    if (this.getOpenAIMode()) {
+      if (this.debugMode) {
+        console.log('[Config] Initializing GeminiClient in OpenAI hijack mode');
+      }
+      // Initialize GeminiClient with null config for hijack mode
+      this.geminiClient = new GeminiClient(this);
+      await this.geminiClient.initialize(null);
+      return;
+    }
+
     this.contentGeneratorConfig = await createContentGeneratorConfig(
       this.model,
       authMethod,
@@ -355,6 +373,30 @@ export class Config {
   getDebugMode(): boolean {
     return this.debugMode;
   }
+
+  getOpenAIMode(): boolean {
+    return this.openaiMode;
+  }
+
+  getDisplayModel(): string {
+    // In OpenAI hijack mode, show the actual third-party model name
+    if (this.getOpenAIMode()) {
+      try {
+        // Try to get from client first
+        if (this.geminiClient) {
+          return this.geminiClient.getCurrentModel();
+        }
+        // Fallback: load directly from config
+        const envConfig = loadOpenAIConfig();
+        return envConfig.model || 'local-model';
+      } catch (error) {
+        // Fallback to default if config loading fails
+        return 'local-model';
+      }
+    }
+    // Otherwise show the configured Gemini model
+    return this.model;
+  }
   getQuestion(): string | undefined {
     return this.question;
   }
@@ -436,6 +478,9 @@ export class Config {
   }
 
   getGeminiClient(): GeminiClient {
+    if (!this.geminiClient) {
+      throw new Error('GeminiClient not initialized. Call refreshAuth() first.');
+    }
     return this.geminiClient;
   }
 

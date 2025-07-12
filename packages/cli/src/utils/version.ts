@@ -10,3 +10,8 @@ export async function getCliVersion(): Promise<string> {
   const pkgJson = await getPackageJson();
   return process.env.CLI_VERSION || pkgJson?.version || 'unknown';
 }
+
+export async function isNightly(): Promise<boolean> {
+  const pkgJson = await getPackageJson();
+  return pkgJson?.nightly || false;
+}
