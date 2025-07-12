@@ -285,6 +285,7 @@ export class Config {
     
     // Initialize enhancers that wrap existing functionality
     this.promptEnhancer = new PromptEnhancer(this);
+    await this.promptEnhancer.initialize();
     this.toolCallInterceptor = new ToolCallInterceptor(this);
   }
 

@@ -27,6 +27,7 @@ import {
   modifyWithEditor,
 } from '../tools/modifiable-tool.js';
 import * as Diff from 'diff';
+import { getToolCallInterceptorIfAvailable } from '../context/index.js';
 
 export type ValidatingToolCall = {
   status: 'validating';
@@ -409,7 +410,17 @@ export class CoreToolScheduler {
         'Cannot schedule new tool calls while other tool calls are actively running (executing or awaiting approval).',
       );
     }
+    
     const requestsToProcess = Array.isArray(request) ? request : [request];
+    
+    // Apply tool call interception if available (pre-processing for context)
+    const interceptor = getToolCallInterceptorIfAvailable(this.config);
+    if (interceptor) {
+      // Pre-processing generates additional context but doesn't modify the request
+      await Promise.all(
+        requestsToProcess.map(req => interceptor.preprocessToolCall(req))
+      );
+    }
     const toolRegistry = await this.toolRegistry;
 
     const newToolCalls: ToolCall[] = requestsToProcess.map(
@@ -685,12 +696,28 @@ export class CoreToolScheduler {
               callId,
               summary ? [summary] : toolResult.llmContent,
             );
-            const successResponse: ToolCallResponseInfo = {
+            let successResponse: ToolCallResponseInfo = {
               callId,
               responseParts: response,
               resultDisplay: resultForDisplay.returnDisplay,
               error: undefined,
             };
+
+            // Apply tool call post-processing if available
+            const interceptor = getToolCallInterceptorIfAvailable(this.config);
+            if (interceptor) {
+              const additionalContext = await interceptor.postprocessToolCall(
+                scheduledCall.request,
+                successResponse
+              );
+              // Append additional context to the response if available
+              if (additionalContext) {
+                successResponse = {
+                  ...successResponse,
+                  resultDisplay: successResponse.resultDisplay + '\n' + additionalContext
+                };
+              }
+            }
 
             this.setStatusInternal(callId, 'success', successResponse);
           })

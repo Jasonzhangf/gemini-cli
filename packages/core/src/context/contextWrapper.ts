@@ -7,6 +7,7 @@
 import { Content } from '@google/genai';
 import { ContextManager } from './contextManager.js';
 import { Config } from '../config/config.js';
+import { ContextDebugger } from './contextDebugger.js';
 
 /**
  * 上下文包装器 - 用于集成现有的内存系统和新的上下文管理系统
@@ -15,16 +16,25 @@ import { Config } from '../config/config.js';
 export class ContextWrapper {
   private contextManager: ContextManager;
   private config: Config;
+  private debugger: ContextDebugger;
 
   constructor(config: Config) {
     this.config = config;
     this.contextManager = config.getContextManager();
+    this.debugger = new ContextDebugger(config.getSessionId(), config.getDebugMode(), config.getProjectRoot());
+  }
+
+  /**
+   * 初始化包装器
+   */
+  async initialize(): Promise<void> {
+    await this.debugger.initialize();
   }
 
   /**
    * 包装现有的getUserMemory方法，添加上下文管理功能
    */
-  getEnhancedUserMemory(): string {
+  async getEnhancedUserMemory(_userMessage?: string): Promise<string> {
     // 获取原始的用户内存
     const originalMemory = this.config.getUserMemory();
     
@@ -35,14 +45,19 @@ export class ContextWrapper {
     const sections: string[] = [];
     
     if (originalMemory && originalMemory.trim().length > 0) {
-      sections.push('# 用户记忆\n' + originalMemory.trim());
+      sections.push('# 用户记忆 (Memory Tool)\n' + originalMemory.trim());
     }
     
     if (contextualMemory && contextualMemory.trim().length > 0) {
       sections.push(contextualMemory.trim());
     }
     
-    return sections.join('\n\n---\n\n');
+    const enhancedMemory = sections.join('\n\n---\n\n');
+    
+    // NOTE: Debug快照现在在getEnhancedSystemPromptIfAvailable中统一处理
+    // 避免重复记录debug信息
+    
+    return enhancedMemory;
   }
 
   /**
@@ -76,7 +91,7 @@ export class ContextWrapper {
   /**
    * 获取当前任务（用于工具调用前的上下文注入）
    */
-  getCurrentTask(): any {
+  getCurrentTask(): unknown {
     return this.contextManager.getCurrentTask();
   }
 
@@ -89,7 +104,7 @@ export class ContextWrapper {
       return '';
     }
 
-    const currentTask = this.getCurrentTask();
+    const currentTask = this.getCurrentTask() as any;
     if (!currentTask) {
       return '\n🎯 任务状态: 所有任务已完成，建议结束任务维护模式';
     }
@@ -101,9 +116,10 @@ export class ContextWrapper {
   /**
    * 处理工具调用后的上下文更新
    */
-  async handleToolCallComplete(toolName: string, toolResult: any): Promise<void> {
+  async handleToolCallComplete(toolName: string, toolResult: unknown): Promise<void> {
+    const result = toolResult as any;
     // 如果是todo工具且创建了任务列表，需要特殊处理
-    if (toolName === 'todo' && toolResult?.maintenanceMode === true) {
+    if (toolName === 'todo' && result?.maintenanceMode === true) {
       // 任务列表已创建，上下文管理器会自动处理
       if (this.config.getDebugMode()) {
         console.log('[ContextWrapper] Entered task maintenance mode');
@@ -111,7 +127,7 @@ export class ContextWrapper {
     }
     
     // 如果是todo工具且结束了维护模式
-    if (toolName === 'todo' && toolResult?.maintenanceMode === false) {
+    if (toolName === 'todo' && result?.maintenanceMode === false) {
       if (this.config.getDebugMode()) {
         console.log('[ContextWrapper] Exited task maintenance mode');
       }
@@ -135,7 +151,29 @@ export class ContextWrapper {
   /**
    * 获取完整的上下文数据（用于调试和监控）
    */
-  getContextData(): any {
+  getContextData(): unknown {
     return this.contextManager.getContext();
+  }
+
+  /**
+   * 手动保存debug快照（用于额外的debug记录点）
+   */
+  async saveDebugSnapshot(enhancedPrompt?: string, userMessage?: string): Promise<void> {
+    if (this.debugger.isDebugEnabled()) {
+      await this.debugger.saveContextSnapshot(
+        this.contextManager.getContext(),
+        this.config.getUserMemory(),
+        this.config.getGeminiMdFileCount(),
+        enhancedPrompt,
+        userMessage
+      );
+    }
+  }
+
+  /**
+   * 获取调试器当前轮次
+   */
+  getCurrentDebugTurn(): number {
+    return this.debugger.getCurrentTurn();
   }
 }

@@ -5,7 +5,8 @@
 
 set -e  # 出错时退出
 
-echo "🔄 OpenAI Hijack 模式更新脚本 v0.1.12"
+SCRIPT_VERSION=$(node -p "require('./package.json').version")
+echo "🔄 OpenAI Hijack 模式更新脚本 v$SCRIPT_VERSION"
 echo "================================="
 
 # 显示当前版本信息
@@ -56,7 +57,12 @@ which gemini && echo "   ✅ gemini 命令可用" || echo "   ❌ gemini 命令�
 
 # 检查版本号
 echo "   检查版本号..."
-gemini --version 2>/dev/null | head -1 && echo "   ✅ 版本检查成功" || echo "   ❌ 版本检查失败"
+ACTUAL_VERSION=$(gemini --version 2>/dev/null | head -1 | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?')
+if [ ! -z "$ACTUAL_VERSION" ]; then
+    echo "   ✅ 当前版本: $ACTUAL_VERSION"
+else 
+    echo "   ❌ 版本检查失败"
+fi
 
 # 7. 测试OpenAI模式
 echo ""
@@ -64,17 +70,20 @@ echo "🧪 测试 OpenAI hijack 模式..."
 echo "   创建测试配置..."
 
 # 创建~/.gemini/.env配置
-mkdir -p ~/.gemini
-cat > ~/.gemini/.env << 'EOF'
-# OpenAI Hijack Configuration - v0.1.12
+if [ ! -f ~/.gemini/.env ]; then
+    mkdir -p ~/.gemini
+    cat > ~/.gemini/.env << EOF
+# OpenAI Hijack Configuration - v$SCRIPT_VERSION
 OPENAI_API_KEY=not-needed
 OPENAI_BASE_URL=http://localhost:1234/v1
-OPENAI_MODEL=local-model-v0.1.12
+OPENAI_MODEL=local-model-v$SCRIPT_VERSION
 OPENAI_TEMPERATURE=0.7
 OPENAI_MAX_TOKENS=4096
 EOF
-
-echo "   ✅ 配置文件已创建: ~/.gemini/.env"
+    echo "   ✅ 配置文件已创建: ~/.gemini/.env"
+else
+    echo "   ℹ️  配置文件 ~/.gemini/.env 已存在，跳过创建."
+fi
 
 # 测试OpenAI模式初始化
 echo "   测试模式初始化..."
@@ -102,4 +111,4 @@ echo "   ✅ 显示正确的第三方模型名称"
 echo "   ✅ 支持文本引导工具调用"
 echo "   ✅ 多轮对话支持"
 echo ""
-echo "版本: v0.1.12 - OpenAI Hijack Mode Complete"
+echo "版本: v$SCRIPT_VERSION - OpenAI Hijack Mode Complete"

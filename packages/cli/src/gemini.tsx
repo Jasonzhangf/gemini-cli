@@ -325,7 +325,7 @@ async function validateNonInterActiveAuth(
   if (nonInteractiveConfig.getOpenAIMode()) {
     return nonInteractiveConfig;
   }
-
+  
   // making a special case for the cli. many headless environments might not have a settings.json set
   // so if GEMINI_API_KEY is set, we'll use that. However since the oauth things are interactive anyway, we'll
   // still expect that exists

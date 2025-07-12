@@ -231,23 +231,30 @@ export class ContextManager {
   generateModelContext(): string {
     const sections: string[] = [];
 
-    // 静态上下文
+    // 静态上下文 - 清晰标记来源
     if (this.context.staticContext.length > 0) {
-      sections.push('# 静态规则上下文\n' + this.context.staticContext.join('\n\n'));
+      let staticSection = `# 📋 静态规则上下文 (Static Context)\n`;
+      staticSection += `*来源: 项目和全局规则文件*\n\n`;
+      staticSection += this.context.staticContext.join('\n\n');
+      sections.push(staticSection);
     }
 
-    // 动态上下文
+    // 动态上下文 - 清晰标记来源
     if (this.context.dynamicContext.length > 0) {
-      sections.push('# 动态上下文\n' + this.context.dynamicContext.join('\n\n'));
+      let dynamicSection = `# 🔄 动态上下文 (Dynamic Context)\n`;
+      dynamicSection += `*来源: 运行时动态添加的上下文信息*\n\n`;
+      dynamicSection += this.context.dynamicContext.join('\n\n');
+      sections.push(dynamicSection);
     }
 
-    // 任务列表上下文
+    // 任务列表上下文 - 清晰标记来源
     if (this.context.taskList && this.context.taskList.isMaintenanceMode) {
       const currentTask = this.getCurrentTask();
       const completedCount = this.context.taskList.tasks.filter(t => t.status === 'completed').length;
       const totalCount = this.context.taskList.tasks.length;
       
-      let taskContext = `# 当前任务管理\n`;
+      let taskContext = `# 🎯 任务管理上下文 (Task Management)\n`;
+      taskContext += `*来源: TODO工具创建的任务列表，当前处于任务维护模式*\n\n`;
       taskContext += `## 任务进度: ${completedCount}/${totalCount} 已完成\n\n`;
       
       if (currentTask) {

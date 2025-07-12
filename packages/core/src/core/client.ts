@@ -355,8 +355,9 @@ export class GeminiClient {
       ...(extraHistory ?? []),
     ];
     try {
-      const userMemory = this.config.getUserMemory();
-      const systemInstruction = getCoreSystemPrompt(userMemory);
+      // Use enhanced system prompt if context enhancement is enabled
+      const { getEnhancedSystemPromptIfAvailable } = await import('../context/index.js');
+      const systemInstruction = await getEnhancedSystemPromptIfAvailable(this.config);
       const generateContentConfigWithThinking = isThinkingSupported(
         this.config.getModel(),
       )
@@ -488,8 +489,9 @@ export class GeminiClient {
     const modelToUse =
       model || this.config.getModel() || DEFAULT_GEMINI_FLASH_MODEL;
     try {
-      const userMemory = this.config.getUserMemory();
-      const systemInstruction = getCoreSystemPrompt(userMemory);
+      // Use enhanced system prompt if context enhancement is enabled
+      const { getEnhancedSystemPromptIfAvailable } = await import('../context/index.js');
+      const systemInstruction = await getEnhancedSystemPromptIfAvailable(this.config);
       const requestConfig = {
         abortSignal,
         ...this.generateContentConfig,
@@ -581,8 +583,9 @@ export class GeminiClient {
     };
 
     try {
-      const userMemory = this.config.getUserMemory();
-      const systemInstruction = getCoreSystemPrompt(userMemory);
+      // Use enhanced system prompt if context enhancement is enabled
+      const { getEnhancedSystemPromptIfAvailable } = await import('../context/index.js');
+      const systemInstruction = await getEnhancedSystemPromptIfAvailable(this.config);
 
       const requestConfig = {
         abortSignal,

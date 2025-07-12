@@ -20,20 +20,39 @@ export function isContextEnhancementEnabled(): boolean {
 // 便捷函数：获取增强的系统提示（如果可用）
 import { Config } from '../config/config.js';
 
-export function getEnhancedSystemPromptIfAvailable(config: Config): string {
+export async function getEnhancedSystemPromptIfAvailable(config: Config, userMessage?: string): Promise<string> {
+  // Import getCoreSystemPrompt from prompts
+  const { getCoreSystemPrompt } = await import('../core/prompts.js');
+  
   if (!isContextEnhancementEnabled()) {
-    // 回退到原始的getUserMemory
+    // 回退到原始的getCoreSystemPrompt，而不是仅仅getUserMemory
+    if (config.getDebugMode()) {
+      console.log('[Context] Context enhancement disabled, using original system prompt');
+    }
     const originalMemory = config.getUserMemory();
-    return originalMemory || '';
+    return getCoreSystemPrompt(originalMemory);
   }
 
   try {
-    return config.getPromptEnhancer().getEnhancedSystemPrompt();
-  } catch (error) {
+    if (config.getDebugMode()) {
+      console.log('[Context] Using enhanced system prompt with context management');
+    }
+    
+    const promptEnhancer = config.getPromptEnhancer();
+    const enhancedPrompt = await promptEnhancer.getEnhancedSystemPrompt(userMessage);
+    
+    // 在每次调用时保存debug快照（如果启用了debug模式）
+    if (config.getDebugMode()) {
+      const contextWrapper = promptEnhancer.getContextWrapper();
+      await contextWrapper.saveDebugSnapshot(enhancedPrompt, userMessage);
+    }
+    
+    return enhancedPrompt;
+  } catch (_error) {
     // 如果增强器未初始化，回退到原始方法
-    console.warn('[Context] PromptEnhancer not available, falling back to original method');
+    console.warn('[Context] PromptEnhancer not available, falling back to original method:', _error);
     const originalMemory = config.getUserMemory();
-    return originalMemory || '';
+    return getCoreSystemPrompt(originalMemory);
   }
 }
 

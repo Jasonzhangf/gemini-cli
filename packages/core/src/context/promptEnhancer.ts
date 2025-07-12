@@ -7,6 +7,7 @@
 import { getCoreSystemPrompt } from '../core/prompts.js';
 import { ContextWrapper } from './contextWrapper.js';
 import { Config } from '../config/config.js';
+import { TodoService } from './todoService.js';
 
 /**
  * 提示增强器 - 包装现有的提示生成系统，添加上下文管理功能
@@ -15,30 +16,82 @@ import { Config } from '../config/config.js';
 export class PromptEnhancer {
   private contextWrapper: ContextWrapper;
   private config: Config;
+  private todoService: TodoService;
 
   constructor(config: Config) {
     this.config = config;
     this.contextWrapper = new ContextWrapper(config);
+    this.todoService = new TodoService();
+  }
+
+  /**
+   * 初始化增强器
+   */
+  async initialize(): Promise<void> {
+    await this.contextWrapper.initialize();
   }
 
   /**
    * 生成增强的系统提示
    * 包装原有的getCoreSystemPrompt，添加上下文管理功能
    */
-  getEnhancedSystemPrompt(): string {
+  async getEnhancedSystemPrompt(userMessage?: string): Promise<string> {
     // 获取增强的用户内存（包含原始内存 + 上下文管理的内容）
-    const enhancedMemory = this.contextWrapper.getEnhancedUserMemory();
+    const enhancedMemory = await this.contextWrapper.getEnhancedUserMemory(userMessage);
     
     // 使用原有的提示生成函数，但传入增强的内存
     const basePrompt = getCoreSystemPrompt(enhancedMemory);
     
+    // 获取当前任务信息
+    const currentTaskPrompt = await this.generateCurrentTaskPrompt();
+    
     // 如果在任务维护模式，添加任务相关的系统提示
     if (this.contextWrapper.isInMaintenanceMode()) {
       const taskModePrompt = this.generateTaskModePrompt();
-      return `${basePrompt}\n\n${taskModePrompt}`;
+      return `${basePrompt}\n\n${currentTaskPrompt}\n\n${taskModePrompt}`;
+    }
+    
+    // 即使不在维护模式，如果有当前任务也要显示
+    if (currentTaskPrompt) {
+      return `${basePrompt}\n\n${currentTaskPrompt}`;
     }
     
     return basePrompt;
+  }
+
+  /**
+   * 生成当前任务提示
+   */
+  private async generateCurrentTaskPrompt(): Promise<string> {
+    try {
+      const currentTask = await this.todoService.getCurrentTask();
+      if (!currentTask) {
+        return '';
+      }
+
+      return `
+# 🎯 当前工作目标
+
+**目标任务**: ${currentTask.description}
+**执行状态**: ${currentTask.status}
+**创建时间**: ${new Date(currentTask.createdAt).toLocaleString()}
+
+🔥 **核心工作流程**: 
+1. **专注执行**: 当前任务是您的唯一工作目标，必须优先完成
+2. **完成标记**: 任务完成后，立即使用以下命令标记完成：
+   \`{"action": "update", "taskId": "${currentTask.id}", "status": "completed"}\`
+3. **获取下一个**: 标记完成后，系统自动分配下一个任务作为新的工作目标
+4. **状态同步**: 每次使用工具时，都要考虑是否推进了当前工作目标
+
+⚠️ **关键提醒**: 
+- 当前任务未完成前，不要分心处理其他事项
+- 完成任务后必须主动更新状态，否则系统无法分配下一个任务
+- 如需修改或分解任务，使用 todo 工具调整后继续执行
+`.trim();
+    } catch (error) {
+      // 如果读取当前任务失败，不添加任务提示
+      return '';
+    }
   }
 
   /**

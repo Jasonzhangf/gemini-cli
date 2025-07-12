@@ -21,6 +21,7 @@ import {
   type HistoryItem,
   MessageType,
   HistoryItemWithoutId,
+  TodoTask,
 } from './types.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { useGeminiStream } from './hooks/useGeminiStream.js';
@@ -50,6 +51,8 @@ import { useConsolePatcher } from './components/ConsolePatcher.js';
 import { DetailedMessagesDisplay } from './components/DetailedMessagesDisplay.js';
 import { HistoryItemDisplay } from './components/HistoryItemDisplay.js';
 import { ContextSummaryDisplay } from './components/ContextSummaryDisplay.js';
+import { TodoDisplay } from './components/TodoDisplay.js';
+import { useTodoState } from './hooks/useTodoState.js';
 import { useHistory } from './hooks/useHistoryManager.js';
 import process from 'node:process';
 import {
@@ -153,6 +156,10 @@ const App = ({
   const [modelSwitchedFromQuotaError, setModelSwitchedFromQuotaError] =
     useState<boolean>(false);
 
+  // Todo state management
+  const todoState = useTodoState(config);
+  const [lastTodoSnapshot, setLastTodoSnapshot] = useState<string>('');
+
   const openPrivacyNotice = useCallback(() => {
     setShowPrivacyNotice(true);
   }, []);
@@ -161,6 +168,35 @@ const App = ({
     () => consoleMessages.filter((msg) => msg.type === 'error').length,
     [consoleMessages],
   );
+
+  // Monitor todo state changes and add to history when updated
+  useEffect(() => {
+    const currentSnapshot = JSON.stringify(todoState.tasks.map(t => ({ id: t.id, status: t.status, description: t.description })));
+    if (currentSnapshot !== lastTodoSnapshot && todoState.tasks.length > 0) {
+      const previousSnapshot = lastTodoSnapshot;
+      setLastTodoSnapshot(currentSnapshot);
+      
+      // Always show todo updates, including initial creation
+      // But distinguish between initial load (no previous snapshot) and actual updates
+      const isInitialLoad = previousSnapshot === '';
+      const hasActualChanges = !isInitialLoad || todoState.tasks.length > 0;
+      
+      if (hasActualChanges) {
+        // Add todo update to history
+        const todoItem: HistoryItemWithoutId = {
+          type: 'todo_update',
+          tasks: todoState.tasks.map(task => ({
+            id: task.id,
+            description: task.description,
+            status: task.status,
+            createdAt: task.createdAt,
+            completedAt: task.completedAt,
+          })),
+        };
+        addItem(todoItem, Date.now());
+      }
+    }
+  }, [todoState.tasks, lastTodoSnapshot, addItem]);
 
   const {
     isThemeDialogOpen,

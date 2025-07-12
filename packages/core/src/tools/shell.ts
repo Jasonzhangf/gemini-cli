@@ -39,19 +39,24 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
     super(
       ShellTool.Name,
       'Shell',
-      `This tool executes a given shell command as \`bash -c <command>\`. Command can start background processes using \`&\`. Command is executed as a subprocess that leads its own process group. Command process group can be terminated as \`kill -- -PGID\` or signaled as \`kill -s SIGNAL -- -PGID\`.
+      `Execute shell commands for file operations, system administration, and task automation. This tool runs bash commands and is essential for:
 
-The following information is returned:
+**File Operations**: cp, mv, rm, mkdir, find, chmod, etc.
+**Directory Management**: Creating, moving, copying, deleting directories and files
+**Content Processing**: grep, awk, sed, sort for text processing
+**System Tasks**: Package management, process control, environment setup
+**Build & Deploy**: npm, make, docker, git operations
 
-Command: Executed command.
-Directory: Directory (relative to project root) where command was executed, or \`(root)\`.
-Stdout: Output on stdout stream. Can be \`(empty)\` or partial on error and for any unwaited background processes.
-Stderr: Output on stderr stream. Can be \`(empty)\` or partial on error and for any unwaited background processes.
-Error: Error or \`(none)\` if no error was reported for the subprocess.
-Exit Code: Exit code or \`(none)\` if terminated by signal.
-Signal: Signal number or \`(none)\` if no signal was received.
-Background PIDs: List of background processes started or \`(none)\`.
-Process Group PGID: Process group started or \`(none)\``,
+Common file management examples:
+- Copy files/directories: cp -r source dest
+- Move/rename: mv old new  
+- Delete: rm -rf directory
+- Create directories: mkdir -p path/to/dir
+- Find files: find . -name "*.txt"
+
+The tool executes as \`bash -c <command>\` and supports background processes with \`&\`.
+
+Returns: Command, Directory, Stdout, Stderr, Error, Exit Code, Signal, Background PIDs, Process Group PGID`,
       {
         type: Type.OBJECT,
         properties: {

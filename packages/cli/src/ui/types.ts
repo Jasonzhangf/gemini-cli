@@ -130,6 +130,19 @@ export type HistoryItemCompression = HistoryItemBase & {
   compression: CompressionProps;
 };
 
+export interface TodoTask {
+  id: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  createdAt: string;
+  completedAt?: string;
+}
+
+export type HistoryItemTodo = HistoryItemBase & {
+  type: 'todo_update';
+  tasks: TodoTask[];
+};
+
 // Using Omit<HistoryItem, 'id'> seems to have some issues with typescript's
 // type inference e.g. historyItem.type === 'tool_group' isn't auto-inferring that
 // 'tools' in historyItem.
@@ -147,7 +160,8 @@ export type HistoryItemWithoutId =
   | HistoryItemModelStats
   | HistoryItemToolStats
   | HistoryItemQuit
-  | HistoryItemCompression;
+  | HistoryItemCompression
+  | HistoryItemTodo;
 
 export type HistoryItem = HistoryItemWithoutId & { id: number };
 

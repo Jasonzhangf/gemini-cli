@@ -93,4 +93,63 @@ export class TodoService {
       createdAt: new Date().toISOString(),
     };
   }
+
+  /**
+   * 设置当前任务ID到单独的文件
+   */
+  async setCurrentTask(taskId: string): Promise<void> {
+    try {
+      const currentTaskFile = path.join(homedir(), '.gemini', 'current_task.txt');
+      await fs.mkdir(path.dirname(currentTaskFile), { recursive: true });
+      await fs.writeFile(currentTaskFile, taskId, 'utf-8');
+    } catch (error) {
+      console.error('[TodoService] Failed to set current task:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取当前任务ID
+   */
+  async getCurrentTaskId(): Promise<string | null> {
+    try {
+      const currentTaskFile = path.join(homedir(), '.gemini', 'current_task.txt');
+      const taskId = await fs.readFile(currentTaskFile, 'utf-8');
+      return taskId.trim();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 更新任务状态
+   */
+  async updateTaskStatus(taskId: string, status: 'pending' | 'in_progress' | 'completed'): Promise<void> {
+    const tasks = await this.loadTasks();
+    const task = tasks.find(t => t.id === taskId);
+    
+    if (!task) {
+      throw new Error(`未找到ID为 ${taskId} 的任务`);
+    }
+
+    task.status = status;
+    if (status === 'completed') {
+      task.completedAt = new Date().toISOString();
+    }
+
+    await this.saveTasks(tasks);
+  }
+
+  /**
+   * 获取当前任务详情
+   */
+  async getCurrentTask(): Promise<TaskItem | null> {
+    const currentTaskId = await this.getCurrentTaskId();
+    if (!currentTaskId) {
+      return null;
+    }
+
+    const tasks = await this.loadTasks();
+    return tasks.find(t => t.id === currentTaskId) || null;
+  }
 }

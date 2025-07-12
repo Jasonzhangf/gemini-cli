@@ -21,6 +21,7 @@ import { ModelStatsDisplay } from './ModelStatsDisplay.js';
 import { ToolStatsDisplay } from './ToolStatsDisplay.js';
 import { SessionSummaryDisplay } from './SessionSummaryDisplay.js';
 import { Config } from '@google/gemini-cli-core';
+import { TodoMessage } from './messages/TodoMessage.js';
 
 interface HistoryItemDisplayProps {
   item: HistoryItem;
@@ -87,6 +88,12 @@ export const HistoryItemDisplay: React.FC<HistoryItemDisplayProps> = ({
     )}
     {item.type === 'compression' && (
       <CompressionMessage compression={item.compression} />
+    )}
+    {item.type === 'todo_update' && (
+      <TodoMessage
+        tasks={item.tasks}
+        terminalWidth={terminalWidth}
+      />
     )}
   </Box>
 );

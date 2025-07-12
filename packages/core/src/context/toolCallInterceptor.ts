@@ -8,6 +8,7 @@ import { ToolCallRequestInfo, ToolCallResponseInfo } from '../core/turn.js';
 import { ContextWrapper } from './contextWrapper.js';
 import { TodoTool } from '../tools/todo.js';
 import { Config } from '../config/config.js';
+import { TodoService } from './todoService.js';
 
 /**
  * 工具调用拦截器 - 在工具调用前后添加上下文相关的处理
@@ -17,11 +18,13 @@ export class ToolCallInterceptor {
   private contextWrapper: ContextWrapper;
   private config: Config;
   private todoTool: TodoTool;
+  private todoService: TodoService;
 
   constructor(config: Config) {
     this.config = config;
     this.contextWrapper = new ContextWrapper(config);
-    this.todoTool = new TodoTool();
+    this.todoTool = new TodoTool(config);
+    this.todoService = new TodoService();
   }
 
   /**
@@ -114,12 +117,19 @@ ${todoData.suggestion ? `💡 建议: ${todoData.suggestion}` : ''}`;
         }
       }
 
-      // 对于其他工具调用，在任务维护模式下提供任务完成提示
+      // 对于其他工具调用，在任务维护模式下提供任务完成检测和提示
       if (this.contextWrapper.isInMaintenanceMode() && request.name !== 'todo') {
-        const currentTask = this.contextWrapper.getCurrentTask();
-        if (currentTask && currentTask.status === 'pending') {
-          return `\n💡 工具执行完成！如果这完成了当前任务 "${currentTask.description}"，请使用以下命令更新状态：
-{"action": "update", "taskId": "${currentTask.id}", "status": "completed"}`;
+        const currentTask = await this.todoService.getCurrentTask();
+        if (currentTask && (currentTask.status === 'pending' || currentTask.status === 'in_progress')) {
+          return `\n🎯 **工作目标检查**: 
+当前目标: "${currentTask.description}" (${currentTask.status})
+
+✅ **工具执行完成** - 请评估：
+• 这次工具使用是否完成了当前工作目标？
+• 如果已完成，立即使用: \`{"action": "update", "taskId": "${currentTask.id}", "status": "completed"}\`
+• 如果未完成，继续执行相关工具直到目标达成
+
+🔄 **下一步**: 完成当前目标后，系统将自动分配下一个工作目标`;
         }
       }
 
@@ -145,5 +155,79 @@ ${todoData.suggestion ? `💡 建议: ${todoData.suggestion}` : ''}`;
   shouldIntercept(toolName: string): boolean {
     // 在任务维护模式下拦截所有工具调用
     return this.contextWrapper.isInMaintenanceMode();
+  }
+
+  /**
+   * 检测任务变更需求
+   * 当模型没有工具调用但任务未完成时，提示用户是否需要更新任务
+   */
+  async detectTaskChangeNeeds(modelResponse: string): Promise<string> {
+    try {
+      // 只在任务维护模式下进行检测
+      if (!this.contextWrapper.isInMaintenanceMode()) {
+        return '';
+      }
+
+      // 获取当前任务
+      const currentTask = await this.todoService.getCurrentTask();
+      if (!currentTask || currentTask.status === 'completed') {
+        return '';
+      }
+
+      // 检查模型的响应是否包含任务相关关键词，但没有工具调用
+      const hasTaskKeywords = this.containsTaskKeywords(modelResponse);
+      const hasToolCalls = this.containsToolCalls(modelResponse);
+
+      if (hasTaskKeywords && !hasToolCalls) {
+        return `\n\n🎯 **工作目标提醒**: 
+当前工作目标: "${currentTask.description}" (${currentTask.status})
+
+⚠️ **检测到任务相关内容但无工具调用**，请立即采取行动：
+
+🔧 **如果目标已达成**: 使用 \`{"action": "update", "taskId": "${currentTask.id}", "status": "completed"}\`
+📝 **如果需要修改目标**: 使用 todo 工具调整任务内容
+⚡ **如果需要继续执行**: 使用相应工具推进当前工作目标
+
+🚨 **重要**: 不要只是描述，要用工具执行！每个工作目标都必须通过实际行动完成。`;
+      }
+
+      return '';
+    } catch (error) {
+      if (this.config.getDebugMode()) {
+        console.warn('[ToolCallInterceptor] Error in detectTaskChangeNeeds:', error);
+      }
+      return '';
+    }
+  }
+
+  /**
+   * 检查文本是否包含任务相关关键词
+   */
+  private containsTaskKeywords(text: string): boolean {
+    const taskKeywords = [
+      '完成', '完成了', '已完成', '任务', '下一步', '接下来', 
+      '开始', '继续', '准备', '需要', '现在', '然后', '步骤',
+      '实现', '修改', '创建', '更新', '处理', '解决', '优化'
+    ];
+    
+    const lowerText = text.toLowerCase();
+    return taskKeywords.some(keyword => 
+      lowerText.includes(keyword) || 
+      text.includes(keyword)
+    );
+  }
+
+  /**
+   * 检查文本是否包含工具调用格式
+   */
+  private containsToolCalls(text: string): boolean {
+    // 检查是否包含工具调用的JSON格式
+    const toolCallPatterns = [
+      /\{[^}]*"action"[^}]*\}/,  // todo工具格式
+      /\{[^}]*"tool"[^}]*\}/,   // 通用工具格式
+      /✦[^✦]*\{[^}]*\}/,       // OpenAI文本引导格式
+    ];
+    
+    return toolCallPatterns.some(pattern => pattern.test(text));
   }
 }

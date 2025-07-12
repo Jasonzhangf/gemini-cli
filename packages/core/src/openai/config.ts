@@ -2,8 +2,6 @@
  * @license
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
- * 
- * OpenAI Hijack Configuration - Load configuration from ~/.gemini/.env
  */
 
 import * as fs from 'node:fs';

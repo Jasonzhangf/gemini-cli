@@ -2,9 +2,6 @@
  * @license
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
- * 
- * OpenAI Hijack Adapter - Transparent redirection to third-party OpenAI providers
- * This module intercepts Gemini API calls and redirects them through OpenAI-compatible endpoints
  */
 
 import * as path from 'path';
@@ -47,6 +44,7 @@ export class OpenAIHijackAdapter {
     'read_many_files': ['file_paths'],
     'search_file_content': ['file_paths'],
   };
+  private processedToolCalls: Set<string> = new Set(); // Track processed tool calls globally
 
   constructor(config: OpenAIHijackConfig, toolDeclarations: any[], coreConfig: Config) {
     this.config = config;
@@ -103,6 +101,15 @@ You have access to powerful tools to help analyze and work with files and data. 
 
 ✦ {"name": "tool_name", "arguments": {"param": "value"}}
 
+🎯 CRITICAL TASK MANAGEMENT RULE:
+For ANY request involving 3+ distinct steps, you MUST IMMEDIATELY create a task list BEFORE starting work:
+✦ {"name": "todo", "arguments": {"action": "create_list", "tasks": ["step1", "step2", "step3"]}}
+
+Examples requiring task lists:
+- File organization, analysis + action, multi-step implementations
+- Any request involving "organize", "analyze and fix", "implement feature"
+- System configuration, debugging multiple issues
+
 📋 AVAILABLE TOOLS:
 ${toolDescriptions}
 
@@ -135,13 +142,14 @@ The user will execute the tools and provide you with the results. Use the result
       'list_directory': '✦ {"name": "list_directory", "arguments": {"path": "."}}',
       'search_file_content': '✦ {"name": "search_file_content", "arguments": {"query": "function", "file_paths": ["./src/**/*.js"]}}',
       'write_file': '✦ {"name": "write_file", "arguments": {"file_path": "./output.txt", "content": "Hello World"}}',
-      'run_shell_command': '✦ {"name": "run_shell_command", "arguments": {"command": "ls -la", "directory": "./src"}}',
+      'run_shell_command': '✦ {"name": "run_shell_command", "arguments": {"command": "cp -r source_folder destination_folder", "description": "Copy directory with all contents"}}',
       'replace': '✦ {"name": "replace", "arguments": {"file_path": "./file.txt", "old_string": "old", "new_string": "new"}}',
       'glob': '✦ {"name": "glob", "arguments": {"patterns": ["**/*.js", "**/*.ts"]}}',
       'web_fetch': '✦ {"name": "web_fetch", "arguments": {"url": "https://example.com"}}',
       'read_many_files': '✦ {"name": "read_many_files", "arguments": {"file_paths": ["./src/*.js"]}}',
       'save_memory': '✦ {"name": "save_memory", "arguments": {"key": "project_info", "value": "Important findings"}}',
-      'google_web_search': '✦ {"name": "google_web_search", "arguments": {"query": "search terms"}}'
+      'google_web_search': '✦ {"name": "google_web_search", "arguments": {"query": "search terms"}}',
+      'todo': '✦ {"name": "todo", "arguments": {"action": "create_list", "tasks": ["实现功能A", "测试功能B", "修复bug C"]}}'
     };
 
     // Return specific example or generate generic one
@@ -183,6 +191,15 @@ The user will execute the tools and provide you with the results. Use the result
           if (toolCallJson && toolCallJson.name) {
             const callId = `text_guided_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             const toolName = this.normalizeToolName(toolCallJson.name);
+            
+            // CRITICAL FIX: Validate that the tool actually exists in our tool declarations
+            const isValidTool = this.toolDeclarations.some(tool => tool.name === toolName);
+            if (!isValidTool) {
+              if (this.debugMode) {
+                console.warn(`[OpenAI Hijack] Skipping unknown tool: ${toolName}`);
+              }
+              continue; // Skip this tool call entirely
+            }
             
             // Handle different argument formats
             let args = toolCallJson.arguments || toolCallJson.args || {};
@@ -322,6 +339,9 @@ The user will execute the tools and provide you with the results. Use the result
       'google_web_search': 'google_web_search',
       'search_web': 'google_web_search',
       'web_search': 'google_web_search',
+      'todo': 'todo',
+      'task': 'todo',
+      'task_management': 'todo',
     };
 
     return toolMapping[name.toLowerCase()] || name;
@@ -329,15 +349,25 @@ The user will execute the tools and provide you with the results. Use the result
 
   /**
    * Remove duplicate tool calls (same name and args)
+   * Uses both local deduplication and global tracking across streaming
    */
   private deduplicateToolCalls(toolCalls: ToolCall[]): ToolCall[] {
-    const seen = new Set<string>();
+    const localSeen = new Set<string>();
     return toolCalls.filter(call => {
       const key = `${call.name}:${JSON.stringify(call.args)}`;
-      if (seen.has(key)) {
+      
+      // Skip if already processed globally (across streaming chunks)
+      if (this.processedToolCalls.has(key)) {
         return false;
       }
-      seen.add(key);
+      
+      // Skip if duplicate in current batch
+      if (localSeen.has(key)) {
+        return false;
+      }
+      
+      localSeen.add(key);
+      this.processedToolCalls.add(key); // Mark as processed globally
       return true;
     });
   }
@@ -374,6 +404,9 @@ The user will execute the tools and provide you with the results. Use the result
     signal: AbortSignal,
     prompt_id: string
   ): AsyncGenerator<ServerGeminiStreamEvent, any> {
+    // Reset processed tool calls for new user message
+    this.processedToolCalls.clear();
+    
     // Extract message from Gemini format
     const userMessage = this.extractMessageFromRequest(request);
     
@@ -402,13 +435,53 @@ The user will execute the tools and provide you with the results. Use the result
       console.log('[OpenAI Hijack] Sending tool results back to model:', toolResults.length);
     }
 
+    // Process tool call completion through interceptor
+    try {
+      const { getToolCallInterceptorIfAvailable } = await import('../context/index.js');
+      const interceptor = getToolCallInterceptorIfAvailable(this.coreConfig);
+      if (interceptor) {
+        for (const toolResult of toolResults) {
+          // Create mock request and response objects for the interceptor
+          const mockRequest = {
+            callId: 'mock-' + Date.now(),
+            name: toolResult.name,
+            args: {}, // We don't have the original args here, but that's okay
+            isClientInitiated: false,
+            prompt_id: prompt_id,
+            isDangerous: false
+          };
+          const mockResponse = {
+            callId: 'mock-' + Date.now(),
+            responseParts: {
+              functionResponse: {
+                response: toolResult.result
+              }
+            },
+            resultDisplay: undefined,
+            error: undefined
+          };
+          
+          // Call the interceptor's postprocess method
+          await interceptor.postprocessToolCall(mockRequest, mockResponse);
+          
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] Processed tool completion through interceptor:', toolResult.name);
+          }
+        }
+      }
+    } catch (error) {
+      if (this.debugMode) {
+        console.warn('[OpenAI Hijack] Tool interceptor processing failed:', error);
+      }
+    }
+
     // Format tool results for the model
     const toolResultMessage = this.formatToolResultsForModel(toolResults);
     
     // Add tool result to conversation history
     this.conversationHistory.push({ role: 'user' as const, content: toolResultMessage });
 
-    yield* this.processModelResponse(toolResultMessage, signal, prompt_id, false);
+    yield* this.processModelResponse(toolResultMessage, signal, prompt_id, true);
   }
 
   /**
@@ -424,11 +497,35 @@ The user will execute the tools and provide you with the results. Use the result
       // Prepare messages for OpenAI API
       let messages: any[] = [...this.conversationHistory];
       
-      // Inject system prompt with tool guidance if needed
-      if (includeGuidance && this.toolDeclarations.length > 0) {
-        const toolGuidance = this.generateToolGuidance();
+      // Inject comprehensive system prompt with tool guidance
+      if (includeGuidance) {
+        let systemPrompt = '';
+        
+        // First, get the core system prompt (enhanced if available)
+        try {
+          const { getEnhancedSystemPromptIfAvailable } = await import('../context/index.js');
+          systemPrompt = await getEnhancedSystemPromptIfAvailable(this.coreConfig, message);
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] Using enhanced system prompt with context management');
+          }
+        } catch (error) {
+          // Fallback to original system prompt
+          const { getCoreSystemPrompt } = await import('../core/prompts.js');
+          const userMemory = this.coreConfig.getUserMemory();
+          systemPrompt = getCoreSystemPrompt(userMemory);
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] Using fallback core system prompt');
+          }
+        }
+        
+        // Then add tool guidance if tools are available
+        if (this.toolDeclarations.length > 0) {
+          const toolGuidance = this.generateToolGuidance();
+          systemPrompt += '\n\n' + toolGuidance;
+        }
+        
         messages = [
-          { role: 'system', content: toolGuidance },
+          { role: 'system', content: systemPrompt },
           ...messages
         ];
       }
@@ -436,14 +533,15 @@ The user will execute the tools and provide you with the results. Use the result
       // Use OpenAI chat completions API
       const stream = await this.openai.chat.completions.create({
         model: this.config.model,
-        messages: messages,
+        messages,
         stream: true,
         temperature: this.config.temperature || 0.7,
         max_tokens: this.config.maxTokens || 4096,
       });
 
       let fullResponse = '';
-      let yieldedToolCalls: Set<string> = new Set();
+      const yieldedToolCalls: Set<string> = new Set();
+      let lastToolCheckLength = 0; // Track when we last checked for tool calls
 
       for await (const chunk of stream) {
         if (signal.aborted) {
@@ -454,31 +552,68 @@ The user will execute the tools and provide you with the results. Use the result
         if (content) {
           fullResponse += content;
 
-          // Continuously check for tool calls in the accumulated response
-          const currentToolCalls = this.parseTextGuidedToolCalls(fullResponse);
+          // Only check for tool calls when we have substantial new content or at the end
+          // This prevents excessive parsing of the same content during streaming
+          const shouldCheckForTools = 
+            fullResponse.length - lastToolCheckLength > 50 || // Substantial new content
+            fullResponse.includes('✦') && fullResponse.length > lastToolCheckLength; // Tool call symbol detected
           
-          // Yield new tool calls that haven't been yielded yet
-          for (const toolCall of currentToolCalls) {
-            const toolKey = `${toolCall.name}:${JSON.stringify(toolCall.args)}`;
-            if (!yieldedToolCalls.has(toolKey)) {
-              yieldedToolCalls.add(toolKey);
-              
-              if (this.debugMode) {
-                console.log('[OpenAI Hijack] Emitting tool_call_request:', toolCall.name);
-              }
+          if (shouldCheckForTools) {
+            lastToolCheckLength = fullResponse.length;
+            
+            // Parse tool calls from the accumulated response
+            const currentToolCalls = this.parseTextGuidedToolCalls(fullResponse);
+            
+            // Yield new tool calls that haven't been yielded yet
+            for (const toolCall of currentToolCalls) {
+              const toolKey = `${toolCall.name}:${JSON.stringify(toolCall.args)}`;
+              if (!yieldedToolCalls.has(toolKey)) {
+                yieldedToolCalls.add(toolKey);
+                
+                if (this.debugMode) {
+                  console.log('[OpenAI Hijack] Emitting tool_call_request:', toolCall.name);
+                }
 
-              yield {
-                type: GeminiEventType.ToolCallRequest,
-                value: {
-                  callId: toolCall.callId,
-                  name: toolCall.name,
-                  args: toolCall.args,
-                  isClientInitiated: false,
-                  prompt_id: prompt_id,
-                  isDangerous: this.dangerousTools.has(toolCall.name),
-                },
-              };
+                yield {
+                  type: GeminiEventType.ToolCallRequest,
+                  value: {
+                    callId: toolCall.callId,
+                    name: toolCall.name,
+                    args: toolCall.args,
+                    isClientInitiated: false,
+                    prompt_id,
+                    isDangerous: this.dangerousTools.has(toolCall.name),
+                  },
+                };
+              }
             }
+          }
+        }
+      }
+      
+      // Final check for any remaining tool calls at the end of streaming
+      if (fullResponse.length > lastToolCheckLength) {
+        const finalToolCalls = this.parseTextGuidedToolCalls(fullResponse);
+        for (const toolCall of finalToolCalls) {
+          const toolKey = `${toolCall.name}:${JSON.stringify(toolCall.args)}`;
+          if (!yieldedToolCalls.has(toolKey)) {
+            yieldedToolCalls.add(toolKey);
+            
+            if (this.debugMode) {
+              console.log('[OpenAI Hijack] Emitting final tool_call_request:', toolCall.name);
+            }
+
+            yield {
+              type: GeminiEventType.ToolCallRequest,
+              value: {
+                callId: toolCall.callId,
+                name: toolCall.name,
+                args: toolCall.args,
+                isClientInitiated: false,
+                prompt_id,
+                isDangerous: this.dangerousTools.has(toolCall.name),
+              },
+            };
           }
         }
       }
@@ -487,9 +622,28 @@ The user will execute the tools and provide you with the results. Use the result
       // The UI should only show the tool call status.
       // If there are no tool calls, it's a regular text response.
       if (yieldedToolCalls.size === 0 && fullResponse.trim()) {
+        let finalContent = fullResponse;
+        
+        // Add task change detection if available
+        try {
+          const { getToolCallInterceptorIfAvailable } = await import('../context/index.js');
+          const interceptor = getToolCallInterceptorIfAvailable(this.coreConfig);
+          if (interceptor) {
+            const taskPrompt = await interceptor.detectTaskChangeNeeds(fullResponse);
+            if (taskPrompt) {
+              finalContent += taskPrompt;
+            }
+          }
+        } catch (error) {
+          // Task detection failed, continue with original content
+          if (this.debugMode) {
+            console.warn('[OpenAI Hijack] Task change detection failed:', error);
+          }
+        }
+        
         yield {
           type: GeminiEventType.Content,
-          value: fullResponse,
+          value: finalContent,
         };
       }
       
