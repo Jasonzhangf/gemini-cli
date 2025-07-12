@@ -101,19 +101,21 @@ You have access to powerful tools to help analyze and work with files and data. 
 
 ✦ {"name": "tool_name", "arguments": {"param": "value"}}
 
-🎯 CRITICAL TASK MANAGEMENT RULE:
-For ANY request involving 3+ distinct steps, you MUST IMMEDIATELY create a task list BEFORE starting work:
-✦ {"name": "todo", "arguments": {"action": "create_list", "tasks": ["step1", "step2", "step3"]}}
+🎯 🚨 CRITICAL TASK MANAGEMENT RULE 🚨:
+For ANY request involving 2+ distinct operations (like "清理空文件夹" + "合并目录"), you MUST IMMEDIATELY create a task list BEFORE starting work:
+✦ {"name": "todo", "arguments": {"action": "create_list", "tasks": ["清理空文件夹", "识别相似目录", "合并目录", "分类整理"]}}
 
-Examples requiring task lists:
-- File organization, analysis + action, multi-step implementations
-- Any request involving "organize", "analyze and fix", "implement feature"
-- System configuration, debugging multiple issues
+Examples requiring IMMEDIATE task creation:
+- File organization + cleanup workflows  
+- Analysis + action requests (analyze code + fix issues)
+- Multi-step implementations or system changes
+- Any request with "and", "then", "after", multiple verbs
 
 📋 AVAILABLE TOOLS:
 ${toolDescriptions}
 
 ⚠️ CRITICAL GUIDELINES:
+- 🚨 NEVER just describe what to do - USE TOOLS to actually do it!
 - ALWAYS start tool calls with the ✦ symbol
 - Use EXACT tool names as shown above
 - Provide complete, valid JSON for arguments
@@ -142,7 +144,7 @@ The user will execute the tools and provide you with the results. Use the result
       'list_directory': '✦ {"name": "list_directory", "arguments": {"path": "."}}',
       'search_file_content': '✦ {"name": "search_file_content", "arguments": {"query": "function", "file_paths": ["./src/**/*.js"]}}',
       'write_file': '✦ {"name": "write_file", "arguments": {"file_path": "./output.txt", "content": "Hello World"}}',
-      'run_shell_command': '✦ {"name": "run_shell_command", "arguments": {"command": "cp -r source_folder destination_folder", "description": "Copy directory with all contents"}}',
+      'run_shell_command': '✦ {"name": "run_shell_command", "arguments": {"command": "echo \'import os; print(\"Hello from Python\")\' > temp.py && python temp.py", "description": "Create and execute Python script for complex tasks"}}',
       'replace': '✦ {"name": "replace", "arguments": {"file_path": "./file.txt", "old_string": "old", "new_string": "new"}}',
       'glob': '✦ {"name": "glob", "arguments": {"patterns": ["**/*.js", "**/*.ts"]}}',
       'web_fetch': '✦ {"name": "web_fetch", "arguments": {"url": "https://example.com"}}',
@@ -624,12 +626,15 @@ The user will execute the tools and provide you with the results. Use the result
       if (yieldedToolCalls.size === 0 && fullResponse.trim()) {
         let finalContent = fullResponse;
         
+        // Filter out thinking content between <think> </think> tags
+        finalContent = this.filterThinkingContent(finalContent);
+        
         // Add task change detection if available
         try {
           const { getToolCallInterceptorIfAvailable } = await import('../context/index.js');
           const interceptor = getToolCallInterceptorIfAvailable(this.coreConfig);
           if (interceptor) {
-            const taskPrompt = await interceptor.detectTaskChangeNeeds(fullResponse);
+            const taskPrompt = await interceptor.detectTaskChangeNeeds(finalContent);
             if (taskPrompt) {
               finalContent += taskPrompt;
             }
@@ -742,6 +747,14 @@ The user will execute the tools and provide you with the results. Use the result
     }).join('\n\n');
 
     return `Here are the results from the tool executions:\n\n${formattedResults}\n\nPlease analyze these results and continue with your response.`;
+  }
+
+  /**
+   * Filter out thinking content between <think> </think> tags
+   */
+  private filterThinkingContent(content: string): string {
+    // Remove content between <think> and </think> tags (case insensitive, multiline)
+    return content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   }
 
   /**

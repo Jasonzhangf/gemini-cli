@@ -46,6 +46,10 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
 **Content Processing**: grep, awk, sed, sort for text processing
 **System Tasks**: Package management, process control, environment setup
 **Build & Deploy**: npm, make, docker, git operations
+**Script Execution**: For complex tasks that are more efficient with Python/scripts, you can write the script and execute it via shell:
+  - Create Python scripts: \`echo 'python_code' > script.py && python script.py\`
+  - Create bash scripts: \`echo 'bash_commands' > script.sh && chmod +x script.sh && ./script.sh\`
+  - Temporary automation: Write and execute custom scripts for data processing, file organization, or system tasks
 
 Common file management examples:
 - Copy files/directories: cp -r source dest
