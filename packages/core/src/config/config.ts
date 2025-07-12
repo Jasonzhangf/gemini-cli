@@ -22,6 +22,7 @@ import { ShellTool } from '../tools/shell.js';
 import { WriteFileTool } from '../tools/write-file.js';
 import { WebFetchTool } from '../tools/web-fetch.js';
 import { ReadManyFilesTool } from '../tools/read-many-files.js';
+import { TodoTool } from '../tools/todo.js';
 import {
   MemoryTool,
   setGeminiMdFilename,
@@ -46,6 +47,9 @@ import {
   DEFAULT_GEMINI_FLASH_MODEL,
 } from './models.js';
 import { ClearcutLogger } from '../telemetry/clearcut-logger/clearcut-logger.js';
+import { ContextManager } from '../context/contextManager.js';
+import { PromptEnhancer } from '../context/promptEnhancer.js';
+import { ToolCallInterceptor } from '../context/toolCallInterceptor.js';
 
 export enum ApprovalMode {
   DEFAULT = 'default',
@@ -192,6 +196,9 @@ export class Config {
   flashFallbackHandler?: FlashFallbackHandler;
   private quotaErrorOccurred: boolean = false;
   private readonly openaiMode: boolean;
+  private contextManager: ContextManager | null = null;
+  private promptEnhancer: PromptEnhancer | null = null;
+  private toolCallInterceptor: ToolCallInterceptor | null = null;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -271,6 +278,14 @@ export class Config {
       }
     }
     this.toolRegistry = await this.createToolRegistry();
+    
+    // Initialize ContextManager and related components
+    this.contextManager = new ContextManager(this.targetDir, this.debugMode);
+    await this.contextManager.initialize();
+    
+    // Initialize enhancers that wrap existing functionality
+    this.promptEnhancer = new PromptEnhancer(this);
+    this.toolCallInterceptor = new ToolCallInterceptor(this);
   }
 
   async refreshAuth(authMethod: AuthType) {
@@ -565,6 +580,27 @@ export class Config {
     return { memoryContent, fileCount };
   }
 
+  getContextManager(): ContextManager {
+    if (!this.contextManager) {
+      throw new Error('ContextManager not initialized. Call initialize() first.');
+    }
+    return this.contextManager;
+  }
+
+  getPromptEnhancer(): PromptEnhancer {
+    if (!this.promptEnhancer) {
+      throw new Error('PromptEnhancer not initialized. Call initialize() first.');
+    }
+    return this.promptEnhancer;
+  }
+
+  getToolCallInterceptor(): ToolCallInterceptor {
+    if (!this.toolCallInterceptor) {
+      throw new Error('ToolCallInterceptor not initialized. Call initialize() first.');
+    }
+    return this.toolCallInterceptor;
+  }
+
   async createToolRegistry(): Promise<ToolRegistry> {
     const registry = new ToolRegistry(this);
     const targetDir = this.getTargetDir();
@@ -613,6 +649,7 @@ export class Config {
     registerCoreTool(ShellTool, this);
     registerCoreTool(MemoryTool);
     registerCoreTool(WebSearchTool, this);
+    registerCoreTool(TodoTool);
 
     await registry.discoverTools();
     return registry;
