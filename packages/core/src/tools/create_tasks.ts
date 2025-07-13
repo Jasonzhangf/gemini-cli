@@ -80,28 +80,45 @@ export class CreateTasksTool extends BaseTool<CreateTasksParams, ToolResult> {
   async execute(params: CreateTasksParams): Promise<ToolResult> {
     let { tasks, template, autoContext = true } = params;
     
-    // **IMPORTANT**: Check task maintenance mode status
+    // **IMPORTANT**: Check task maintenance mode status - STRICTLY FORBIDDEN
     if (this.contextManager?.isInMaintenanceMode()) {
       const currentTask = this.contextManager.getCurrentTask();
+      const context = this.contextManager.getContext();
+      const totalTasks = context.taskList?.tasks?.length || 0;
+      const completedTasks = context.taskList?.tasks?.filter(t => t.status === 'completed').length || 0;
+      
+      // Log the violation attempt
+      console.warn(`[CreateTasksTool] VIOLATION: Attempted to create new task list while in maintenance mode`);
+      console.warn(`[CreateTasksTool] Current task: ${currentTask?.description || 'none'}`);
+      console.warn(`[CreateTasksTool] Progress: ${completedTasks}/${totalTasks}`);
       
       return {
         llmContent: JSON.stringify({
-          error: 'already_in_maintenance_mode',
+          error: 'forbidden_in_maintenance_mode',
           currentTask: currentTask,
-          message: '已处于任务维护模式，不能创建新的任务列表'
+          progress: `${completedTasks}/${totalTasks}`,
+          message: '🚫 严格禁止：已处于任务维护模式，绝对不能创建新的任务列表！'
         }),
-        returnDisplay: `❌ **错误**: 已处于任务维护模式，无法创建新任务列表
-        
-🎯 **当前任务**: ${currentTask?.description || '未知'}
-📊 **任务状态**: ${currentTask?.status || '未知'}
+        returnDisplay: `🚫 **严格禁止**: 已处于任务维护模式，绝对不能创建新的任务列表！
 
-💡 **可用操作**:
-- \`finish_current_task\` - 完成当前任务
-- \`get_next_task\` - 获取下一个任务  
-- \`insert_task\` - 在当前位置插入新任务
-- 直接执行当前任务的子步骤（无需创建子任务列表）
+📋 **当前任务列表**:
+   • 总任务数: ${totalTasks}
+   • 已完成: ${completedTasks}
+   • 剩余: ${totalTasks - completedTasks}
 
-⚠️ **注意**: 如需更改任务目标，请明确说明要更改的内容，系统会要求确认。`
+🎯 **当前任务**: ${currentTask?.description || '未知'} (${currentTask?.status || '未知'})
+
+✅ **正确操作**:
+   • \`get_current_task\` - 查看当前任务详情
+   • \`finish_current_task\` - 完成当前任务
+   • \`insert_task\` - 添加细化任务
+   • 直接执行当前任务的具体步骤
+
+❌ **禁止操作**:
+   • create_tasks - 绝对禁止重复创建任务列表
+   • 任何形式的任务重新规划
+
+💡 **请专注于完成现有任务列表中的各项任务！**`
       };
     }
     

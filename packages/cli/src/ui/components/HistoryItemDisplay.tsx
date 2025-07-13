@@ -93,7 +93,7 @@ export const HistoryItemDisplay: React.FC<HistoryItemDisplayProps> = ({
       <TodoMessage
         tasks={item.tasks}
         terminalWidth={terminalWidth}
-        currentTaskId={item.tasks.find(t => t.status === 'in_progress')?.id}
+        currentTaskId={item.tasks.find(t => t.status === 'in_progress' || (!item.tasks.some(task => task.status === 'in_progress') && t.status === 'pending'))?.id}
       />
     )}
   </Box>

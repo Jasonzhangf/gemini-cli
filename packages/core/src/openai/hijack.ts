@@ -9,6 +9,7 @@ import { OpenAI } from 'openai';
 import { Content, Tool } from '@google/genai';
 import { ServerGeminiStreamEvent, GeminiEventType } from '../core/turn.js';
 import { Config } from '../config/config.js';
+import { DebugLogger } from '../context/debugLogger.js';
 
 export interface OpenAIHijackConfig {
   apiKey: string;
@@ -53,12 +54,16 @@ export class OpenAIHijackAdapter {
     failed: number;
     callIds: string[];
   }> = new Map(); // Enhanced tool call tracking per response
+  private debugLogger: DebugLogger | null = null;
+  private currentTurnId: string = '';
+  private sessionId: string;
 
   constructor(config: OpenAIHijackConfig, toolDeclarations: any[], coreConfig: Config) {
     this.config = config;
     this.coreConfig = coreConfig;
     this.toolDeclarations = toolDeclarations;
     this.debugMode = coreConfig.getDebugMode();
+    this.sessionId = this.generateSessionId();
 
     this.openai = new OpenAI({
       apiKey: config.apiKey,
@@ -68,10 +73,32 @@ export class OpenAIHijackAdapter {
     // Initialize context manager for task state management
     this.contextManager = coreConfig.getContextManager();
 
+    // Initialize debug logger if debug mode is enabled (async)
+    if (this.debugMode) {
+      this.initializeDebugLogger().catch(error => {
+        console.warn('[OpenAI Hijack] Failed to initialize debug logger in constructor:', error);
+      });
+    }
+
     if (this.debugMode) {
       console.log('[OpenAI Hijack] Initialized with model:', config.model);
       console.log('[OpenAI Hijack] Base URL:', config.baseURL || 'default');
       console.log('[OpenAI Hijack] Tool declarations count:', toolDeclarations.length);
+      console.log('[OpenAI Hijack] Session ID:', this.sessionId);
+    }
+  }
+
+  private generateSessionId(): string {
+    return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  private async initializeDebugLogger() {
+    if (this.debugMode) {
+      try {
+        this.debugLogger = await DebugLogger.create(this.sessionId, true);
+      } catch (error) {
+        console.warn('[OpenAI Hijack] Failed to initialize debug logger:', error);
+      }
     }
   }
 
@@ -83,7 +110,15 @@ export class OpenAIHijackAdapter {
       return '';
     }
 
-    const toolDescriptions = this.toolDeclarations.map(tool => {
+    // Filter tools based on maintenance mode
+    let availableTools = this.toolDeclarations;
+    if (this.contextManager?.isInMaintenanceMode()) {
+      // In maintenance mode, exclude create_tasks
+      availableTools = this.toolDeclarations.filter(tool => tool.name !== 'create_tasks');
+      console.log('[OpenAI Hijack] Maintenance mode: Filtered out create_tasks tool');
+    }
+
+    const toolDescriptions = availableTools.map(tool => {
       const params = tool.parameters?.properties || {};
       const required = tool.parameters?.required || [];
       const isDangerous = this.dangerousTools.has(tool.name);
@@ -159,7 +194,7 @@ The user will execute the tools and provide you with the results. Use the result
       'replace': '✦ {"name": "replace", "arguments": {"file_path": "./file.txt", "old_string": "old", "new_string": "new"}}',
       'glob': '✦ {"name": "glob", "arguments": {"patterns": ["**/*.js", "**/*.ts"]}}',
       'web_fetch': '✦ {"name": "web_fetch", "arguments": {"url": "https://example.com"}}',
-      'read_many_files': '✦ {"name": "read_many_files", "arguments": {"file_paths": ["./src/*.js"]}}',
+      'read_many_files': '✦ {"name": "read_many_files", "arguments": {"paths": ["./src/*.js"]}}',
       'save_memory': '✦ {"name": "save_memory", "arguments": {"key": "project_info", "value": "Important findings"}}',
       'google_web_search': '✦ {"name": "google_web_search", "arguments": {"query": "search terms"}}',
       'todo': '✦ {"name": "todo", "arguments": {"action": "create_list", "tasks": ["实现功能A", "测试功能B", "修复bug C"]}}'
@@ -532,12 +567,44 @@ The user will execute the tools and provide you with the results. Use the result
       case 'remember':
         return { content: cleanParam };
         
+      case 'read_many_files':
+      case 'read_multiple':
+        // Handle paths parameter - should be an array
+        if (cleanParam.includes(',')) {
+          const paths = cleanParam.split(',').map(p => p.trim().replace(/^['"]|['"]$/g, ''));
+          return { paths };
+        }
+        // Single path
+        return { paths: [cleanParam] };
+        
       case 'create_tasks':
       case 'todo':
       case 'task':
         // Parse task creation - extract tasks array
+        
+        // Method 1: Try to extract JSON array directly
+        const jsonArrayMatch = cleanParam.match(/\[([^\]]+)\]/);
+        if (jsonArrayMatch) {
+          try {
+            const fullArray = `[${jsonArrayMatch[1]}]`;
+            const parsedTasks = JSON.parse(fullArray);
+            if (Array.isArray(parsedTasks)) {
+              // Clean up any prefix issues in parsed tasks
+              const cleanedTasks = parsedTasks.map(task => {
+                if (typeof task === 'string') {
+                  return task.replace(/^tasks\s*\[\s*["']?/, '').replace(/["']?\s*\]?$/, '');
+                }
+                return task;
+              }).filter(t => t && t.length > 0);
+              return { tasks: cleanedTasks };
+            }
+          } catch (e) {
+            // Continue to next method
+          }
+        }
+        
+        // Method 2: Try to extract tasks array from text like: tasks ["task1", "task2"] 
         if (cleanParam.includes('tasks')) {
-          // Try to extract tasks array from text like: tasks ["task1", "task2"] 
           const tasksMatch = cleanParam.match(/tasks\s*\[([^\]]+)\]/);
           if (tasksMatch) {
             const tasksStr = tasksMatch[1];
@@ -545,8 +612,22 @@ The user will execute the tools and provide you with the results. Use the result
             return { tasks };
           }
         }
-        // Fallback: treat entire param as a single task
-        return { tasks: [cleanParam.substring(0, 20)] };
+        
+        // Method 3: Split by comma if contains commas
+        if (cleanParam.includes(',')) {
+          const tasks = cleanParam.split(',').map(t => {
+            let cleaned = t.trim().replace(/^['"]|['"]$/g, '');
+            // Remove "tasks [" prefix if present
+            cleaned = cleaned.replace(/^tasks\s*\[\s*["']?/, '');
+            // Remove trailing "]" or quotes
+            cleaned = cleaned.replace(/["']?\s*\]?$/, '');
+            return cleaned;
+          }).filter(t => t.length > 0);
+          return { tasks };
+        }
+        
+        // Fallback: treat entire param as a single task but keep full content
+        return { tasks: [cleanParam] };
         
       case 'get_current_task':
       case 'finish_current_task':
@@ -690,11 +771,60 @@ The user will execute the tools and provide you with the results. Use the result
     // Reset processed tool calls for new user message
     this.processedToolCalls.clear();
     
+    // Start new debug turn
+    this.currentTurnId = `turn-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    
     // Extract message from Gemini format
     const rawUserMessage = this.extractMessageFromRequest(request);
     
     // Preprocess user message to enforce task planning for complex requests
     const userMessage = await this.preprocessUserMessage(rawUserMessage);
+    
+    // Start debug logging (ensure logger is initialized)
+    if (this.debugMode) {
+      if (!this.debugLogger) {
+        try {
+          this.debugLogger = await DebugLogger.create(this.sessionId, true);
+        } catch (error) {
+          console.warn('[OpenAI Hijack] Failed to create debug logger on demand:', error);
+        }
+      }
+      
+      if (this.debugLogger) {
+        this.debugLogger.startTurn(this.currentTurnId, userMessage);
+        
+        // Log contexts
+        try {
+          if (this.contextManager) {
+            const context = this.contextManager.getContext();
+            this.debugLogger.logSystemContext({
+              sessionId: this.sessionId,
+              model: this.config.model,
+              baseURL: this.config.baseURL,
+              timestamp: new Date().toISOString()
+            });
+            
+            if (context.staticContext) {
+              this.debugLogger.logStaticContext(context.staticContext);
+            }
+            
+            if (context.dynamicContext) {
+              this.debugLogger.logDynamicContext(context.dynamicContext);
+            }
+            
+            if (context.taskList) {
+              this.debugLogger.logTaskContext({
+                taskList: context.taskList,
+                isMaintenanceMode: this.contextManager.isInMaintenanceMode(),
+                currentTask: this.contextManager.getCurrentTask()
+              });
+            }
+          }
+        } catch (error) {
+          this.debugLogger.logError(`Failed to log contexts: ${error}`);
+        }
+      }
+    }
     
     // Add to conversation history
     this.conversationHistory.push({ role: 'user' as const, content: userMessage });
@@ -702,6 +832,8 @@ The user will execute the tools and provide you with the results. Use the result
     if (this.debugMode) {
       console.log('[OpenAI Hijack] Sending user message to model:', this.config.model);
       console.log('[OpenAI Hijack] Message length:', userMessage.length);
+      console.log('[OpenAI Hijack] Turn ID:', this.currentTurnId);
+      console.log('[OpenAI Hijack] Debug logger available:', !!this.debugLogger);
     }
 
     yield* this.processModelResponse(userMessage, signal, prompt_id);
@@ -715,10 +847,28 @@ The user will execute the tools and provide you with the results. Use the result
     signal: AbortSignal,
     prompt_id: string
   ): AsyncGenerator<ServerGeminiStreamEvent, any> {
+    // Ensure we have a turn ID for tool responses
+    if (!this.currentTurnId) {
+      this.currentTurnId = `turn-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    }
+    
     const toolResults = this.extractToolResultsFromRequest(request);
+    
+    // Log tool results to debug logger
+    if (this.debugLogger && toolResults.length > 0) {
+      for (const toolResult of toolResults) {
+        this.debugLogger.logToolCall(
+          toolResult.name, 
+          {}, // We don't have original args here
+          toolResult.result,
+          (toolResult as any).error
+        );
+      }
+    }
     
     if (this.debugMode) {
       console.log('[OpenAI Hijack] Sending tool results back to model:', toolResults.length);
+      console.log('[OpenAI Hijack] Tool results:', toolResults.map(r => ({ name: r.name, hasResult: !!r.result, hasError: !!(r as any).error })));
     }
 
     // Process tool call completion through interceptor
@@ -945,8 +1095,37 @@ The user will execute the tools and provide you with the results. Use the result
       // Add assistant's raw response to history for context
       this.conversationHistory.push({ role: 'assistant' as const, content: fullResponse });
 
+      // Log model response to debug logger
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] About to log model response, debug logger available:', !!this.debugLogger);
+        console.log('[OpenAI Hijack] Full response length:', fullResponse.length);
+      }
+      
+      if (this.debugLogger && fullResponse) {
+        this.debugLogger.logModelResponse(fullResponse);
+        
+        // Log tool calls if any were detected
+        const toolCalls = this.parseTextGuidedToolCalls(fullResponse);
+        for (const toolCall of toolCalls) {
+          this.debugLogger.logToolCall(toolCall.name, toolCall.args);
+        }
+        
+        // Log metadata about the response
+        this.debugLogger.logMetadata({
+          responseLength: fullResponse.length,
+          toolCallsDetected: yieldedToolCalls.size,
+          model: this.config.model,
+          responseTimestamp: new Date().toISOString()
+        });
+        
+        if (this.debugMode) {
+          console.log('[OpenAI Hijack] Model response logged to debug logger');
+        }
+      }
+
       if (this.debugMode) {
         console.log('[OpenAI Hijack] Response completed, tool calls detected:', yieldedToolCalls.size);
+        console.log('[OpenAI Hijack] Full response length:', fullResponse.length);
       }
 
     } catch (error) {
@@ -964,6 +1143,18 @@ The user will execute the tools and provide you with the results. Use the result
       // Output tool call statistics for debugging
       if (this.debugMode && this.toolCallTracker.size > 0) {
         console.log(`[OpenAI Hijack] Tool Call Statistics: ${this.getToolCallStats()}`);
+      }
+      
+      // Finalize debug turn
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] About to finalize debug turn, logger available:', !!this.debugLogger);
+        console.log('[OpenAI Hijack] Current turn ID:', this.currentTurnId);
+      }
+      
+      if (this.debugLogger && this.currentTurnId) {
+        await this.debugLogger.finalizeTurn();
+      } else if (this.debugMode) {
+        console.log('[OpenAI Hijack] Skipping finalize - debugLogger:', !!this.debugLogger, 'turnId:', this.currentTurnId);
       }
     }
   }
