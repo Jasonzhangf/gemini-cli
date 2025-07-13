@@ -6,18 +6,19 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { homedir } from 'os';
 
 export interface DebugTurnData {
   turnId: string;
   sessionId: string;
   timestamp: string;
+  turnNumber: number;
   userInput?: string;
   systemContext?: any;
   staticContext?: any;
   dynamicContext?: any;
   taskContext?: any;
   modelResponse?: string;
+  rawModelResponse?: string; // 原始模型回复
   toolCalls?: Array<{
     name: string;
     args: any;
@@ -30,21 +31,26 @@ export interface DebugTurnData {
 
 export class DebugLogger {
   private sessionId: string;
-  private debugDir: string;
+  private projectDir: string;
+  private sessionDir: string;
   private enabled: boolean;
   private currentTurn: Partial<DebugTurnData> = {};
+  private turnCounter: number = 0;
 
-  constructor(sessionId: string, enabled: boolean = false) {
+  constructor(sessionId: string, projectDir: string, enabled: boolean = false) {
     this.sessionId = sessionId;
+    this.projectDir = projectDir;
     this.enabled = enabled;
-    this.debugDir = path.join(homedir(), '.gemini', 'debug', 'sessions');
+    // 统一到项目目录下的 .gemini/debug/sessions
+    this.sessionDir = path.join(projectDir, '.gemini', 'debug', 'sessions', sessionId);
   }
 
   async initialize() {
     if (!this.enabled) return;
     
     try {
-      await fs.mkdir(this.debugDir, { recursive: true });
+      await fs.mkdir(this.sessionDir, { recursive: true });
+      console.log(`[DebugLogger] Initialized session directory: ${this.sessionDir}`);
     } catch (error) {
       console.warn('[DebugLogger] Failed to create debug directory:', error);
       this.enabled = false;
@@ -57,12 +63,14 @@ export class DebugLogger {
       return;
     }
     
-    console.log(`[DebugLogger] Starting turn ${turnId}...`);
+    this.turnCounter++;
+    console.log(`[DebugLogger] Starting turn ${this.turnCounter}: ${turnId}...`);
     
     this.currentTurn = {
       turnId,
       sessionId: this.sessionId,
       timestamp: new Date().toISOString(),
+      turnNumber: this.turnCounter,
       userInput,
       toolCalls: [],
       errors: []
@@ -93,6 +101,12 @@ export class DebugLogger {
     if (!this.enabled) return;
     console.log(`[DebugLogger] Logging model response (${response.length} chars)`);
     this.currentTurn.modelResponse = response;
+  }
+
+  logRawModelResponse(rawResponse: string) {
+    if (!this.enabled) return;
+    console.log(`[DebugLogger] Logging raw model response (${rawResponse.length} chars)`);
+    this.currentTurn.rawModelResponse = rawResponse;
   }
 
   logToolCall(name: string, args: any, result?: any, error?: string) {
@@ -133,14 +147,19 @@ export class DebugLogger {
     
     if (!this.currentTurn.turnId) {
       console.log('[DebugLogger] No current turn ID, skipping finalize');
+      console.log('[DebugLogger] Current turn keys:', Object.keys(this.currentTurn));
+      console.log('[DebugLogger] Session ID:', this.sessionId);
       return;
     }
 
-    console.log(`[DebugLogger] Finalizing turn ${this.currentTurn.turnId}...`);
+    console.log(`[DebugLogger] Finalizing turn ${this.turnCounter}: ${this.currentTurn.turnId}...`);
 
     try {
-      const filename = `turn-${this.currentTurn.turnId}-${this.currentTurn.timestamp?.replace(/[:.]/g, '-')}.json`;
-      const filepath = path.join(this.debugDir, this.sessionId, filename);
+      // 使用轮次编号和时间戳的文件命名：turn-001-turnId-timestamp.json
+      const turnNumber = String(this.turnCounter).padStart(3, '0');
+      const timestamp = this.currentTurn.timestamp?.replace(/[:.]/g, '-') || '';
+      const filename = `turn-${turnNumber}-${this.currentTurn.turnId}-${timestamp}.json`;
+      const filepath = path.join(this.sessionDir, filename);
       
       console.log(`[DebugLogger] Writing to: ${filepath}`);
       
@@ -273,8 +292,8 @@ export class DebugLogger {
   }
 
   // Static method to create and initialize a logger
-  static async create(sessionId: string, enabled: boolean = false): Promise<DebugLogger> {
-    const logger = new DebugLogger(sessionId, enabled);
+  static async create(sessionId: string, projectDir: string, enabled: boolean = false): Promise<DebugLogger> {
+    const logger = new DebugLogger(sessionId, projectDir, enabled);
     await logger.initialize();
     return logger;
   }

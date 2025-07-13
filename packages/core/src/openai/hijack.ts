@@ -95,7 +95,8 @@ export class OpenAIHijackAdapter {
   private async initializeDebugLogger() {
     if (this.debugMode) {
       try {
-        this.debugLogger = await DebugLogger.create(this.sessionId, true);
+        const projectDir = this.coreConfig.getTargetDir();
+        this.debugLogger = await DebugLogger.create(this.sessionId, projectDir, true);
       } catch (error) {
         console.warn('[OpenAI Hijack] Failed to initialize debug logger:', error);
       }
@@ -788,7 +789,8 @@ The user will execute the tools and provide you with the results. Use the result
     if (this.debugMode) {
       if (!this.debugLogger) {
         try {
-          this.debugLogger = await DebugLogger.create(this.sessionId, true);
+          const projectDir = this.coreConfig.getTargetDir();
+          this.debugLogger = await DebugLogger.create(this.sessionId, projectDir, true);
         } catch (error) {
           console.warn('[OpenAI Hijack] Failed to create debug logger on demand:', error);
         }
@@ -1132,7 +1134,9 @@ The user will execute the tools and provide you with the results. Use the result
       }
       
       if (this.debugLogger && fullResponse) {
+        // Log both processed and raw model response
         this.debugLogger.logModelResponse(fullResponse);
+        this.debugLogger.logRawModelResponse(fullResponse);
         
         // Log tool calls if any were detected
         const toolCalls = this.parseTextGuidedToolCalls(fullResponse);
@@ -1145,11 +1149,13 @@ The user will execute the tools and provide you with the results. Use the result
           responseLength: fullResponse.length,
           toolCallsDetected: yieldedToolCalls.size,
           model: this.config.model,
-          responseTimestamp: new Date().toISOString()
+          responseTimestamp: new Date().toISOString(),
+          includesToolCalls: yieldedToolCalls.size > 0,
+          hasThinkingContent: fullResponse.includes('<think>') || fullResponse.includes('</think>')
         });
         
         if (this.debugMode) {
-          console.log('[OpenAI Hijack] Model response logged to debug logger');
+          console.log('[OpenAI Hijack] Model response and raw response logged to debug logger');
         }
       }
 
