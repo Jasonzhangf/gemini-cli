@@ -257,9 +257,15 @@ The user will execute the tools and provide you with the results. Use the result
         
         try {
           const jsonStr = match[1];
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] Attempting to parse JSON tool call:', jsonStr);
+          }
           const toolCallJson = this.parseToolCallJson(jsonStr);
           
           if (toolCallJson && toolCallJson.name) {
+            if (this.debugMode) {
+              console.log('[OpenAI Hijack] Successfully parsed tool call JSON:', toolCallJson.name);
+            }
             const callId = `text_guided_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             const toolName = this.normalizeToolName(toolCallJson.name);
             
@@ -268,6 +274,7 @@ The user will execute the tools and provide you with the results. Use the result
             if (!isValidTool) {
               if (this.debugMode) {
                 console.warn(`[OpenAI Hijack] Skipping unknown tool: ${toolName}`);
+                console.warn(`[OpenAI Hijack] Available tools:`, this.toolDeclarations.map(t => t.name));
               }
               continue; // Skip this tool call entirely
             }
@@ -304,7 +311,8 @@ The user will execute the tools and provide you with the results. Use the result
           }
         } catch (error) {
           if (this.debugMode) {
-            console.warn('[OpenAI Hijack] Failed to parse tool call JSON:', match[1], error);
+            console.warn('[OpenAI Hijack] Failed to parse tool call JSON:', match[1]);
+            console.warn('[OpenAI Hijack] JSON parse error:', error);
           }
         }
       }
@@ -407,27 +415,57 @@ The user will execute the tools and provide you with the results. Use the result
    */
   private parseToolCallJson(jsonStr: string): any {
     try {
-      return JSON.parse(jsonStr);
-    } catch {
+      const parsed = JSON.parse(jsonStr);
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] JSON parse successful:', parsed);
+      }
+      return parsed;
+    } catch (initialError) {
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] Initial JSON parse failed, attempting fixes:', initialError instanceof Error ? initialError.message : String(initialError));
+        console.log('[OpenAI Hijack] Original JSON string:', jsonStr);
+      }
+      
       // Try to fix common JSON issues
       let fixed = jsonStr.trim();
+      
+      // Remove any ✦ symbols that might be inside the JSON
+      fixed = fixed.replace(/✦/g, '');
       
       // Add missing closing braces
       const openBraces = (fixed.match(/\{/g) || []).length;
       const closeBraces = (fixed.match(/\}/g) || []).length;
       if (openBraces > closeBraces) {
         fixed += '}'.repeat(openBraces - closeBraces);
+        if (this.debugMode) {
+          console.log('[OpenAI Hijack] Added missing closing braces');
+        }
       }
       
-      // Fix unquoted keys
-      fixed = fixed.replace(/(\w+):/g, '"$1":');
+      // Fix unquoted keys (more careful regex)
+      fixed = fixed.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
       
       // Fix trailing commas
       fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
       
+      // Fix unquoted string values that look like paths or strings
+      fixed = fixed.replace(/:\s*([^\s\"\d\{\}\[\],][^,\}\]]*)/g, ': "$1"');
+      
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] Fixed JSON string:', fixed);
+      }
+      
       try {
-        return JSON.parse(fixed);
-      } catch {
+        const parsed = JSON.parse(fixed);
+        if (this.debugMode) {
+          console.log('[OpenAI Hijack] JSON fix successful:', parsed);
+        }
+        return parsed;
+      } catch (finalError) {
+        if (this.debugMode) {
+          console.warn('[OpenAI Hijack] JSON fix failed:', finalError instanceof Error ? finalError.message : String(finalError));
+          console.warn('[OpenAI Hijack] Final attempt string:', fixed);
+        }
         return null;
       }
     }
@@ -890,7 +928,8 @@ The user will execute the tools and provide you with the results. Use the result
             args: {}, // We don't have the original args here, but that's okay
             isClientInitiated: false,
             prompt_id: prompt_id,
-            isDangerous: false
+            isDangerous: false,
+            turnId: this.currentTurnId  // Pass turn ID to tasks
           };
           const mockResponse = {
             callId: 'mock-' + Date.now(),
@@ -923,7 +962,16 @@ The user will execute the tools and provide you with the results. Use the result
     // Add tool result to conversation history
     this.conversationHistory.push({ role: 'user' as const, content: toolResultMessage });
 
+    // Process model response and finalize the turn after tool completion
     yield* this.processModelResponse(toolResultMessage, signal, prompt_id, true);
+    
+    // Finalize debug turn after tool completion
+    if (this.debugLogger && this.currentTurnId) {
+      await this.debugLogger.finalizeTurn();
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] ✅ Turn finalized after tool completion for turn:', this.currentTurnId);
+      }
+    }
   }
 
   /**
@@ -935,6 +983,8 @@ The user will execute the tools and provide you with the results. Use the result
     prompt_id: string,
     includeGuidance: boolean = true
   ): AsyncGenerator<ServerGeminiStreamEvent, any> {
+    let toolCalls: ToolCall[] = []; // Define outside try block for finally access
+    
     try {
       // Prepare messages for OpenAI API
       let messages: any[] = [...this.conversationHistory];
@@ -1014,10 +1064,27 @@ The user will execute the tools and provide you with the results. Use the result
       }
 
       // Parse tool calls once from the complete response
-      const toolCalls = this.parseTextGuidedToolCalls(fullResponse);
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] About to parse tool calls from response:', fullResponse.substring(0, 500) + '...');
+        // Check for specific tool patterns
+        const hasWriteFile = fullResponse.includes('write_file');
+        const hasToolSymbol = fullResponse.includes('✦');
+        const hasJsonBlocks = fullResponse.includes('{');
+        console.log('[OpenAI Hijack] Response contains - write_file:', hasWriteFile, '✦ symbol:', hasToolSymbol, 'JSON blocks:', hasJsonBlocks);
+      }
       
-      if (this.debugMode && toolCalls.length > 0) {
-        console.log('[OpenAI Hijack] Parsed tool calls:', toolCalls.length);
+      toolCalls = this.parseTextGuidedToolCalls(fullResponse);
+      
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] Parsed tool calls count:', toolCalls.length);
+        if (toolCalls.length > 0) {
+          console.log('[OpenAI Hijack] Tool call names:', toolCalls.map(tc => tc.name));
+        } else {
+          console.log('[OpenAI Hijack] No tool calls parsed. Response patterns check:');
+          console.log('- Contains ✦:', fullResponse.includes('✦'));
+          console.log('- Contains write_file:', fullResponse.includes('write_file'));
+          console.log('- Contains JSON braces:', fullResponse.includes('{'));
+        }
       }
 
       // Emit all tool calls
@@ -1038,6 +1105,7 @@ The user will execute the tools and provide you with the results. Use the result
             isClientInitiated: false,
             prompt_id,
             isDangerous: this.dangerousTools.has(toolCall.name),
+            // turnId: this.currentTurnId,  // Pass turn ID for task tracking (TODO: add to type definition)
           },
         };
       }
@@ -1088,8 +1156,7 @@ The user will execute the tools and provide you with the results. Use the result
         this.debugLogger.logModelResponse(fullResponse);
         this.debugLogger.logRawModelResponse(fullResponse);
         
-        // Log tool calls if any were detected
-        const toolCalls = this.parseTextGuidedToolCalls(fullResponse);
+        // Log tool calls if any were detected  
         for (const toolCall of toolCalls) {
           this.debugLogger.logToolCall(toolCall.name, toolCall.args);
         }
@@ -1131,21 +1198,32 @@ The user will execute the tools and provide you with the results. Use the result
         console.log(`[OpenAI Hijack] Tool Call Statistics: ${this.getToolCallStats()}`);
       }
       
-      // Finalize debug turn
+      // Finalize debug turn only for complete responses (not for tool responses)
       if (this.debugMode) {
         console.log('[OpenAI Hijack] About to finalize debug turn, logger available:', !!this.debugLogger);
         console.log('[OpenAI Hijack] Current turn ID:', this.currentTurnId);
+        console.log('[OpenAI Hijack] Tool calls detected:', toolCalls?.length || 0);
         
         if (this.debugLogger) {
           console.log('[OpenAI Hijack] Logger session ID:', (this.debugLogger as any).sessionId);
           console.log('[OpenAI Hijack] Logger enabled:', (this.debugLogger as any).enabled);
+          console.log('[OpenAI Hijack] Current turn counter:', (this.debugLogger as any).turnCounter);
         }
       }
       
-      if (this.debugLogger && this.currentTurnId) {
+      // Only finalize the turn if we're not expecting more tool interactions
+      // For responses with tool calls, we'll finalize after all tools complete
+      if (this.debugLogger && this.currentTurnId && (!toolCalls || toolCalls.length === 0)) {
         await this.debugLogger.finalizeTurn();
+        if (this.debugMode) {
+          console.log('[OpenAI Hijack] ✅ Turn finalized successfully for turn:', this.currentTurnId);
+        }
       } else if (this.debugMode) {
-        console.log('[OpenAI Hijack] Skipping finalize - debugLogger:', !!this.debugLogger, 'turnId:', this.currentTurnId);
+        if (toolCalls && toolCalls.length > 0) {
+          console.log('[OpenAI Hijack] Deferring turn finalization - waiting for tool completion');
+        } else {
+          console.log('[OpenAI Hijack] Skipping finalize - debugLogger:', !!this.debugLogger, 'turnId:', this.currentTurnId);
+        }
       }
     }
   }
