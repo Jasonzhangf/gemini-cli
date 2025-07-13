@@ -9,10 +9,16 @@ import * as path from 'path';
 import { homedir } from 'os';
 import { Content } from '@google/genai';
 import { TodoService } from './todoService.js';
+import { MemoryStorageService, MemoryType } from './memoryStorageService.js';
 
 export interface ContextData {
   historyRecords: Content[];
-  staticContext: string[];
+  staticContext: {
+    globalRules: string[];
+    projectRules: string[];
+    globalMemories: string[];
+    projectMemories: string[];
+  };
   dynamicContext: string[];
   taskList: TaskListContext | null;
 }
@@ -38,16 +44,23 @@ export interface TaskItem {
 export class ContextManager {
   private context: ContextData;
   private todoService: TodoService;
+  private memoryService: MemoryStorageService;
   private projectRoot: string;
   private debugMode: boolean;
 
   constructor(projectRoot: string, debugMode: boolean = false) {
     this.projectRoot = projectRoot;
     this.debugMode = debugMode;
-    this.todoService = new TodoService();
+    this.todoService = new TodoService(projectRoot);
+    this.memoryService = new MemoryStorageService(projectRoot, debugMode);
     this.context = {
       historyRecords: [],
-      staticContext: [],
+      staticContext: {
+        globalRules: [],
+        projectRules: [],
+        globalMemories: [],
+        projectMemories: []
+      },
       dynamicContext: [],
       taskList: null,
     };
@@ -59,45 +72,139 @@ export class ContextManager {
   async initialize(): Promise<void> {
     await this.loadStaticContext();
     if (this.debugMode) {
-      console.log('[ContextManager] Initialized with static context items:', this.context.staticContext.length);
+      const totalGlobalRules = this.context.staticContext.globalRules.length;
+      const totalProjectRules = this.context.staticContext.projectRules.length;
+      const totalGlobalMemories = this.context.staticContext.globalMemories.length;
+      const totalProjectMemories = this.context.staticContext.projectMemories.length;
+      console.log(`[ContextManager] Initialized with ${totalGlobalRules} global rules, ${totalProjectRules} project rules, ${totalGlobalMemories} global memories, ${totalProjectMemories} project memories`);
     }
   }
 
   /**
-   * 加载静态上下文从 ./gemini/rules 和 ~/.gemini/rules
+   * 加载静态上下文：全局规则、项目规则、全局记忆和项目记忆
+   * 1. 全局规则：~/.gemini/globalrules/ - 每轮都会读取，每个项目都会读取
+   * 2. 项目规则：./gemini/localrules/ - 当前项目特定规则
+   * 3. 全局记忆：~/.gemini/memories/Memory.md - 全局知识和经验
+   * 4. 项目记忆：./gemini/memories/Memory.md - 项目特定知识和经验
    */
   private async loadStaticContext(): Promise<void> {
-    const staticContextPaths = [
-      path.join(this.projectRoot, '.gemini', 'rules'),
-      path.join(homedir(), '.gemini', 'rules'),
-    ];
+    // 清空现有静态上下文
+    this.context.staticContext.globalRules = [];
+    this.context.staticContext.projectRules = [];
+    this.context.staticContext.globalMemories = [];
+    this.context.staticContext.projectMemories = [];
 
-    this.context.staticContext = [];
+    // 1. 加载全局规则
+    await this.loadGlobalRules();
+    
+    // 2. 加载项目规则
+    await this.loadProjectRules();
+    
+    // 3. 加载全局记忆
+    await this.loadGlobalMemories();
+    
+    // 4. 加载项目记忆
+    await this.loadProjectMemories();
+  }
 
-    for (const rulesDir of staticContextPaths) {
-      try {
-        const files = await fs.readdir(rulesDir);
-        const mdFiles = files.filter(file => file.endsWith('.md'));
-        
-        for (const file of mdFiles) {
-          const filePath = path.join(rulesDir, file);
-          try {
-            const content = await fs.readFile(filePath, 'utf-8');
-            this.context.staticContext.push(`--- ${file} ---\n${content}`);
-            if (this.debugMode) {
-              console.log(`[ContextManager] Loaded static context: ${filePath}`);
-            }
-          } catch (error) {
-            if (this.debugMode) {
-              console.warn(`[ContextManager] Failed to read ${filePath}:`, error);
-            }
+  /**
+   * 加载全局规则从 ~/.gemini/globalrules/
+   */
+  private async loadGlobalRules(): Promise<void> {
+    const globalRulesDir = path.join(homedir(), '.gemini', 'globalrules');
+    
+    try {
+      const files = await fs.readdir(globalRulesDir);
+      const mdFiles = files.filter(file => file.endsWith('.md'));
+      
+      for (const file of mdFiles) {
+        const filePath = path.join(globalRulesDir, file);
+        try {
+          const content = await fs.readFile(filePath, 'utf-8');
+          this.context.staticContext.globalRules.push(`--- 全局规则: ${file} ---\n${content}`);
+          if (this.debugMode) {
+            console.log(`[ContextManager] Loaded global rule: ${filePath}`);
+          }
+        } catch (error) {
+          if (this.debugMode) {
+            console.warn(`[ContextManager] Failed to read global rule ${filePath}:`, error);
           }
         }
-      } catch (error) {
-        // Directory doesn't exist, skip silently
-        if (this.debugMode) {
-          console.log(`[ContextManager] Rules directory not found: ${rulesDir}`);
+      }
+    } catch (error) {
+      // 全局规则目录不存在，跳过
+      if (this.debugMode) {
+        console.log(`[ContextManager] Global rules directory not found: ${globalRulesDir}`);
+      }
+    }
+  }
+
+  /**
+   * 加载项目规则从 ./gemini/localrules/
+   */
+  private async loadProjectRules(): Promise<void> {
+    const projectRulesDir = path.join(this.projectRoot, '.gemini', 'localrules');
+    
+    try {
+      const files = await fs.readdir(projectRulesDir);
+      const mdFiles = files.filter(file => file.endsWith('.md'));
+      
+      for (const file of mdFiles) {
+        const filePath = path.join(projectRulesDir, file);
+        try {
+          const content = await fs.readFile(filePath, 'utf-8');
+          this.context.staticContext.projectRules.push(`--- 项目规则: ${file} ---\n${content}`);
+          if (this.debugMode) {
+            console.log(`[ContextManager] Loaded project rule: ${filePath}`);
+          }
+        } catch (error) {
+          if (this.debugMode) {
+            console.warn(`[ContextManager] Failed to read project rule ${filePath}:`, error);
+          }
         }
+      }
+    } catch (error) {
+      // 项目规则目录不存在，跳过
+      if (this.debugMode) {
+        console.log(`[ContextManager] Project rules directory not found: ${projectRulesDir}`);
+      }
+    }
+  }
+
+  /**
+   * 加载全局记忆从 ~/.gemini/memories/Memory.md
+   */
+  private async loadGlobalMemories(): Promise<void> {
+    try {
+      const globalMemories = await this.memoryService.getMemories(MemoryType.GLOBAL);
+      if (globalMemories) {
+        this.context.staticContext.globalMemories.push(`--- 全局记忆: Memory.md ---\n${globalMemories}`);
+        if (this.debugMode) {
+          console.log(`[ContextManager] Loaded global memories`);
+        }
+      }
+    } catch (error) {
+      if (this.debugMode) {
+        console.log(`[ContextManager] No global memories found or failed to load`);
+      }
+    }
+  }
+
+  /**
+   * 加载项目记忆从 ./gemini/memories/Memory.md
+   */
+  private async loadProjectMemories(): Promise<void> {
+    try {
+      const projectMemories = await this.memoryService.getMemories(MemoryType.PROJECT);
+      if (projectMemories) {
+        this.context.staticContext.projectMemories.push(`--- 项目记忆: Memory.md ---\n${projectMemories}`);
+        if (this.debugMode) {
+          console.log(`[ContextManager] Loaded project memories`);
+        }
+      }
+    } catch (error) {
+      if (this.debugMode) {
+        console.log(`[ContextManager] No project memories found or failed to load`);
       }
     }
   }
@@ -226,16 +333,69 @@ export class ContextManager {
   }
 
   /**
+   * 刷新记忆内容（在记忆保存后调用）
+   */
+  async refreshMemories(): Promise<void> {
+    // 清除现有记忆
+    this.context.staticContext.globalMemories = [];
+    this.context.staticContext.projectMemories = [];
+    
+    // 重新加载记忆
+    await this.loadGlobalMemories();
+    await this.loadProjectMemories();
+    
+    if (this.debugMode) {
+      console.log('[ContextManager] Refreshed memories in context');
+    }
+  }
+
+  /**
    * 生成用于模型的完整上下文字符串
    */
   generateModelContext(): string {
     const sections: string[] = [];
 
-    // 静态上下文 - 清晰标记来源
-    if (this.context.staticContext.length > 0) {
-      let staticSection = `# 📋 静态规则上下文 (Static Context)\n`;
-      staticSection += `*来源: 项目和全局规则文件*\n\n`;
-      staticSection += this.context.staticContext.join('\n\n');
+    // 静态上下文 - 分离全局和项目规则、记忆
+    const hasGlobalRules = this.context.staticContext.globalRules.length > 0;
+    const hasProjectRules = this.context.staticContext.projectRules.length > 0;
+    const hasGlobalMemories = this.context.staticContext.globalMemories.length > 0;
+    const hasProjectMemories = this.context.staticContext.projectMemories.length > 0;
+    
+    if (hasGlobalRules || hasProjectRules || hasGlobalMemories || hasProjectMemories) {
+      let staticSection = `# 📋 静态上下文 (Static Context)\n`;
+      staticSection += `*来源: 全局规则、项目规则、全局记忆和项目记忆*\n\n`;
+      
+      // 全局规则
+      if (hasGlobalRules) {
+        staticSection += `## 🌍 全局规则 (${this.context.staticContext.globalRules.length}个)\n`;
+        staticSection += `*适用于所有项目的通用规则*\n\n`;
+        staticSection += this.context.staticContext.globalRules.join('\n\n');
+        staticSection += '\n\n';
+      }
+      
+      // 项目规则
+      if (hasProjectRules) {
+        staticSection += `## 🏠 项目规则 (${this.context.staticContext.projectRules.length}个)\n`;
+        staticSection += `*当前项目特定规则*\n\n`;
+        staticSection += this.context.staticContext.projectRules.join('\n\n');
+        staticSection += '\n\n';
+      }
+      
+      // 全局记忆
+      if (hasGlobalMemories) {
+        staticSection += `## 🧠 全局记忆 (${this.context.staticContext.globalMemories.length}个)\n`;
+        staticSection += `*适用于所有项目的知识和经验*\n\n`;
+        staticSection += this.context.staticContext.globalMemories.join('\n\n');
+        staticSection += '\n\n';
+      }
+      
+      // 项目记忆
+      if (hasProjectMemories) {
+        staticSection += `## 💡 项目记忆 (${this.context.staticContext.projectMemories.length}个)\n`;
+        staticSection += `*当前项目特定的知识和经验*\n\n`;
+        staticSection += this.context.staticContext.projectMemories.join('\n\n');
+      }
+      
       sections.push(staticSection);
     }
 

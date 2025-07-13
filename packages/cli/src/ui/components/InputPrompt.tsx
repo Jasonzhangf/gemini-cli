@@ -16,7 +16,7 @@ import stringWidth from 'string-width';
 import { useShellHistory } from '../hooks/useShellHistory.js';
 import { useCompletion } from '../hooks/useCompletion.js';
 import { useKeypress, Key } from '../hooks/useKeypress.js';
-import { isAtCommand, isSlashCommand } from '../utils/commandUtils.js';
+import { isAtCommand, isSlashCommand, isHashCommand } from '../utils/commandUtils.js';
 import { CommandContext, SlashCommand } from '../commands/types.js';
 import { Config } from '@google/gemini-cli-core';
 import {
@@ -61,7 +61,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   const completion = useCompletion(
     buffer.text,
     config.getTargetDir(),
-    isAtCommand(buffer.text) || isSlashCommand(buffer.text),
+    isAtCommand(buffer.text) || isSlashCommand(buffer.text) || isHashCommand(buffer.text),
     slashCommands,
     commandContext,
     config,

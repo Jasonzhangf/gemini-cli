@@ -23,6 +23,15 @@ import { WriteFileTool } from '../tools/write-file.js';
 import { WebFetchTool } from '../tools/web-fetch.js';
 import { ReadManyFilesTool } from '../tools/read-many-files.js';
 import { TodoTool } from '../tools/todo.js';
+import { CreateTasksTool } from '../tools/create_tasks.js';
+import { GetCurrentTaskTool } from '../tools/get_current_task.js';
+import { FinishCurrentTaskTool } from '../tools/finish_current_task.js';
+import { GetNextTaskTool } from '../tools/get_next_task.js';
+import { InsertTaskTool } from '../tools/insert_task.js';
+import { WorkflowTemplateTool } from '../tools/workflow_template.js';
+import { MigrateProjectDataTool } from '../tools/migrate_project_data.js';
+import { SaveMemoryTool } from '../tools/save_memory.js';
+import { ViewMemoriesTool } from '../tools/view_memories.js';
 import {
   MemoryTool,
   setGeminiMdFilename,
@@ -650,7 +659,16 @@ export class Config {
     registerCoreTool(ShellTool, this);
     registerCoreTool(MemoryTool);
     registerCoreTool(WebSearchTool, this);
-    registerCoreTool(TodoTool);
+    // registerCoreTool(TodoTool); // Replaced with simple task tools
+    registerCoreTool(CreateTasksTool, this);
+    registerCoreTool(GetCurrentTaskTool, this);
+    registerCoreTool(FinishCurrentTaskTool, this);
+    registerCoreTool(GetNextTaskTool, this);
+    registerCoreTool(InsertTaskTool, this);
+    registerCoreTool(WorkflowTemplateTool, this);
+    registerCoreTool(MigrateProjectDataTool, this);
+    registerCoreTool(SaveMemoryTool, this);
+    registerCoreTool(ViewMemoriesTool, this);
 
     await registry.discoverTools();
     return registry;

@@ -59,7 +59,7 @@ export class TodoTool extends BaseTool<TodoToolParams, ToolResult> {
         required: ['action'],
       }
     );
-    this.todoService = new TodoService();
+    this.todoService = new TodoService(process.cwd());
     this.config = config || null;
     
     // Try to get the shared context manager if available
@@ -142,7 +142,22 @@ export class TodoTool extends BaseTool<TodoToolParams, ToolResult> {
     switch (action) {
       case 'create_list':
         const taskCount = result?.tasks?.length || 0;
-        return `✅ 已创建任务列表，包含 ${taskCount} 个任务`;
+        let message = `✅ 已创建任务列表，包含 ${taskCount} 个任务\n`;
+        if (result?.tasks && Array.isArray(result.tasks)) {
+          message += `📋 任务详情:\n`;
+          result.tasks.forEach((task: any, index: number) => {
+            const statusIcon = task.status === 'in_progress' ? '🔄' : 
+                             task.status === 'completed' ? '✅' : '⏳';
+            message += `   ${index + 1}. ${statusIcon} ${task.description} (${task.status})\n`;
+          });
+          if (result?.currentTaskId) {
+            const currentTask = result.tasks.find((t: any) => t.id === result.currentTaskId);
+            if (currentTask) {
+              message += `🎯 当前任务: ${currentTask.description}`;
+            }
+          }
+        }
+        return message.trim();
       case 'add_task':
         return `✅ 已添加新任务: ${result?.task?.description || ''}`;
       case 'update':
@@ -178,6 +193,14 @@ export class TodoTool extends BaseTool<TodoToolParams, ToolResult> {
       tasks.push(this.todoService.createTask(taskDesc));
     }
 
+    // 设置第一个任务状态为in_progress（在保存之前）
+    if (tasks.length > 0) {
+      tasks[0].status = 'in_progress';
+    }
+    
+    // 保存任务到TodoService
+    await this.todoService.saveTasks(tasks);
+    
     // 通过contextManager创建任务列表（这会设置维护模式）
     if (this.contextManager) {
       await this.contextManager.createTaskList(tasks);
@@ -186,8 +209,6 @@ export class TodoTool extends BaseTool<TodoToolParams, ToolResult> {
     // 自动设置第一个任务为当前任务
     if (tasks.length > 0) {
       await this.todoService.setCurrentTask(tasks[0].id);
-      // 将第一个任务状态设为in_progress
-      await this.todoService.updateTaskStatus(tasks[0].id, 'in_progress');
       if (this.contextManager) {
         await this.contextManager.updateTaskStatus(tasks[0].id, 'in_progress');
       }

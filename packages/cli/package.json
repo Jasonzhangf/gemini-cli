@@ -1,7 +1,7 @@
 {
   "name": "@google/gemini-cli",
-  "version": "0.1.13.2",
-  "description": "Gemini CLI",
+  "version": "0.1.14.1",
+  "description": "Gemini CLI - Enhanced Memory System & Task Management",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/google-gemini/gemini-cli.git"

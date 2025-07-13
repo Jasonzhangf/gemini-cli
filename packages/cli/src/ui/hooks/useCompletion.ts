@@ -126,6 +126,57 @@ export function useCompletion(
 
     const trimmedQuery = query.trimStart();
 
+    // Handle # (hash) commands separately for memory system
+    if (trimmedQuery.startsWith('#')) {
+      const fullPath = trimmedQuery.substring(1);
+      const rawParts = fullPath.split(/\s+/).filter((p) => p);
+      
+      // If it's just "#" with no content, show basic memory commands
+      if (rawParts.length === 0) {
+        const memorySuggestions = [
+          { label: 'g', value: 'g', description: '保存全局记忆 - #g <内容>' },
+          { label: 'p', value: 'p', description: '保存项目记忆 - #p <内容>' },
+          { label: 'v', value: 'v', description: '查看记忆统计' },
+        ];
+        setSuggestions(memorySuggestions);
+        setShowSuggestions(true);
+        setActiveSuggestionIndex(0);
+        setIsLoadingSuggestions(false);
+        return;
+      }
+      
+      // If user typed a command (g, p, v) but no content, show usage hints
+      if (rawParts.length === 1) {
+        const command = rawParts[0];
+        let suggestions: Suggestion[] = [];
+        
+        if (command === 'g') {
+          suggestions = [{ label: 'g <内容>', value: 'g ', description: '保存为全局记忆' }];
+        } else if (command === 'p') {
+          suggestions = [{ label: 'p <内容>', value: 'p ', description: '保存为项目记忆' }];
+        } else if (command === 'v') {
+          suggestions = [{ label: 'v', value: 'v', description: '查看记忆统计' }];
+        } else {
+          // Unknown command or content without g/p/v prefix
+          suggestions = [
+            { label: `g ${command}`, value: `g ${command}`, description: '保存为全局记忆' },
+            { label: `p ${command}`, value: `p ${command}`, description: '保存为项目记忆' },
+          ];
+        }
+        
+        setSuggestions(suggestions);
+        setShowSuggestions(suggestions.length > 0);
+        setActiveSuggestionIndex(suggestions.length > 0 ? 0 : -1);
+        setIsLoadingSuggestions(false);
+        return;
+      }
+      
+      // If user has typed content after g/p, no suggestions needed
+      resetCompletionState();
+      return;
+    }
+
+    // Handle / (slash) commands
     if (trimmedQuery.startsWith('/')) {
       const fullPath = trimmedQuery.substring(1);
       const hasTrailingSpace = trimmedQuery.endsWith(' ');

@@ -8,6 +8,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Colors } from '../colors.js';
 import { type Config } from '@google/gemini-cli-core';
+import { useMemoryStatus } from '../hooks/useMemoryStatus.js';
 
 interface TipsProps {
   config: Config;
@@ -15,8 +16,42 @@ interface TipsProps {
 
 export const Tips: React.FC<TipsProps> = ({ config }) => {
   const geminiMdFileCount = config.getGeminiMdFileCount();
+  const memoryStatus = useMemoryStatus(config);
+
   return (
     <Box flexDirection="column" marginBottom={1}>
+      {/* Memory System Status */}
+      {memoryStatus.isLoaded && !memoryStatus.error && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color={Colors.AccentGreen}>
+            🧠 Memory System Ready:
+          </Text>
+          <Box marginLeft={2}>
+            <Text color={Colors.Foreground}>
+              • Global: {memoryStatus.globalMemories} memories, {memoryStatus.globalRules} rules
+            </Text>
+          </Box>
+          <Box marginLeft={2}>
+            <Text color={Colors.Foreground}>
+              • Project: {memoryStatus.projectMemories} memories, {memoryStatus.projectRules} rules
+            </Text>
+          </Box>
+          <Box marginLeft={2}>
+            <Text color={Colors.AccentBlue}>
+              Quick save: <Text bold>#g <Text italic>content</Text></Text> (global) | <Text bold>#p <Text italic>content</Text></Text> (project) | <Text bold>#v</Text> (view)
+            </Text>
+          </Box>
+        </Box>
+      )}
+
+      {memoryStatus.error && (
+        <Box marginBottom={1}>
+          <Text color={Colors.AccentYellow}>
+            ⚠️ Memory System: {memoryStatus.error}
+          </Text>
+        </Box>
+      )}
+
       <Text color={Colors.Foreground}>Tips for getting started:</Text>
       <Text color={Colors.Foreground}>
         1. Ask questions, edit files, or run commands.

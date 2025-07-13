@@ -24,3 +24,12 @@ export const isAtCommand = (query: string): boolean =>
  * @returns True if the query looks like an '/' command, false otherwise.
  */
 export const isSlashCommand = (query: string): boolean => query.startsWith('/');
+
+/**
+ * Checks if a query string potentially represents a '#' command.
+ * It triggers if the query starts with '#'
+ *
+ * @param query The input query string.
+ * @returns True if the query looks like a '#' command, false otherwise.
+ */
+export const isHashCommand = (query: string): boolean => query.startsWith('#');

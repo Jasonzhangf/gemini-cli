@@ -52,7 +52,66 @@ vi.mock('./turn', () => {
   };
 });
 
-vi.mock('../config/config.js');
+vi.mock('../config/config.js', () => {
+  const mockConfigInstance = {
+    getDebugMode: vi.fn().mockReturnValue(false),
+    getTargetDir: vi.fn().mockReturnValue('/test'),
+    getModel: vi.fn().mockReturnValue('test-model'),
+    getApiKey: vi.fn().mockReturnValue('test-key'),
+    getUserMemory: vi.fn().mockReturnValue(''),
+    getFullContext: vi.fn().mockReturnValue(false),
+    getToolRegistry: vi.fn().mockResolvedValue({ getAllTools: vi.fn().mockReturnValue([]) }),
+    getGeminiClient: vi.fn().mockReturnValue(undefined),
+    setGeminiClient: vi.fn(),
+    getDisplayModel: vi.fn().mockReturnValue('test-model'),
+    getOpenAIMode: vi.fn().mockReturnValue(false),
+    getEmbeddingModel: vi.fn().mockReturnValue('test-embedding-model'),
+    getSessionId: vi.fn().mockReturnValue('test-session'),
+    getContentGeneratorConfig: vi.fn().mockReturnValue({}),
+    getMaxSessionTurns: vi.fn().mockReturnValue(50),
+    getQuotaErrorOccurred: vi.fn().mockReturnValue(false),
+    getUserTier: vi.fn().mockResolvedValue(undefined),
+    getSandbox: vi.fn().mockReturnValue(undefined),
+    getProjectRoot: vi.fn().mockReturnValue('/test'),
+    getQuestion: vi.fn().mockReturnValue(undefined),
+    getCoreTools: vi.fn().mockReturnValue(undefined),
+    getExcludeTools: vi.fn().mockReturnValue(undefined),
+    getToolDiscoveryCommand: vi.fn().mockReturnValue(undefined),
+    getToolCallCommand: vi.fn().mockReturnValue(undefined),
+    getMcpServerCommand: vi.fn().mockReturnValue(undefined),
+    getMcpServers: vi.fn().mockReturnValue(undefined),
+    getGeminiMdFileCount: vi.fn().mockReturnValue(0),
+    getApprovalMode: vi.fn().mockReturnValue('default'),
+    getShowMemoryUsage: vi.fn().mockReturnValue(false),
+    getAccessibility: vi.fn().mockReturnValue({}),
+    getTelemetryEnabled: vi.fn().mockReturnValue(false),
+    getTelemetryLogPromptsEnabled: vi.fn().mockReturnValue(false),
+    getTelemetryOtlpEndpoint: vi.fn().mockReturnValue(''),
+    getTelemetryTarget: vi.fn().mockReturnValue('none'),
+    getGeminiDir: vi.fn().mockReturnValue('/test/.gemini'),
+    getProjectTempDir: vi.fn().mockReturnValue('/test/tmp'),
+    getEnableRecursiveFileSearch: vi.fn().mockReturnValue(true),
+    getFileFilteringRespectGitIgnore: vi.fn().mockReturnValue(true),
+    getCheckpointingEnabled: vi.fn().mockReturnValue(true),
+    getProxy: vi.fn().mockReturnValue(undefined),
+    getWorkingDir: vi.fn().mockReturnValue('/test'),
+    getBugCommand: vi.fn().mockReturnValue(undefined),
+    getFileService: vi.fn().mockReturnValue({}),
+    getUsageStatisticsEnabled: vi.fn().mockReturnValue(false),
+    getExtensionContextFilePaths: vi.fn().mockReturnValue([]),
+    getListExtensions: vi.fn().mockReturnValue(false),
+    getActiveExtensions: vi.fn().mockReturnValue([]),
+    getNoBrowser: vi.fn().mockReturnValue(false),
+    getGitService: vi.fn().mockResolvedValue({}),
+    getContextManager: vi.fn().mockReturnValue({}),
+    getPromptEnhancer: vi.fn().mockReturnValue({}),
+    getToolCallInterceptor: vi.fn().mockReturnValue({}),
+  };
+  
+  return {
+    Config: vi.fn().mockImplementation(() => mockConfigInstance),
+  };
+});
 vi.mock('./prompts');
 vi.mock('../utils/getFolderStructure', () => ({
   getFolderStructure: vi.fn().mockResolvedValue('Mock Folder Structure'),

@@ -36,15 +36,23 @@ export class OpenAIHijackAdapter {
   private debugMode: boolean = false;
   private dangerousTools: Set<string> = new Set(['run_shell_command', 'write_file', 'replace']);
   private pathArgsMap: Record<string, string[]> = {
-    'read_file': ['file_path'],
+    'read_file': ['absolute_path'],
     'write_file': ['file_path'],
     'list_directory': ['path'],
     'replace': ['file_path'],
     'glob': ['patterns'],
-    'read_many_files': ['file_paths'],
+    'read_many_files': ['paths'],
     'search_file_content': ['file_paths'],
   };
   private processedToolCalls: Set<string> = new Set(); // Track processed tool calls globally
+  private contextManager: any; // Context manager for task state
+  private toolCallTracker: Map<string, {
+    discovered: number;
+    attempted: number;  
+    succeeded: number;
+    failed: number;
+    callIds: string[];
+  }> = new Map(); // Enhanced tool call tracking per response
 
   constructor(config: OpenAIHijackConfig, toolDeclarations: any[], coreConfig: Config) {
     this.config = config;
@@ -56,6 +64,9 @@ export class OpenAIHijackAdapter {
       apiKey: config.apiKey,
       baseURL: config.baseURL || 'https://api.openai.com/v1',
     });
+
+    // Initialize context manager for task state management
+    this.contextManager = coreConfig.getContextManager();
 
     if (this.debugMode) {
       console.log('[OpenAI Hijack] Initialized with model:', config.model);
@@ -175,15 +186,34 @@ The user will execute the tools and provide you with the results. Use the result
   private parseTextGuidedToolCalls(content: string): ToolCall[] {
     const toolCalls: ToolCall[] = [];
     
-    // Multiple patterns to catch different tool call formats
-    const patterns = [
+    // First try parsing standard JSON format patterns
+    const jsonPatterns = [
       /✦\s*(\{[^}]*\})/g,                    // ✦ symbol prefix
       /(?:tool_call|function_call):\s*(\{[^}]*\})/gi, // explicit tool_call labels
       /```json\s*(\{[^}]*\})\s*```/gi,       // json code blocks
       /(\{[^}]*"name"[^}]*"arguments"[^}]*\})/gi, // any JSON with name and arguments
     ];
+    
+    // Then try parsing descriptive format patterns (ordered from most specific to most general)
+    const descriptivePatterns = [
+      // Most specific patterns first (with parameters)
+      /\[tool_call:\s*([a-zA-Z_][a-zA-Z0-9_]*)\s+for\s+'([^']+)'\]/gi,   // [tool_call: read_file for '/path/file.py']
+      /\[tool_call:\s*([a-zA-Z_][a-zA-Z0-9_]*)\s+for\s+"([^"]+)"\]/gi,   // [tool_call: shell for "ls -la"]
+      /\[tool_call:\s*([a-zA-Z_][a-zA-Z0-9_]*)\s+for\s+([^\]]+)\]/gi,     // [tool_call: glob for pattern **/*.py]
+      /\[tool_call:\s*([a-zA-Z_][a-zA-Z0-9_]*)\s+((?:to|with)\s+[^\]]+)\]/gi,  // [tool_call: write_file to create ...]
+      
+      // Simple no-param format (must come after param patterns to avoid conflicts)
+      /\[tool_call:\s*([a-zA-Z_][a-zA-Z0-9_]*)\]/gi,                   // [tool_call: finish_current_task] - simple no-param format
+      
+      // Alternative formats
+      /\[([a-zA-Z_][a-zA-Z0-9_]*)\s+for\s+(.+)\]/gi,                   // Without "tool_call:" prefix
+      /\[([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.+)\]/gi,                     // [tool: params] format
+    ];
 
-    for (const pattern of patterns) {
+    const patterns = [...jsonPatterns, ...descriptivePatterns];
+
+    // Process JSON patterns first
+    for (const pattern of jsonPatterns) {
       let match;
       while ((match = pattern.exec(content)) !== null) {
         try {
@@ -223,6 +253,9 @@ The user will execute the tools and provide you with the results. Use the result
               args: transformedArgs,
             });
 
+            // Track discovered tool call
+            this.updateToolCallTracker(toolName, 'discovered');
+
             if (this.debugMode) {
               console.log('[OpenAI Hijack] Parsed tool call:', toolName, 'args:', Object.keys(transformedArgs));
             }
@@ -230,6 +263,59 @@ The user will execute the tools and provide you with the results. Use the result
         } catch (error) {
           if (this.debugMode) {
             console.warn('[OpenAI Hijack] Failed to parse tool call JSON:', match[1], error);
+          }
+        }
+      }
+    }
+
+    // Process descriptive patterns as fallback - use Set to track processed positions
+    const processedPositions = new Set<number>();
+    
+    for (const pattern of descriptivePatterns) {
+      let match;
+      while ((match = pattern.exec(content)) !== null) {
+        // Skip if this position was already processed by a previous pattern
+        if (processedPositions.has(match.index)) {
+          continue;
+        }
+        
+        try {
+          const toolName = this.normalizeToolName(match[1]);
+          const paramText = match[2] || match[3] || '';
+          
+          // Validate that the tool exists
+          const isValidTool = this.toolDeclarations.some(tool => tool.name === toolName);
+          if (!isValidTool) {
+            if (this.debugMode) {
+              console.warn(`[OpenAI Hijack] Skipping unknown descriptive tool: ${toolName}`);
+            }
+            continue;
+          }
+          
+          // Parse parameters based on tool type
+          const args = this.parseDescriptiveToolArgs(toolName, paramText);
+          const transformedArgs = this.transformPathArguments(toolName, args);
+          
+          const callId = `descriptive_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          
+          toolCalls.push({
+            callId,
+            name: toolName,
+            args: transformedArgs,
+          });
+          
+          // Track discovered tool call
+          this.updateToolCallTracker(toolName, 'discovered');
+          
+          // Mark this position as processed to avoid duplicate parsing
+          processedPositions.add(match.index);
+          
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] Parsed descriptive tool call:', toolName, 'args:', Object.keys(transformedArgs));
+          }
+        } catch (error) {
+          if (this.debugMode) {
+            console.warn('[OpenAI Hijack] Failed to parse descriptive tool call:', match[0], error);
           }
         }
       }
@@ -341,12 +427,147 @@ The user will execute the tools and provide you with the results. Use the result
       'google_web_search': 'google_web_search',
       'search_web': 'google_web_search',
       'web_search': 'google_web_search',
-      'todo': 'todo',
-      'task': 'todo',
-      'task_management': 'todo',
+      'todo': 'create_tasks',
+      'task': 'create_tasks', 
+      'task_management': 'create_tasks',
+      'create_tasks': 'create_tasks',
+      'get_current_task': 'get_current_task',
+      'current_task': 'get_current_task',
+      'finish_current_task': 'finish_current_task',
+      'complete_task': 'finish_current_task',
+      'finish_task': 'finish_current_task',
+      'get_next_task': 'get_next_task',
+      'next_task': 'get_next_task',
+      'insert_task': 'insert_task',
+      'add_task': 'insert_task',
     };
 
     return toolMapping[name.toLowerCase()] || name;
+  }
+
+  /**
+   * Parse descriptive tool call arguments from natural language format
+   * Maps common descriptive formats to proper tool arguments
+   */
+  private parseDescriptiveToolArgs(toolName: string, paramText: string): any {
+    const cleanParam = paramText.replace(/^['"`]|['"`]$/g, '').trim();
+    
+    // Try to parse complex parameter formats with multiple key-value pairs
+    const complexParamMatch = cleanParam.match(/(\w+)\s+'([^']+)'(?:\s+(\w+)\s+'([^']+)')*|(\w+)\s+"([^"]+)"(?:\s+(\w+)\s+"([^"]+)")*/);
+    if (complexParamMatch) {
+      const args: any = {};
+      // Extract key-value pairs from the match
+      const text = cleanParam;
+      const keyValuePattern = /(\w+)\s+['"]([^'"]+)['"]/g;
+      let match;
+      while ((match = keyValuePattern.exec(text)) !== null) {
+        args[match[1]] = match[2];
+      }
+      
+      // Handle array-like parameters like tasks ["task1", "task2"]
+      const arrayPattern = /(\w+)\s+\[([^\]]+)\]/g;
+      let arrayMatch;
+      while ((arrayMatch = arrayPattern.exec(text)) !== null) {
+        const items = arrayMatch[2].split(',').map(item => item.trim().replace(/^['"]|['"]$/g, ''));
+        args[arrayMatch[1]] = items;
+      }
+      
+      // If we found structured parameters, return them
+      if (Object.keys(args).length > 0) {
+        return args;
+      }
+    }
+    
+    switch (toolName) {
+      case 'glob':
+      case 'find':
+        if (cleanParam.includes('pattern')) {
+          return { pattern: cleanParam.replace(/^pattern\s+['"`]?|['"`]?$/g, '') };
+        }
+        return { pattern: cleanParam };
+        
+      case 'read_file':
+        if (cleanParam.includes('path') || cleanParam.includes('file')) {
+          return { file_path: cleanParam.replace(/^(?:path|file)\s+['"`]?|['"`]?$/g, '') };
+        }
+        return { file_path: cleanParam };
+        
+      case 'write_file':
+        if (cleanParam.includes('to create') || cleanParam.includes('create')) {
+          const filePath = cleanParam.replace(/^.*(?:to create|create)\s+['"`]?|['"`]?.*$/g, '');
+          return { file_path: filePath, content: '' };
+        }
+        return { file_path: cleanParam, content: '' };
+        
+      case 'run_shell_command':
+      case 'shell':
+      case 'bash':
+        return { command: cleanParam };
+        
+      case 'search_file_content':
+      case 'grep':
+        if (cleanParam.includes('for')) {
+          const pattern = cleanParam.replace(/^.*for\s+['"`]?|['"`]?.*$/g, '');
+          return { pattern };
+        }
+        return { pattern: cleanParam };
+        
+      case 'list_directory':
+      case 'ls':
+        return { path: cleanParam || '.' };
+        
+      case 'replace':
+      case 'edit':
+        return { file_path: cleanParam };
+        
+      case 'web_fetch':
+      case 'fetch':
+        return { url: cleanParam };
+        
+      case 'google_web_search':
+      case 'web_search':
+        return { query: cleanParam };
+        
+      case 'save_memory':
+      case 'remember':
+        return { content: cleanParam };
+        
+      case 'create_tasks':
+      case 'todo':
+      case 'task':
+        // Parse task creation - extract tasks array
+        if (cleanParam.includes('tasks')) {
+          // Try to extract tasks array from text like: tasks ["task1", "task2"] 
+          const tasksMatch = cleanParam.match(/tasks\s*\[([^\]]+)\]/);
+          if (tasksMatch) {
+            const tasksStr = tasksMatch[1];
+            const tasks = tasksStr.split(',').map(t => t.trim().replace(/^['"]|['"]$/g, ''));
+            return { tasks };
+          }
+        }
+        // Fallback: treat entire param as a single task
+        return { tasks: [cleanParam.substring(0, 20)] };
+        
+      case 'get_current_task':
+      case 'finish_current_task':
+      case 'get_next_task':
+        // These tools don't need parameters
+        return {};
+        
+      case 'insert_task':
+      case 'add_task':
+        return { description: cleanParam.substring(0, 20) };
+        
+      default:
+        // Generic fallback - try to match common parameter names
+        if (cleanParam.includes('/') || cleanParam.includes('\\')) {
+          return { file_path: cleanParam };
+        } else if (cleanParam.startsWith('http')) {
+          return { url: cleanParam };
+        } else {
+          return { input: cleanParam };
+        }
+    }
   }
 
   /**
@@ -360,6 +581,9 @@ The user will execute the tools and provide you with the results. Use the result
       
       // Skip if already processed globally (across streaming chunks)
       if (this.processedToolCalls.has(key)) {
+        if (this.debugMode) {
+          console.log(`[OpenAI Hijack] Skipping duplicate tool call: ${call.name}`);
+        }
         return false;
       }
       
@@ -369,9 +593,64 @@ The user will execute the tools and provide you with the results. Use the result
       }
       
       localSeen.add(key);
-      this.processedToolCalls.add(key); // Mark as processed globally
+      // NOTE: Don't mark as processed here - only mark after successful execution
       return true;
     });
+  }
+
+  /**
+   * Mark a tool call as successfully processed
+   */
+  private markToolCallAsProcessed(call: ToolCall): void {
+    const key = `${call.name}:${JSON.stringify(call.args)}`;
+    this.processedToolCalls.add(key);
+    
+    // Update tracker
+    this.updateToolCallTracker(call.name, 'succeeded');
+    
+    if (this.debugMode) {
+      console.log(`[OpenAI Hijack] Marked tool call as processed: ${call.name}`);
+    }
+  }
+
+  /**
+   * Update tool call tracker statistics
+   */
+  private updateToolCallTracker(toolName: string, action: 'discovered' | 'attempted' | 'succeeded' | 'failed'): void {
+    if (!this.toolCallTracker.has(toolName)) {
+      this.toolCallTracker.set(toolName, {
+        discovered: 0,
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        callIds: []
+      });
+    }
+    
+    const tracker = this.toolCallTracker.get(toolName)!;
+    tracker[action]++;
+    
+    if (this.debugMode) {
+      console.log(`[OpenAI Hijack] Tool ${toolName} - ${action}: ${tracker[action]}`);
+    }
+  }
+
+  /**
+   * Get tool call statistics for debugging
+   */
+  private getToolCallStats(): string {
+    const stats: string[] = [];
+    for (const [toolName, tracker] of this.toolCallTracker.entries()) {
+      stats.push(`${toolName}: discovered=${tracker.discovered}, attempted=${tracker.attempted}, succeeded=${tracker.succeeded}, failed=${tracker.failed}`);
+    }
+    return stats.join('; ');
+  }
+
+  /**
+   * Reset tool call tracker for new response
+   */
+  private resetToolCallTracker(): void {
+    this.toolCallTracker.clear();
   }
 
   /**
@@ -382,6 +661,8 @@ The user will execute the tools and provide you with the results. Use the result
     signal: AbortSignal,
     prompt_id: string
   ): AsyncGenerator<ServerGeminiStreamEvent, any> {
+    // Reset tool call tracker for new request
+    this.resetToolCallTracker();
     // Check if this is a tool result being sent back to the model
     const isToolResponse = this.isToolResponse(request);
     
@@ -410,7 +691,10 @@ The user will execute the tools and provide you with the results. Use the result
     this.processedToolCalls.clear();
     
     // Extract message from Gemini format
-    const userMessage = this.extractMessageFromRequest(request);
+    const rawUserMessage = this.extractMessageFromRequest(request);
+    
+    // Preprocess user message to enforce task planning for complex requests
+    const userMessage = await this.preprocessUserMessage(rawUserMessage);
     
     // Add to conversation history
     this.conversationHistory.push({ role: 'user' as const, content: userMessage });
@@ -572,6 +856,9 @@ The user will execute the tools and provide you with the results. Use the result
               if (!yieldedToolCalls.has(toolKey)) {
                 yieldedToolCalls.add(toolKey);
                 
+                // Track attempted tool call
+                this.updateToolCallTracker(toolCall.name, 'attempted');
+                
                 if (this.debugMode) {
                   console.log('[OpenAI Hijack] Emitting tool_call_request:', toolCall.name);
                 }
@@ -600,6 +887,9 @@ The user will execute the tools and provide you with the results. Use the result
           const toolKey = `${toolCall.name}:${JSON.stringify(toolCall.args)}`;
           if (!yieldedToolCalls.has(toolKey)) {
             yieldedToolCalls.add(toolKey);
+            
+            // Track attempted tool call
+            this.updateToolCallTracker(toolCall.name, 'attempted');
             
             if (this.debugMode) {
               console.log('[OpenAI Hijack] Emitting final tool_call_request:', toolCall.name);
@@ -670,6 +960,11 @@ The user will execute the tools and provide you with the results. Use the result
           }
         },
       };
+    } finally {
+      // Output tool call statistics for debugging
+      if (this.debugMode && this.toolCallTracker.size > 0) {
+        console.log(`[OpenAI Hijack] Tool Call Statistics: ${this.getToolCallStats()}`);
+      }
     }
   }
 
@@ -829,5 +1124,110 @@ The user will execute the tools and provide you with the results. Use the result
    */
   getCurrentModel(): string {
     return this.config.model;
+  }
+
+  /**
+   * Preprocess user message to enforce task planning for complex requests
+   * Detects multi-step tasks and modifies the message to request task planning
+   */
+  private async preprocessUserMessage(userMessage: string): Promise<string> {
+    if (!userMessage || userMessage.trim().length === 0) {
+      return userMessage;
+    }
+
+    const trimmedMessage = userMessage.trim();
+    
+    // Check if the message is a complex task requiring decomposition
+    if (this.isComplexTask(trimmedMessage)) {
+      // Check if already in maintenance mode (tasks already exist)
+      if (this.contextManager && await this.contextManager.isInMaintenanceMode()) {
+        // If already in maintenance mode, send the message as-is
+        return userMessage;
+      }
+
+      // Modify the message to request task planning first
+      const enhancedMessage = this.enhanceMessageWithTaskPlanningRequest(trimmedMessage);
+      
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] Enhanced user message for task planning');
+        console.log('[OpenAI Hijack] Original:', trimmedMessage.substring(0, 100) + '...');
+        console.log('[OpenAI Hijack] Enhanced:', enhancedMessage.substring(0, 100) + '...');
+      }
+      
+      return enhancedMessage;
+    }
+
+    return userMessage;
+  }
+
+  /**
+   * Detect if a user request is a complex task requiring task decomposition
+   */
+  private isComplexTask(message: string): boolean {
+    // Keywords that indicate complex operations
+    const complexTaskIndicators = [
+      // File/directory operations
+      '分析', '整理', '合并', '重构', '迁移', '清理', '组织',
+      '建立', '创建应用', '开发', '实现', '搭建', '构建',
+      'analyze', 'organize', 'merge', 'refactor', 'migrate', 'clean', 'build',
+      'create app', 'develop', 'implement', 'setup', 'establish',
+      
+      // Multi-step indicators
+      '步骤', '流程', '过程', '方案', '计划', '系统',
+      'step', 'process', 'workflow', 'plan', 'system', 'multiple',
+      
+      // Project-level operations
+      '项目', '模块', '功能', '接入', '集成', '配置',
+      'project', 'module', 'feature', 'integrate', 'configure',
+      
+      // Research + action combinations
+      '研究.*实现', '分析.*开发', '学习.*应用',
+      'research.*implement', 'analyze.*develop', 'study.*apply'
+    ];
+
+    const lowerMessage = message.toLowerCase();
+    
+    // Check for explicit multi-step indicators
+    const multiStepPatterns = [
+      /(?:然后|接着|之后|再|并且|以及|and then|then|also|additionally)/gi,
+      /(?:第一|第二|第三|首先|其次|最后|1\.|2\.|3\.|first|second|third|finally)/gi,
+      /(?:同时|一起|together|simultaneously)/gi
+    ];
+
+    // Check if message contains multiple steps
+    const hasMultipleSteps = multiStepPatterns.some(pattern => pattern.test(message));
+    
+    // Check for complex task keywords
+    const hasComplexKeywords = complexTaskIndicators.some(keyword => 
+      new RegExp(keyword, 'i').test(lowerMessage)
+    );
+
+    // Check message length (very long messages often indicate complex tasks)
+    const isLongMessage = message.length > 200;
+
+    // Check for programming/development context with action verbs
+    const programmingContext = /(?:代码|文件|程序|应用|系统|数据|API|接口|code|file|program|app|system|data|api)/i.test(message);
+    const actionVerbs = /(?:修改|优化|改进|扩展|添加|删除|更新|测试|部署|modify|optimize|improve|extend|add|remove|update|test|deploy)/i.test(message);
+    
+    return hasMultipleSteps || hasComplexKeywords || (isLongMessage && programmingContext && actionVerbs);
+  }
+
+  /**
+   * Enhance user message with task planning request
+   */
+  private enhanceMessageWithTaskPlanningRequest(originalMessage: string): string {
+    return `请先为以下请求制定详细的任务计划：
+
+"${originalMessage}"
+
+请首先创建任务列表分解这个请求为具体的任务步骤，然后逐步执行。使用以下格式：
+
+[tool_call: create_tasks for tasks ["任务1", "任务2", "任务3"]]
+
+确保每个任务描述清晰且可执行，不超过20个字符。创建任务列表后，开始执行第一个任务。
+
+完成任务时使用: [tool_call: finish_current_task]
+查看当前任务: [tool_call: get_current_task]
+查看下一个任务: [tool_call: get_next_task]`;
   }
 }

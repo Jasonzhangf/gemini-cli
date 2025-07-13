@@ -186,24 +186,58 @@ export class ContextDebugger {
   /**
    * 分析静态上下文
    */
-  private analyzeStaticContext(staticContext: string[]): ContextDebugInfo['staticContext'] {
+  private analyzeStaticContext(staticContext: { 
+    globalRules: string[]; 
+    projectRules: string[];
+    globalMemories: string[];
+    projectMemories: string[];
+  }): ContextDebugInfo['staticContext'] {
     const projectRules: Array<{ file: string; content: string }> = [];
     const globalRules: Array<{ file: string; content: string }> = [];
     let totalSize = 0;
 
-    staticContext.forEach(context => {
+    // 处理全局规则
+    staticContext.globalRules.forEach(context => {
       const lines = context.split('\n');
       const firstLine = lines[0] || '';
       const fileName = firstLine.match(/--- (.+) ---/)?.[1] || 'unknown';
       const content = lines.slice(1).join('\n');
       
       totalSize += context.length;
+      globalRules.push({ file: fileName, content });
+    });
+
+    // 处理项目规则
+    staticContext.projectRules.forEach(context => {
+      const lines = context.split('\n');
+      const firstLine = lines[0] || '';
+      const fileName = firstLine.match(/--- (.+) ---/)?.[1] || 'unknown';
+      const content = lines.slice(1).join('\n');
       
-      if (fileName.includes('/.gemini/rules/')) {
-        globalRules.push({ file: fileName, content });
-      } else {
-        projectRules.push({ file: fileName, content });
-      }
+      totalSize += context.length;
+      projectRules.push({ file: fileName, content });
+    });
+
+    // 处理全局记忆
+    staticContext.globalMemories.forEach(context => {
+      const lines = context.split('\n');
+      const firstLine = lines[0] || '';
+      const fileName = firstLine.match(/--- (.+) ---/)?.[1] || 'unknown';
+      const content = lines.slice(1).join('\n');
+      
+      totalSize += context.length;
+      globalRules.push({ file: fileName, content });
+    });
+
+    // 处理项目记忆
+    staticContext.projectMemories.forEach(context => {
+      const lines = context.split('\n');
+      const firstLine = lines[0] || '';
+      const fileName = firstLine.match(/--- (.+) ---/)?.[1] || 'unknown';
+      const content = lines.slice(1).join('\n');
+      
+      totalSize += context.length;
+      projectRules.push({ file: fileName, content });
     });
 
     return { projectRules, globalRules, totalSize };

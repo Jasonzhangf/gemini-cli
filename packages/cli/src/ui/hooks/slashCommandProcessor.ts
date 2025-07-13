@@ -1055,7 +1055,7 @@ export const useSlashCommandProcessor = (
       }
 
       const trimmed = rawQuery.trim();
-      if (!trimmed.startsWith('/') && !trimmed.startsWith('?')) {
+      if (!trimmed.startsWith('/') && !trimmed.startsWith('?') && !trimmed.startsWith('#')) {
         return false;
       }
 
@@ -1065,6 +1065,11 @@ export const useSlashCommandProcessor = (
           { type: MessageType.USER, text: trimmed },
           userMessageTimestamp,
         );
+      }
+
+      // Handle # (hash) commands directly for memory storage
+      if (trimmed.startsWith('#')) {
+        return await handleHashCommand(trimmed, userMessageTimestamp);
       }
 
       const parts = trimmed.substring(1).trim().split(/\s+/);
@@ -1212,6 +1217,253 @@ export const useSlashCommandProcessor = (
       openThemeDialog,
     ],
   );
+
+  /**
+   * Handle hash commands directly for memory storage
+   */
+  const handleHashCommand = useCallback(async (
+    trimmed: string,
+    userMessageTimestamp: number
+  ): Promise<SlashCommandProcessorResult> => {
+    const args = trimmed.substring(1).trim(); // Remove # prefix
+    
+    // If no arguments, don't show anything - let user continue typing
+    if (!args) {
+      return { type: 'handled' };
+    }
+    
+    // Parse command - support both old and new syntax
+    const parts = args.split(' ');
+    const command = parts[0];
+    const restArgs = parts.slice(1).join(' ');
+    
+    // New simplified commands
+    if (command === 'g') {
+      // #g <content> = save global
+      if (!restArgs.trim()) {
+        addItem(
+          {
+            type: MessageType.ERROR,
+            text: '❌ 用法: #g <内容> - 保存全局记忆',
+          },
+          userMessageTimestamp,
+        );
+        return { type: 'handled' };
+      }
+      return {
+        type: 'schedule_tool',
+        toolName: 'save_memory',
+        toolArgs: {
+          content: restArgs.trim(),
+          type: 'global',
+          title: `CLI快速保存 - ${new Date().toLocaleString()}`
+        }
+      };
+    }
+    
+    if (command === 'p') {
+      // #p <content> = save project
+      if (!restArgs.trim()) {
+        addItem(
+          {
+            type: MessageType.ERROR,
+            text: '❌ 用法: #p <内容> - 保存项目记忆',
+          },
+          userMessageTimestamp,
+        );
+        return { type: 'handled' };
+      }
+      return {
+        type: 'schedule_tool',
+        toolName: 'save_memory',
+        toolArgs: {
+          content: restArgs.trim(),
+          type: 'project',
+          title: `CLI快速保存 - ${new Date().toLocaleString()}`
+        }
+      };
+    }
+    
+    if (command === 'v') {
+      // #v = view memories
+      return {
+        type: 'schedule_tool',
+        toolName: 'view_memories',
+        toolArgs: {
+          type: 'both',
+          action: 'stats'
+        }
+      };
+    }
+    
+    // If just # with content, prompt for type selection with simplified commands
+    if (args && !['save', 'view', 'list', 'cleanup', 'help'].includes(command)) {
+      const content = args.trim();
+      addItem(
+        {
+          type: MessageType.INFO,
+          text: `💭 选择记忆类型：
+
+📋 **内容**: ${content.length > 50 ? content.substring(0, 50) + '...' : content}
+
+快速保存命令：
+• \`#g ${content}\` - 保存为全局记忆 🌍
+• \`#p ${content}\` - 保存为项目记忆 🏠
+
+其他命令：\`#v\` 查看记忆`,
+        },
+        userMessageTimestamp,
+      );
+      return { type: 'handled' };
+    }
+    
+    // Legacy commands support
+    switch (command) {
+      case 'save':
+        return await handleHashSaveCommand(restArgs, userMessageTimestamp);
+      case 'view':
+      case 'stats':
+        return {
+          type: 'schedule_tool',
+          toolName: 'view_memories',
+          toolArgs: {
+            type: restArgs.trim() || 'both',
+            action: 'stats'
+          }
+        };
+      case 'list':
+      case 'show':
+        return {
+          type: 'schedule_tool',
+          toolName: 'view_memories',
+          toolArgs: {
+            type: restArgs.trim() || 'both',
+            action: 'view'
+          }
+        };
+      case 'cleanup':
+        const keepCount = restArgs.trim() ? parseInt(restArgs.trim(), 10) : 50;
+        if (isNaN(keepCount) || keepCount < 1) {
+          addItem(
+            {
+              type: MessageType.ERROR,
+              text: '❌ 保留数量必须是正整数',
+            },
+            userMessageTimestamp,
+          );
+          return { type: 'handled' };
+        }
+        return {
+          type: 'schedule_tool',
+          toolName: 'view_memories',
+          toolArgs: {
+            type: 'both',
+            action: 'cleanup',
+            cleanup_keep_count: keepCount
+          }
+        };
+      case 'help':
+        addItem(
+          {
+            type: MessageType.INFO,
+            text: `# 🧠 激发存储功能 - 简化命令
+
+## 💡 快速命令
+- \`#g <内容>\` - 保存全局记忆 🌍
+- \`#p <内容>\` - 保存项目记忆 🏠  
+- \`#v\` - 查看记忆统计 📊
+- \`# <内容>\` - 显示类型选择
+
+## 📖 完整命令
+- \`#save global <内容>\` - 保存全局记忆
+- \`#save project <内容>\` - 保存项目记忆
+- \`#view\` - 查看记忆统计
+- \`#list\` - 查看记忆内容
+- \`#cleanup [数量]\` - 清理旧记忆`,
+          },
+          userMessageTimestamp,
+        );
+        return { type: 'handled' };
+      default:
+        addItem(
+          {
+            type: MessageType.ERROR,
+            text: '❌ 未知命令。快速使用: #g <内容> | #p <内容> | #v 或 #help',
+          },
+          userMessageTimestamp,
+        );
+        return { type: 'handled' };
+    }
+  }, [addItem]);
+
+  /**
+   * Handle #save command with interactive type selection
+   */
+  const handleHashSaveCommand = useCallback(async (
+    args: string,
+    userMessageTimestamp: number
+  ): Promise<SlashCommandProcessorResult> => {
+    if (!args.trim()) {
+      addItem(
+        {
+          type: MessageType.ERROR,
+          text: '❌ 用法: #save <global|project> <内容> 或 #save <内容> (将询问类型)',
+        },
+        userMessageTimestamp,
+      );
+      return { type: 'handled' };
+    }
+    
+    const parts = args.trim().split(' ');
+    const firstPart = parts[0];
+    
+    // Check if first part is type specification
+    if (firstPart === 'global' || firstPart === 'project') {
+      const content = parts.slice(1).join(' ');
+      if (!content.trim()) {
+        addItem(
+          {
+            type: MessageType.ERROR,
+            text: '❌ 记忆内容不能为空',
+          },
+          userMessageTimestamp,
+        );
+        return { type: 'handled' };
+      }
+      
+      return {
+        type: 'schedule_tool',
+        toolName: 'save_memory',
+        toolArgs: {
+          content: content.trim(),
+          type: firstPart,
+          title: `CLI快速保存 - ${new Date().toLocaleString()}`
+        }
+      };
+    } else {
+      // No type specified, prompt user to choose
+      const content = args.trim();
+      
+      // Show interactive choice
+      addItem(
+        {
+          type: MessageType.INFO,
+          text: `💭 请选择记忆类型：
+
+📋 **保存内容**: ${content.length > 50 ? content.substring(0, 50) + '...' : content}
+
+🌍 **全局记忆** - 适用于所有项目的通用知识和经验
+🏠 **项目记忆** - 当前项目特定的知识和经验
+
+请使用以下命令完成保存：
+- \`#save global ${content}\` - 保存为全局记忆
+- \`#save project ${content}\` - 保存为项目记忆`,
+        },
+        userMessageTimestamp,
+      );
+      return { type: 'handled' };
+    }
+  }, [addItem]);
 
   const allCommands = useMemo(() => {
     // Adapt legacy commands to the new SlashCommand interface

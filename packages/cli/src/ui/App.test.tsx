@@ -72,6 +72,8 @@ interface MockServerConfig {
   getAllGeminiMdFilenames: Mock<() => string[]>;
   getGeminiClient: Mock<() => GeminiClient | undefined>;
   getUserTier: Mock<() => Promise<string | undefined>>;
+  getDisplayModel: Mock<() => string>;
+  getOpenAIMode: Mock<() => boolean>;
 }
 
 // Mock @google/gemini-cli-core and its Config class
@@ -135,6 +137,8 @@ vi.mock('@google/gemini-cli-core', async (importOriginal) => {
         setFlashFallbackHandler: vi.fn(),
         getSessionId: vi.fn(() => 'test-session-id'),
         getUserTier: vi.fn().mockResolvedValue(undefined),
+        getDisplayModel: vi.fn(() => opts.model || 'test-model-in-mock-factory'),
+        getOpenAIMode: vi.fn(() => false),
       };
     });
   return {
