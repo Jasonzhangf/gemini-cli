@@ -220,13 +220,13 @@ The user will execute the tools and provide you with the results. Use the result
    */
   private parseTextGuidedToolCalls(content: string): ToolCall[] {
     const toolCalls: ToolCall[] = [];
+    const processedPositions = new Set<number>();
     
     // First try parsing standard JSON format patterns
     const jsonPatterns = [
       /✦\s*(\{[^}]*\})/g,                    // ✦ symbol prefix
       /(?:tool_call|function_call):\s*(\{[^}]*\})/gi, // explicit tool_call labels
       /```json\s*(\{[^}]*\})\s*```/gi,       // json code blocks
-      /(\{[^}]*"name"[^}]*"arguments"[^}]*\})/gi, // any JSON with name and arguments
     ];
     
     // Then try parsing descriptive format patterns (ordered from most specific to most general)
@@ -245,12 +245,15 @@ The user will execute the tools and provide you with the results. Use the result
       /\[([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.+)\]/gi,                     // [tool: params] format
     ];
 
-    const patterns = [...jsonPatterns, ...descriptivePatterns];
-
     // Process JSON patterns first
     for (const pattern of jsonPatterns) {
       let match;
       while ((match = pattern.exec(content)) !== null) {
+        // Skip if this position was already processed
+        if (processedPositions.has(match.index)) {
+          continue;
+        }
+        
         try {
           const jsonStr = match[1];
           const toolCallJson = this.parseToolCallJson(jsonStr);
@@ -259,7 +262,7 @@ The user will execute the tools and provide you with the results. Use the result
             const callId = `text_guided_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             const toolName = this.normalizeToolName(toolCallJson.name);
             
-            // CRITICAL FIX: Validate that the tool actually exists in our tool declarations
+            // Validate that the tool actually exists in our tool declarations
             const isValidTool = this.toolDeclarations.some(tool => tool.name === toolName);
             if (!isValidTool) {
               if (this.debugMode) {
@@ -290,6 +293,9 @@ The user will execute the tools and provide you with the results. Use the result
 
             // Track discovered tool call
             this.updateToolCallTracker(toolName, 'discovered');
+            
+            // Mark position as processed
+            processedPositions.add(match.index);
 
             if (this.debugMode) {
               console.log('[OpenAI Hijack] Parsed tool call:', toolName, 'args:', Object.keys(transformedArgs));
@@ -303,9 +309,7 @@ The user will execute the tools and provide you with the results. Use the result
       }
     }
 
-    // Process descriptive patterns as fallback - use Set to track processed positions
-    const processedPositions = new Set<number>();
-    
+    // Process descriptive patterns as fallback only if no JSON patterns matched at that position
     for (const pattern of descriptivePatterns) {
       let match;
       while ((match = pattern.exec(content)) !== null) {
@@ -936,11 +940,37 @@ The user will execute the tools and provide you with the results. Use the result
       // Inject comprehensive system prompt with tool guidance
       if (includeGuidance) {
         let systemPrompt = '';
+        let contextComponents: any = {};
         
         // First, get the core system prompt (enhanced if available)
         try {
           const { getEnhancedSystemPromptIfAvailable } = await import('../context/index.js');
           systemPrompt = await getEnhancedSystemPromptIfAvailable(this.coreConfig, message);
+          
+          // Collect detailed context information for debug logging
+          if (this.debugMode && this.debugLogger) {
+            try {
+              const standardIntegrator = this.coreConfig.getContextManager().getStandardContextIntegrator();
+              if (standardIntegrator) {
+                const fullContext = await standardIntegrator.getStandardContext({ includeProjectDiscovery: false });
+                contextComponents = {
+                  systemContext: fullContext.system,
+                  staticContext: fullContext.static,
+                  dynamicContext: fullContext.dynamic,
+                  taskContext: fullContext.task
+                };
+                
+                // Log each context component separately
+                this.debugLogger.logSystemContext(contextComponents.systemContext);
+                this.debugLogger.logStaticContext(contextComponents.staticContext);
+                this.debugLogger.logDynamicContext(contextComponents.dynamicContext);
+                this.debugLogger.logTaskContext(contextComponents.taskContext);
+              }
+            } catch (contextError) {
+              console.warn('[OpenAI Hijack] Failed to collect detailed context for debug:', contextError);
+            }
+          }
+          
           if (this.debugMode) {
             console.log('[OpenAI Hijack] Using enhanced system prompt with context management');
           }
@@ -1149,6 +1179,11 @@ The user will execute the tools and provide you with the results. Use the result
       if (this.debugMode) {
         console.log('[OpenAI Hijack] About to finalize debug turn, logger available:', !!this.debugLogger);
         console.log('[OpenAI Hijack] Current turn ID:', this.currentTurnId);
+        
+        if (this.debugLogger) {
+          console.log('[OpenAI Hijack] Logger session ID:', (this.debugLogger as any).sessionId);
+          console.log('[OpenAI Hijack] Logger enabled:', (this.debugLogger as any).enabled);
+        }
       }
       
       if (this.debugLogger && this.currentTurnId) {
