@@ -998,104 +998,54 @@ The user will execute the tools and provide you with the results. Use the result
         ];
       }
 
-      // Use OpenAI chat completions API
-      const stream = await this.openai.chat.completions.create({
+      // Use OpenAI chat completions API with non-streaming for better tool call handling
+      const response = await this.openai.chat.completions.create({
         model: this.config.model,
         messages,
-        stream: true,
+        stream: false, // Non-streaming for cleaner tool call parsing
         temperature: this.config.temperature || 0.7,
         max_tokens: this.config.maxTokens || 4096,
       });
 
-      let fullResponse = '';
-      const yieldedToolCalls: Set<string> = new Set();
-      let lastToolCheckLength = 0; // Track when we last checked for tool calls
-
-      for await (const chunk of stream) {
-        if (signal.aborted) {
-          break;
-        }
-
-        const content = chunk.choices[0]?.delta?.content || '';
-        if (content) {
-          fullResponse += content;
-
-          // Only check for tool calls when we have substantial new content or at the end
-          // This prevents excessive parsing of the same content during streaming
-          const shouldCheckForTools = 
-            fullResponse.length - lastToolCheckLength > 50 || // Substantial new content
-            fullResponse.includes('✦') && fullResponse.length > lastToolCheckLength; // Tool call symbol detected
-          
-          if (shouldCheckForTools) {
-            lastToolCheckLength = fullResponse.length;
-            
-            // Parse tool calls from the accumulated response
-            const currentToolCalls = this.parseTextGuidedToolCalls(fullResponse);
-            
-            // Yield new tool calls that haven't been yielded yet
-            for (const toolCall of currentToolCalls) {
-              const toolKey = `${toolCall.name}:${JSON.stringify(toolCall.args)}`;
-              if (!yieldedToolCalls.has(toolKey)) {
-                yieldedToolCalls.add(toolKey);
-                
-                // Track attempted tool call
-                this.updateToolCallTracker(toolCall.name, 'attempted');
-                
-                if (this.debugMode) {
-                  console.log('[OpenAI Hijack] Emitting tool_call_request:', toolCall.name);
-                }
-
-                yield {
-                  type: GeminiEventType.ToolCallRequest,
-                  value: {
-                    callId: toolCall.callId,
-                    name: toolCall.name,
-                    args: toolCall.args,
-                    isClientInitiated: false,
-                    prompt_id,
-                    isDangerous: this.dangerousTools.has(toolCall.name),
-                  },
-                };
-              }
-            }
-          }
-        }
-      }
+      const fullResponse = response.choices[0]?.message?.content || '';
       
-      // Final check for any remaining tool calls at the end of streaming
-      if (fullResponse.length > lastToolCheckLength) {
-        const finalToolCalls = this.parseTextGuidedToolCalls(fullResponse);
-        for (const toolCall of finalToolCalls) {
-          const toolKey = `${toolCall.name}:${JSON.stringify(toolCall.args)}`;
-          if (!yieldedToolCalls.has(toolKey)) {
-            yieldedToolCalls.add(toolKey);
-            
-            // Track attempted tool call
-            this.updateToolCallTracker(toolCall.name, 'attempted');
-            
-            if (this.debugMode) {
-              console.log('[OpenAI Hijack] Emitting final tool_call_request:', toolCall.name);
-            }
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] Received complete response:', fullResponse.length, 'characters');
+      }
 
-            yield {
-              type: GeminiEventType.ToolCallRequest,
-              value: {
-                callId: toolCall.callId,
-                name: toolCall.name,
-                args: toolCall.args,
-                isClientInitiated: false,
-                prompt_id,
-                isDangerous: this.dangerousTools.has(toolCall.name),
-              },
-            };
-          }
+      // Parse tool calls once from the complete response
+      const toolCalls = this.parseTextGuidedToolCalls(fullResponse);
+      
+      if (this.debugMode && toolCalls.length > 0) {
+        console.log('[OpenAI Hijack] Parsed tool calls:', toolCalls.length);
+      }
+
+      // Emit all tool calls
+      for (const toolCall of toolCalls) {
+        // Track attempted tool call
+        this.updateToolCallTracker(toolCall.name, 'attempted');
+        
+        if (this.debugMode) {
+          console.log('[OpenAI Hijack] Emitting tool_call_request:', toolCall.name);
         }
+
+        yield {
+          type: GeminiEventType.ToolCallRequest,
+          value: {
+            callId: toolCall.callId,
+            name: toolCall.name,
+            args: toolCall.args,
+            isClientInitiated: false,
+            prompt_id,
+            isDangerous: this.dangerousTools.has(toolCall.name),
+          },
+        };
       }
 
       // If the response contained tool calls, do not yield any content.
       // The UI should only show the tool call status.
       // If there are no tool calls, it's a regular text response.
-      if (yieldedToolCalls.size === 0 && fullResponse.trim()) {
+      if (toolCalls.length === 0 && fullResponse.trim()) {
         let finalContent = fullResponse;
         
         // Filter out thinking content between <think> </think> tags
@@ -1147,10 +1097,10 @@ The user will execute the tools and provide you with the results. Use the result
         // Log metadata about the response
         this.debugLogger.logMetadata({
           responseLength: fullResponse.length,
-          toolCallsDetected: yieldedToolCalls.size,
+          toolCallsDetected: toolCalls.length,
           model: this.config.model,
           responseTimestamp: new Date().toISOString(),
-          includesToolCalls: yieldedToolCalls.size > 0,
+          includesToolCalls: toolCalls.length > 0,
           hasThinkingContent: fullResponse.includes('<think>') || fullResponse.includes('</think>')
         });
         
@@ -1160,7 +1110,7 @@ The user will execute the tools and provide you with the results. Use the result
       }
 
       if (this.debugMode) {
-        console.log('[OpenAI Hijack] Response completed, tool calls detected:', yieldedToolCalls.size);
+        console.log('[OpenAI Hijack] Response completed, tool calls detected:', toolCalls.length);
         console.log('[OpenAI Hijack] Full response length:', fullResponse.length);
       }
 
