@@ -36,6 +36,12 @@ export interface TaskItem {
   status: 'pending' | 'in_progress' | 'completed';
   createdAt: string;
   completedAt?: string;
+  modifiedAt?: Array<{
+    timestamp: string;
+    oldDescription: string;
+    newDescription: string;
+    reason: string;
+  }>;
 }
 
 /**

@@ -33,15 +33,15 @@ export class CreateTasksTool extends BaseTool<CreateTasksParams, ToolResult> {
   constructor(config?: Config) {
     super(
       'create_tasks',
-      '创建任务列表',
-      '创建新的任务列表，支持工作流模板和自动上下文发现',
+      '创建完整的任务分解列表',
+      '将复杂目标分解为多个具体任务，创建完整的任务列表。每个任务应该是独立可执行的步骤。',
       {
         type: Type.OBJECT,
         properties: {
           tasks: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: '任务列表，每个任务描述不超过20个字符（当使用template时可选）',
+            description: '任务列表数组，将大目标分解为3-8个具体的执行步骤。每个任务描述应简洁明确，建议不超过30个字符。\n\n**正确格式示例**：\n["分析项目结构", "设计接口方案", "实现核心功能", "编写测试代码", "集成调试"]\n\n**重要**：必须是有效的JSON数组格式，每个任务用双引号包围。',
           },
           template: {
             type: Type.STRING,
@@ -78,7 +78,32 @@ export class CreateTasksTool extends BaseTool<CreateTasksParams, ToolResult> {
 
 
   async execute(params: CreateTasksParams): Promise<ToolResult> {
-    const { tasks, template, autoContext = true } = params;
+    let { tasks, template, autoContext = true } = params;
+    
+    // **IMPORTANT**: Check task maintenance mode status
+    if (this.contextManager?.isInMaintenanceMode()) {
+      const currentTask = this.contextManager.getCurrentTask();
+      
+      return {
+        llmContent: JSON.stringify({
+          error: 'already_in_maintenance_mode',
+          currentTask: currentTask,
+          message: '已处于任务维护模式，不能创建新的任务列表'
+        }),
+        returnDisplay: `❌ **错误**: 已处于任务维护模式，无法创建新任务列表
+        
+🎯 **当前任务**: ${currentTask?.description || '未知'}
+📊 **任务状态**: ${currentTask?.status || '未知'}
+
+💡 **可用操作**:
+- \`finish_current_task\` - 完成当前任务
+- \`get_next_task\` - 获取下一个任务  
+- \`insert_task\` - 在当前位置插入新任务
+- 直接执行当前任务的子步骤（无需创建子任务列表）
+
+⚠️ **注意**: 如需更改任务目标，请明确说明要更改的内容，系统会要求确认。`
+      };
+    }
     
     // Validate inputs
     if (!tasks && !template) {
@@ -89,125 +114,99 @@ export class CreateTasksTool extends BaseTool<CreateTasksParams, ToolResult> {
       throw new Error('任务列表不能为空');
     }
 
-    // Validate task descriptions if provided
+    // Validate and fix task descriptions if provided
     if (tasks) {
-      for (const task of tasks) {
-        if (!task || task.trim().length === 0) {
-          throw new Error('任务描述不能为空');
+      // Handle malformed JSON arrays - attempt to fix common formatting issues
+      if (!Array.isArray(tasks)) {
+        // Try to extract tasks from malformed JSON string
+        const tasksStr = JSON.stringify(tasks);
+        console.log(`[CreateTasks] Attempting to fix malformed tasks parameter: ${tasksStr}`);
+        
+        // Look for patterns like 'tasks ["task1", "task2"' and extract actual task descriptions
+        const taskPattern = /"([^"]+)"/g;
+        const extractedTasks = [];
+        let match;
+        while ((match = taskPattern.exec(tasksStr)) !== null) {
+          const task = match[1].trim();
+          // Skip meta-strings like "tasks [" and only keep actual task descriptions
+          if (task && !task.includes('tasks [') && !task.includes('[') && !task.includes(']')) {
+            extractedTasks.push(task);
+          }
         }
-        if (task.length > 20) {
-          throw new Error(`任务描述"${task}"超过20个字符限制`);
+        
+        if (extractedTasks.length > 0) {
+          console.log(`[CreateTasks] Extracted ${extractedTasks.length} tasks: ${JSON.stringify(extractedTasks)}`);
+          // Use the corrected tasks array
+          params.tasks = extractedTasks;
+          tasks = extractedTasks;
+        } else {
+          throw new Error(`参数格式错误：tasks必须是字符串数组，收到: ${tasksStr}。请使用格式: ["任务1", "任务2", "任务3"]`);
+        }
+      }
+      
+      for (let i = 0; i < tasks.length; i++) {
+        const task = tasks[i];
+        if (typeof task !== 'string') {
+          throw new Error(`任务${i + 1}必须是字符串，收到: ${JSON.stringify(task)}`);
+        }
+        if (!task || task.trim().length === 0) {
+          throw new Error(`任务${i + 1}描述不能为空`);
+        }
+        if (task.length > 100) {
+          throw new Error(`任务${i + 1}描述"${task}"超过100个字符限制`);
         }
       }
     }
 
-    // Use StandardContextIntegrator for comprehensive context management
-    if (this.config && this.contextDiscovery) {
-      const contextIntegrator = new StandardContextIntegrator(this.config, process.cwd());
+    // **ALWAYS** use StandardContextIntegrator for comprehensive context management
+    // Only fallback if config is completely unavailable
+    if (!this.config) {
+      throw new Error('配置不可用，无法创建任务');
+    }
+    
+    const contextIntegrator = new StandardContextIntegrator(this.config, process.cwd());
+    
+    try {
+      const result = await contextIntegrator.createTasksWithContext(
+        tasks || [],
+        template,
+        autoContext
+      );
+
+      // Format comprehensive output with full context
+      const fullContext = contextIntegrator.formatStandardContextForModel(result.context);
       
-      try {
-        const result = await contextIntegrator.createTasksWithContext(
-          tasks || [],
-          template,
-          autoContext
-        );
-
-        // Format comprehensive output with full context
-        const fullContext = contextIntegrator.formatStandardContextForModel(result.context);
-        
-        const displayMessage = `✅ 已创建 ${result.tasks.length} 个任务${template ? ` (使用模板: ${template})` : ''}
-
-📊 **项目上下文摘要**:
-${result.contextSummary}
-
-📋 **任务列表** (${result.tasks.length} 个):
-${result.tasks.map((task, index) => {
-  const statusIcon = task.status === 'completed' ? '✅' : 
-                    task.status === 'in_progress' ? '🔄' : '⏳';
-  return `   ${index + 1}. ${statusIcon} ${task.description} (${task.status})`;
-}).join('\n')}
+      const displayMessage = `✅ 已创建 ${result.tasks.length} 个任务${template ? ` (使用模板: ${template})` : ''}
 
 🎯 **当前任务**: ${result.tasks[0]?.description || ''}
 📊 **进度**: ${result.tasks.filter(t => t.status === 'completed').length}/${result.tasks.length} 已完成
 
-${autoContext ? `
-📄 **完整项目上下文已收集并可用于任务执行**
-- 系统环境信息 ✅
-- 项目结构分析 ✅  
-- 依赖配置信息 ✅
-- 项目文档内容 ✅
-- 任务管理状态 ✅
+🚀 任务维护模式已激活！`;
 
-💡 **提示**: 模型现在拥有完整的项目上下文，可以更智能地执行任务。
-` : ''}`;
-
-        return {
-          llmContent: fullContext,
-          returnDisplay: displayMessage,
-        };
+      return {
+        llmContent: fullContext,
+        returnDisplay: displayMessage,
+      };
+      
+    } catch (error) {
+      console.error('[CreateTasksTool] Context integration failed:', error);
+      
+      // Return error instead of silent fallback to simple mode
+      return {
+        llmContent: JSON.stringify({
+          error: 'context_integration_failed',
+          message: `上下文集成失败: ${error instanceof Error ? error.message : String(error)}`
+        }),
+        returnDisplay: `❌ **错误**: 任务创建失败
         
-      } catch (error) {
-        console.error('[CreateTasksTool] Context integration failed:', error);
-        // Fall back to simple task creation
-      }
+🔍 **原因**: 上下文集成失败
+📝 **详情**: ${error instanceof Error ? error.message : String(error)}
+
+💡 **建议**: 
+- 检查项目配置
+- 确保工作目录正确
+- 重试任务创建`
+      };
     }
-
-    // Fallback: Simple task creation without context integration
-    let finalTasks = tasks || [];
-    
-    // If using template, get tasks from template
-    if (template) {
-      const templateObj = await this.templateService.getTemplate(template);
-      if (templateObj) {
-        finalTasks = this.templateService.createTasksFromTemplate(templateObj);
-      } else {
-        throw new Error(`未找到模板: ${template}`);
-      }
-    }
-
-    // Create task objects
-    const taskObjects = finalTasks.map(description => 
-      this.todoService.createTask(description.trim())
-    );
-
-    // Save tasks and project metadata
-    await this.todoService.saveTasks(taskObjects);
-    await this.todoService.saveProjectMeta();
-
-    // Set first task as current
-    if (taskObjects.length > 0) {
-      await this.todoService.setCurrentTask(taskObjects[0].id);
-      await this.todoService.updateTaskStatus(taskObjects[0].id, 'in_progress');
-    }
-
-    // Update context manager
-    if (this.contextManager) {
-      await this.contextManager.createTaskList(taskObjects);
-    }
-
-    const displayMessage = `✅ 已创建 ${taskObjects.length} 个任务${template ? ` (使用模板: ${template})` : ''}
-
-📋 **任务列表** (${taskObjects.length} 个):
-${taskObjects.map((task, index) => {
-  const statusIcon = task.status === 'completed' ? '✅' : 
-                    task.status === 'in_progress' ? '🔄' : '⏳';
-  return `   ${index + 1}. ${statusIcon} ${task.description} (${task.status})`;
-}).join('\n')}
-
-🎯 **当前任务**: ${taskObjects[0]?.description || ''}
-📊 **进度**: 0/${taskObjects.length} 已完成
-
-⚠️ **注意**: 简化模式，未收集完整上下文。建议在支持的环境中启用autoContext。`;
-
-    return {
-      llmContent: JSON.stringify({
-        tasks: taskObjects,
-        currentTaskId: taskObjects[0]?.id,
-        maintenanceMode: true,
-        template,
-        contextMode: 'simple'
-      }),
-      returnDisplay: displayMessage,
-    };
   }
 }

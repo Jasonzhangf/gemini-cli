@@ -92,7 +92,7 @@ export class ContextDiscoveryService {
     for (const file of dependencyFiles) {
       try {
         const filePath = path.join(this.projectDir, file);
-        const result = await this.readTool.execute({ absolute_path: filePath }, new AbortController().signal);
+        const result = await this.readTool.execute({ file_path: filePath }, new AbortController().signal);
         
         if (typeof result.llmContent === 'string') {
           foundDependencies.push(`=== ${file} ===\n${result.llmContent.substring(0, 1000)}${result.llmContent.length > 1000 ? '...(truncated)' : ''}`);
@@ -123,7 +123,7 @@ export class ContextDiscoveryService {
         
         for (const file of readmeFiles.slice(0, 3)) { // 最多读取3个README
           try {
-            const content = await this.readTool.execute({ absolute_path: file }, new AbortController().signal);
+            const content = await this.readTool.execute({ file_path: file }, new AbortController().signal);
             if (typeof content.llmContent === 'string') {
               docFiles.push(`=== ${path.basename(file)} ===\n${content.llmContent.substring(0, 2000)}${content.llmContent.length > 2000 ? '...(truncated)' : ''}`);
             }
@@ -138,7 +138,7 @@ export class ContextDiscoveryService {
       for (const readme of commonReadmes) {
         try {
           const result = await this.readTool.execute({ 
-            absolute_path: path.join(this.projectDir, readme) 
+            file_path: path.join(this.projectDir, readme) 
           }, new AbortController().signal);
           
           if (typeof result.llmContent === 'string') {

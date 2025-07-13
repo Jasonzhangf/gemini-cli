@@ -31,7 +31,7 @@ export class InsertTaskTool extends BaseTool<InsertTaskParams, ToolResult> {
         properties: {
           description: {
             type: Type.STRING,
-            description: '新任务描述，不超过20个字符'
+            description: '新任务描述，建议不超过30个字符'
           }
         },
         required: ['description']
@@ -47,8 +47,8 @@ export class InsertTaskTool extends BaseTool<InsertTaskParams, ToolResult> {
       throw new Error('任务描述不能为空');
     }
 
-    if (params.description.length > 20) {
-      throw new Error(`任务描述"${params.description}"超过20个字符限制`);
+    if (params.description.length > 100) {
+      throw new Error(`任务描述"${params.description}"超过100个字符限制`);
     }
 
     const tasks = await this.todoService.loadTasks();

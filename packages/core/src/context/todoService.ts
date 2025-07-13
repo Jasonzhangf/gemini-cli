@@ -118,10 +118,10 @@ export class TodoService {
   }
 
   /**
-   * 验证任务描述长度（不超过20个字）
+   * 验证任务描述长度（不超过100个字符，约50汉字）
    */
   validateTaskDescription(description: string): boolean {
-    return description.length <= 20 && description.trim().length > 0;
+    return description.length <= 100 && description.trim().length > 0;
   }
 
   /**
@@ -129,7 +129,7 @@ export class TodoService {
    */
   createTask(description: string): TaskItem {
     if (!this.validateTaskDescription(description)) {
-      throw new Error('任务描述必须在1-20个字符之间');
+      throw new Error('任务描述必须在1-100个字符之间');
     }
 
     return {

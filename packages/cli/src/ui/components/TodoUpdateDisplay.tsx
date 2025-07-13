@@ -18,12 +18,14 @@ export interface TodoTask {
 
 interface TodoUpdateDisplayProps {
   tasks: TodoTask[];
+  currentTaskId?: string;
   lastUpdate?: string;
   visible?: boolean;
 }
 
 export const TodoUpdateDisplay: React.FC<TodoUpdateDisplayProps> = ({
   tasks,
+  currentTaskId,
   lastUpdate,
   visible = true,
 }) => {
@@ -31,12 +33,15 @@ export const TodoUpdateDisplay: React.FC<TodoUpdateDisplayProps> = ({
     return null;
   }
 
-  const statusIcon = (status: TodoTask['status']) => {
+  const statusIcon = (status: TodoTask['status'], isCurrent: boolean) => {
+    if (isCurrent && status !== 'completed') {
+      return '🔄'; // Current task indicator
+    }
     switch (status) {
       case 'completed':
         return '☒';
       case 'in_progress':
-        return '☐'; // Current task shows as pending in this format
+        return '☐';
       case 'pending':
         return '☐';
       default:
@@ -44,7 +49,10 @@ export const TodoUpdateDisplay: React.FC<TodoUpdateDisplayProps> = ({
     }
   };
 
-  const getStatusColor = (status: TodoTask['status']) => {
+  const getStatusColor = (status: TodoTask['status'], isCurrent: boolean) => {
+    if (isCurrent && status !== 'completed') {
+      return Colors.AccentYellow; // Highlight current task
+    }
     switch (status) {
       case 'completed':
         return Colors.Gray;
@@ -72,12 +80,16 @@ export const TodoUpdateDisplay: React.FC<TodoUpdateDisplayProps> = ({
         {tasks.map((task, index) => {
           const isLast = index === tasks.length - 1;
           const prefix = index === 0 ? '     ' : '     ';
+          const isCurrent = task.id === currentTaskId;
           
           return (
             <Box key={task.id}>
               <Text color={Colors.Gray}>{prefix}</Text>
-              <Text color={getStatusColor(task.status)}>
-                {statusIcon(task.status)} {task.description}
+              <Text color={getStatusColor(task.status, isCurrent)}>
+                {statusIcon(task.status, isCurrent)} {task.description}
+                {isCurrent && task.status !== 'completed' && (
+                  <Text color={Colors.AccentYellow}> ← 当前</Text>
+                )}
                 {task.status === 'completed' && (
                   <Text color={Colors.Gray}>     </Text>
                 )}

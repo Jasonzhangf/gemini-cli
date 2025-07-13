@@ -21,6 +21,14 @@ export const Tips: React.FC<TipsProps> = ({ config }) => {
   return (
     <Box flexDirection="column" marginBottom={1}>
       {/* Memory System Status */}
+      {!memoryStatus.isLoaded && (
+        <Box marginBottom={1}>
+          <Text color={Colors.AccentBlue}>
+            🧠 Loading Memory System...
+          </Text>
+        </Box>
+      )}
+
       {memoryStatus.isLoaded && !memoryStatus.error && (
         <Box flexDirection="column" marginBottom={1}>
           <Text color={Colors.AccentGreen}>

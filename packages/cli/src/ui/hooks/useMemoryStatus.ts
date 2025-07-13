@@ -84,10 +84,9 @@ export const useMemoryStatus = (config: Config): MemoryStatus => {
           isLoaded: true,
         });
 
-        // Log memory status in debug mode
-        if (config.getDebugMode()) {
-          console.log(`[Memory System] Loaded - Global: ${globalMemories} memories, ${globalRules} rules | Project: ${projectMemories} memories, ${projectRules} rules`);
-        }
+        // Always log memory status for debugging
+        console.log(`[Memory System] Loaded - Global: ${globalMemories} memories, ${globalRules} rules | Project: ${projectMemories} memories, ${projectRules} rules`);
+        console.log(`[Memory System] Paths checked - Global: ${globalMemoryPath}, Project: ${projectMemoryPath}`);
 
       } catch (error) {
         setStatus(prev => ({

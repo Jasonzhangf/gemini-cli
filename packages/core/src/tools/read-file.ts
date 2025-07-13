@@ -25,9 +25,9 @@ import {
  */
 export interface ReadFileToolParams {
   /**
-   * The absolute path to the file to read
+   * The path to the file to read
    */
-  absolute_path: string;
+  file_path: string;
 
   /**
    * The line number to start reading from (optional)
@@ -56,9 +56,9 @@ export class ReadFileTool extends BaseTool<ReadFileToolParams, ToolResult> {
       'Reads and returns the content of a specified file from the local filesystem. Handles text, images (PNG, JPG, GIF, WEBP, SVG, BMP), and PDF files. For text files, it can read specific line ranges.',
       {
         properties: {
-          absolute_path: {
+          file_path: {
             description:
-              "The absolute path to the file to read (e.g., '/home/user/project/file.txt'). Relative paths are not supported. You must provide an absolute path.",
+              "The path to the file to read. Can be absolute (e.g., '/home/user/project/file.txt') or relative to the project root (e.g., 'src/main.ts'). Relative paths will be automatically converted to absolute paths.",
             type: Type.STRING,
           },
           offset: {
@@ -72,7 +72,7 @@ export class ReadFileTool extends BaseTool<ReadFileToolParams, ToolResult> {
             type: Type.NUMBER,
           },
         },
-        required: ['absolute_path'],
+        required: ['file_path'],
         type: Type.OBJECT,
       },
     );
@@ -85,9 +85,11 @@ export class ReadFileTool extends BaseTool<ReadFileToolParams, ToolResult> {
       return errors;
     }
 
-    const filePath = params.absolute_path;
+    // Auto-convert relative paths to absolute paths
+    let filePath = params.file_path;
     if (!path.isAbsolute(filePath)) {
-      return `File path must be absolute, but was relative: ${filePath}. You must provide an absolute path.`;
+      filePath = path.resolve(this.rootDirectory, filePath);
+      params.file_path = filePath; // Update the parameter
     }
     if (!isWithinRoot(filePath, this.rootDirectory)) {
       return `File path must be within the root directory (${this.rootDirectory}): ${filePath}`;
@@ -100,7 +102,7 @@ export class ReadFileTool extends BaseTool<ReadFileToolParams, ToolResult> {
     }
 
     const fileService = this.config.getFileService();
-    if (fileService.shouldGeminiIgnoreFile(params.absolute_path)) {
+    if (fileService.shouldGeminiIgnoreFile(params.file_path)) {
       return `File path '${filePath}' is ignored by .geminiignore pattern(s).`;
     }
 
@@ -110,12 +112,12 @@ export class ReadFileTool extends BaseTool<ReadFileToolParams, ToolResult> {
   getDescription(params: ReadFileToolParams): string {
     if (
       !params ||
-      typeof params.absolute_path !== 'string' ||
-      params.absolute_path.trim() === ''
+      typeof params.file_path !== 'string' ||
+      params.file_path.trim() === ''
     ) {
       return `Path unavailable`;
     }
-    const relativePath = makeRelative(params.absolute_path, this.rootDirectory);
+    const relativePath = makeRelative(params.file_path, this.rootDirectory);
     return shortenPath(relativePath);
   }
 
@@ -132,7 +134,7 @@ export class ReadFileTool extends BaseTool<ReadFileToolParams, ToolResult> {
     }
 
     const result = await processSingleFileContent(
-      params.absolute_path,
+      params.file_path,
       this.rootDirectory,
       params.offset,
       params.limit,
@@ -149,13 +151,13 @@ export class ReadFileTool extends BaseTool<ReadFileToolParams, ToolResult> {
       typeof result.llmContent === 'string'
         ? result.llmContent.split('\n').length
         : undefined;
-    const mimetype = getSpecificMimeType(params.absolute_path);
+    const mimetype = getSpecificMimeType(params.file_path);
     recordFileOperationMetric(
       this.config,
       FileOperation.READ,
       lines,
       mimetype,
-      path.extname(params.absolute_path),
+      path.extname(params.file_path),
     );
 
     return {

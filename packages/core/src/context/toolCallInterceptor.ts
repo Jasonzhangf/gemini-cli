@@ -96,20 +96,20 @@ ${todoData.suggestion ? `💡 建议: ${todoData.suggestion}` : ''}`;
         if (toolResult) {
           await this.contextWrapper.handleToolCallComplete('todo', toolResult);
           
-          // 根据todo操作类型返回不同的后处理信息
+          // 根据todo操作类型返回不同的后处理信息（精简版，不干扰用户）
           switch (toolResult.action) {
             case 'create_list':
-              return '\n🚀 任务维护模式已激活！系统将在每次工具调用时提示当前任务。';
+              return '\n🚀 任务维护模式已激活！';
               
             case 'update':
               if (toolResult.allCompleted) {
-                return '\n🎉 所有任务已完成！建议使用 {"action": "end_maintenance"} 结束任务维护模式。';
+                return '\n🎉 所有任务已完成！';
               } else {
                 return `\n✅ 任务状态已更新！进度: ${toolResult.progress}`;
               }
               
             case 'end_maintenance':
-              return '\n🏁 任务维护模式已结束，回到常规对话模式。';
+              return '\n🏁 任务维护模式已结束。';
               
             default:
               return '';
@@ -117,19 +117,16 @@ ${todoData.suggestion ? `💡 建议: ${todoData.suggestion}` : ''}`;
         }
       }
 
-      // 对于其他工具调用，在任务维护模式下提供任务完成检测和提示
+      // 对于其他工具调用，在任务维护模式下不显示任务提示给用户
+      // 任务状态信息通过系统提示传递给模型
       if (this.contextWrapper.isInMaintenanceMode() && request.name !== 'todo') {
+        // 静默更新任务状态，但不显示给用户
         const currentTask = await this.todoService.getCurrentTask();
         if (currentTask && (currentTask.status === 'pending' || currentTask.status === 'in_progress')) {
-          return `\n🎯 **工作目标检查**: 
-当前目标: "${currentTask.description}" (${currentTask.status})
-
-✅ **工具执行完成** - 请评估：
-• 这次工具使用是否完成了当前工作目标？
-• 如果已完成，立即使用: \`{"action": "update", "taskId": "${currentTask.id}", "status": "completed"}\`
-• 如果未完成，继续执行相关工具直到目标达成
-
-🔄 **下一步**: 完成当前目标后，系统将自动分配下一个工作目标`;
+          // 记录调试信息但不返回给用户
+          if (this.config.getDebugMode()) {
+            console.log(`[ToolCallInterceptor] Task reminder for model: ${currentTask.description} (${currentTask.status})`);
+          }
         }
       }
 
@@ -179,16 +176,12 @@ ${todoData.suggestion ? `💡 建议: ${todoData.suggestion}` : ''}`;
       const hasToolCalls = this.containsToolCalls(modelResponse);
 
       if (hasTaskKeywords && !hasToolCalls) {
-        return `\n\n🎯 **工作目标提醒**: 
-当前工作目标: "${currentTask.description}" (${currentTask.status})
-
-⚠️ **检测到任务相关内容但无工具调用**，请立即采取行动：
-
-🔧 **如果目标已达成**: 使用 \`{"action": "update", "taskId": "${currentTask.id}", "status": "completed"}\`
-📝 **如果需要修改目标**: 使用 todo 工具调整任务内容
-⚡ **如果需要继续执行**: 使用相应工具推进当前工作目标
-
-🚨 **重要**: 不要只是描述，要用工具执行！每个工作目标都必须通过实际行动完成。`;
+        // 记录检测到的情况但不显示给用户
+        if (this.config.getDebugMode()) {
+          console.log(`[ToolCallInterceptor] Detected task-related response without tool calls for task: ${currentTask.description}`);
+        }
+        // 任务提醒通过系统提示处理，不在这里显示给用户
+        return '';
       }
 
       return '';

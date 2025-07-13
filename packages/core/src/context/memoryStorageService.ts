@@ -245,18 +245,14 @@ export class MemoryStorageService {
    * 计算记忆条目数量
    */
   private countMemoryEntries(content: string): number {
-    // 计算以 "## " 开头的行数（除了文件标题）
+    // 计算以 "## " 开头的行数（这些都是实际的记忆条目）
+    // 文件标题使用 "# " 开头，所以 "## " 都是记忆条目
     const lines = content.split('\n');
     let count = 0;
-    let foundFirstHeader = false;
     
     for (const line of lines) {
       if (line.startsWith('## ')) {
-        if (foundFirstHeader) {
-          count++;
-        } else {
-          foundFirstHeader = true;
-        }
+        count++;
       }
     }
     

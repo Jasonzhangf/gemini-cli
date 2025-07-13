@@ -51,12 +51,15 @@ export class PromptEnhancer {
       return `${basePrompt}\n\n${currentTaskPrompt}\n\n${taskModePrompt}`;
     }
     
+    // 非维护模式：添加任务创建指导
+    const nonMaintenancePrompt = this.generateNonMaintenanceModePrompt();
+    
     // 即使不在维护模式，如果有当前任务也要显示
     if (currentTaskPrompt) {
-      return `${basePrompt}\n\n${currentTaskPrompt}`;
+      return `${basePrompt}\n\n${currentTaskPrompt}\n\n${nonMaintenancePrompt}`;
     }
     
-    return basePrompt;
+    return `${basePrompt}\n\n${nonMaintenancePrompt}`;
   }
 
   /**
@@ -99,23 +102,76 @@ export class PromptEnhancer {
    */
   private generateTaskModePrompt(): string {
     return `
-# 任务维护模式
+# 🔧 任务维护模式
 
 你当前处于任务维护模式。在此模式下：
 
-1. **任务导向**: 专注于完成当前活跃的任务
-2. **状态更新**: 完成任务后立即使用 todo 工具更新状态  
+## 🎯 工作重点
+1. **任务导向**: 专注于完成当前活跃的任务列表中的各项任务
+2. **状态更新**: 完成任务后立即更新任务状态
 3. **进度跟踪**: 定期检查任务进度和完成情况
-4. **自动提示**: 系统会在工具调用时自动提醒当前任务
+4. **维护任务列表**: 根据需要插入新任务或修改现有任务
 
-## 任务管理工具使用指南
+## 🛠️ 可用的任务维护工具
 
-- **查看当前任务**: \`{"action": "current"}\`
-- **更新任务状态**: \`{"action": "update", "taskId": "task_id", "status": "completed"}\`
-- **查看所有任务**: \`{"action": "list"}\`
-- **结束维护模式**: \`{"action": "end_maintenance"}\` (所有任务完成后)
+### 任务状态管理
+- **get_current_task**: 查看当前正在执行的任务
+- **finish_current_task**: 完成当前任务并自动切换到下一个
+- **get_next_task**: 获取下一个待执行的任务
 
-请在执行任何工具调用时，牢记当前的任务目标，并在完成相关工作后及时更新任务状态。
+### 任务列表维护
+- **insert_task**: 在当前任务后插入新任务
+- **modify_task**: 修改任务描述或更新任务信息
+
+## ⚠️ 重要限制
+- **禁止使用 create_tasks**: 任务列表已存在，不要重复创建新的任务列表
+- **专注维护模式**: 当前应该维护现有任务，而不是重新规划整个项目
+
+## 💡 工作流程建议
+1. 使用 **get_current_task** 确认当前工作目标
+2. 专注完成当前任务
+3. 完成后使用 **finish_current_task** 标记完成
+4. 如需要可使用 **insert_task** 添加细化任务
+5. 继续下一个任务直到全部完成
+
+请在任务维护模式下避免使用 create_tasks 工具，专注于维护和完成现有的任务列表。
+`.trim();
+  }
+
+  /**
+   * 生成非维护模式的系统提示
+   */
+  private generateNonMaintenanceModePrompt(): string {
+    return `
+# 📋 任务规划模式
+
+当前没有活跃的任务列表，你处于任务规划模式。
+
+## 🛠️ 推荐使用的工具
+
+### 任务规划工具
+- **create_tasks**: 将复杂目标分解为具体的任务列表
+  - 用于创建3-8个具体可执行的任务
+  - 每个任务应该是独立的执行步骤
+  - 建议不超过30个字符，简洁明确
+
+### 工作流模板
+- **workflow_template**: 使用预定义的工作流模板
+  - explore-plan-code-test: 探索-规划-编码-测试流程
+  - project-analysis: 项目分析工作流
+  - bug-fix: 问题修复工作流
+
+## ⚠️ 当前限制
+- **避免使用任务维护工具**: insert_task, modify_task, finish_current_task 等
+- **无当前任务**: 没有活跃任务时，维护工具不适用
+
+## 💡 建议工作流程
+1. 分析用户需求和目标
+2. 使用 **create_tasks** 制定完整的执行计划
+3. 系统自动进入任务维护模式
+4. 开始逐个执行任务
+
+当你需要处理复杂任务时，优先使用 create_tasks 工具来制定清晰的执行计划。
 `.trim();
   }
 

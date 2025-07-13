@@ -220,6 +220,11 @@ Use this tool when the user's query implies needing the content of several files
   }
 
   getDescription(params: ReadManyFilesParams): string {
+    // Safety check: ensure params.paths is an array
+    if (!params.paths || !Array.isArray(params.paths)) {
+      return `Error: 'paths' parameter must be an array, received: ${typeof params.paths}`;
+    }
+
     const allPatterns = [...params.paths, ...(params.include || [])];
     const pathDesc = `using patterns: \`${allPatterns.join('`, `')}\` (within target directory: \`${this.targetDir}\`)`;
 
@@ -251,6 +256,14 @@ Use this tool when the user's query implies needing the content of several files
     params: ReadManyFilesParams,
     signal: AbortSignal,
   ): Promise<ToolResult> {
+    // Additional safety check for paths parameter
+    if (!params.paths || !Array.isArray(params.paths)) {
+      return {
+        llmContent: `Error: 'paths' parameter must be an array, received: ${typeof params.paths}`,
+        returnDisplay: `## Parameter Error\n\n'paths' parameter must be an array, received: ${typeof params.paths}`,
+      };
+    }
+
     const validationError = this.validateParams(params);
     if (validationError) {
       return {

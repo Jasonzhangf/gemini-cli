@@ -19,19 +19,22 @@ export interface TodoTask {
 interface TodoMessageProps {
   tasks: TodoTask[];
   terminalWidth: number;
+  currentTaskId?: string;
 }
 
-const TodoStatusIndicator: React.FC<{ status: TodoTask['status'] }> = ({ status }) => (
+const TodoStatusIndicator: React.FC<{ status: TodoTask['status']; isCurrent: boolean }> = ({ status, isCurrent }) => (
   <Box minWidth={3}>
-    {status === 'completed' && <Text color={Colors.AccentGreen}>☒</Text>}
-    {status === 'in_progress' && <Text color={Colors.AccentYellow}>☐</Text>}
-    {status === 'pending' && <Text color={Colors.Gray}>☐</Text>}
+    {isCurrent && status !== 'completed' && <Text color={Colors.AccentBlue}>🔄</Text>}
+    {(!isCurrent || status === 'completed') && status === 'completed' && <Text color={Colors.AccentGreen}>☒</Text>}
+    {(!isCurrent || status === 'completed') && status === 'in_progress' && <Text color={Colors.AccentBlue}>☐</Text>}
+    {(!isCurrent || status === 'completed') && status === 'pending' && <Text color={Colors.Foreground}>☐</Text>}
   </Box>
 );
 
 export const TodoMessage: React.FC<TodoMessageProps> = ({
   tasks,
   terminalWidth,
+  currentTaskId,
 }) => {
   if (tasks.length === 0) {
     return null;
@@ -64,16 +67,24 @@ export const TodoMessage: React.FC<TodoMessageProps> = ({
           </Box>
           {tasks.map((task, index) => {
             const isCompleted = task.status === 'completed';
-            const textColor = isCompleted ? Colors.Gray : Colors.Foreground;
+            const isCurrent = task.id === currentTaskId;
+            
+            // 状态颜色：完成=绿色，正在执行=蓝色，未执行=黑色
+            let textColor = Colors.Foreground; // 默认黑色（未执行）
+            if (isCompleted) {
+              textColor = Colors.AccentGreen; // 绿色（完成）
+            } else if (isCurrent || task.status === 'in_progress') {
+              textColor = Colors.AccentBlue; // 蓝色（正在执行）
+            }
             
             return (
               <Box key={task.id} minHeight={1}>
                 <Text color={Colors.Gray}>     </Text>
-                <TodoStatusIndicator status={task.status} />
+                <TodoStatusIndicator status={task.status} isCurrent={isCurrent} />
                 <Text color={textColor}>
                   {task.description}
-                  {isCompleted && (
-                    <Text color={Colors.Gray}>     </Text>
+                  {isCurrent && !isCompleted && (
+                    <Text color={Colors.AccentBlue}> ← 当前</Text>
                   )}
                 </Text>
               </Box>

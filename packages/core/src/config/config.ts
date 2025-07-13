@@ -28,6 +28,7 @@ import { GetCurrentTaskTool } from '../tools/get_current_task.js';
 import { FinishCurrentTaskTool } from '../tools/finish_current_task.js';
 import { GetNextTaskTool } from '../tools/get_next_task.js';
 import { InsertTaskTool } from '../tools/insert_task.js';
+import { ModifyTaskTool } from '../tools/modify_task.js';
 import { WorkflowTemplateTool } from '../tools/workflow_template.js';
 import { MigrateProjectDataTool } from '../tools/migrate_project_data.js';
 import { SaveMemoryTool } from '../tools/save_memory.js';
@@ -657,7 +658,7 @@ export class Config {
     registerCoreTool(WebFetchTool, this);
     registerCoreTool(ReadManyFilesTool, targetDir, this);
     registerCoreTool(ShellTool, this);
-    registerCoreTool(MemoryTool);
+    // registerCoreTool(MemoryTool); // Replaced with new SaveMemoryTool
     registerCoreTool(WebSearchTool, this);
     // registerCoreTool(TodoTool); // Replaced with simple task tools
     registerCoreTool(CreateTasksTool, this);
@@ -665,6 +666,7 @@ export class Config {
     registerCoreTool(FinishCurrentTaskTool, this);
     registerCoreTool(GetNextTaskTool, this);
     registerCoreTool(InsertTaskTool, this);
+    registerCoreTool(ModifyTaskTool, this);
     registerCoreTool(WorkflowTemplateTool, this);
     registerCoreTool(MigrateProjectDataTool, this);
     registerCoreTool(SaveMemoryTool, this);

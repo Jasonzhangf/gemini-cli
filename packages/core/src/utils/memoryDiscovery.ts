@@ -200,6 +200,34 @@ async function getGeminiMdFilePathsInternal(
     }
   }
 
+  // Add new memory storage files (from 激发存储功能)
+  const globalMemoryStoragePath = path.join(userHomePath, '.gemini', 'memories', 'Memory.md');
+  const projectMemoryStoragePath = path.join(currentWorkingDirectory, '.gemini', 'memories', 'Memory.md');
+
+  try {
+    await fs.access(globalMemoryStoragePath, fsSync.constants.R_OK);
+    allPaths.add(globalMemoryStoragePath);
+    if (debugMode) {
+      logger.debug(`Found readable global memory storage: ${globalMemoryStoragePath}`);
+    }
+  } catch {
+    if (debugMode) {
+      logger.debug(`Global memory storage not found: ${globalMemoryStoragePath}`);
+    }
+  }
+
+  try {
+    await fs.access(projectMemoryStoragePath, fsSync.constants.R_OK);
+    allPaths.add(projectMemoryStoragePath);
+    if (debugMode) {
+      logger.debug(`Found readable project memory storage: ${projectMemoryStoragePath}`);
+    }
+  } catch {
+    if (debugMode) {
+      logger.debug(`Project memory storage not found: ${projectMemoryStoragePath}`);
+    }
+  }
+
   // Add extension context file paths
   for (const extensionPath of extensionContextFilePaths) {
     allPaths.add(extensionPath);
@@ -267,6 +295,15 @@ function concatenateInstructions(
       const displayPath = path.isAbsolute(item.filePath)
         ? path.relative(currentWorkingDirectoryForDisplay, item.filePath)
         : item.filePath;
+      
+      // Check if this is a new memory storage file (skip it to avoid duplication with ContextManager)
+      if (item.filePath.includes('.gemini/memories/Memory.md')) {
+        if (logger.debug) {
+          logger.debug(`Skipping memory storage file to avoid duplication: ${item.filePath}`);
+        }
+        return null;
+      }
+      
       return `--- Context from: ${displayPath} ---\n${trimmedContent}\n--- End of Context from: ${displayPath} ---`;
     })
     .filter((block): block is string => block !== null)
