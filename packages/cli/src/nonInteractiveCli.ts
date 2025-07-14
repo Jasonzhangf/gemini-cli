@@ -11,6 +11,7 @@ import {
   ToolRegistry,
   shutdownTelemetry,
   isTelemetrySdkInitialized,
+  ContextAgent,
 } from '@google/gemini-cli-core';
 import {
   Content,
@@ -64,6 +65,22 @@ export async function runNonInteractive(
   const abortController = new AbortController();
   let currentMessages: Content[] = [{ role: 'user', parts: [{ text: input }] }];
   let turnCount = 0;
+  
+  // Point 1: RAG processing at user input's most original state (non-interactive mode)
+  try {
+    const contextAgent = config.getContextAgent();
+    if (contextAgent) {
+      await contextAgent.injectContextIntoDynamicSystem(input);
+      if (config.getDebugMode()) {
+        console.log('[nonInteractiveCli] ✅ RAG processing completed for original user input');
+      }
+    }
+  } catch (ragError) {
+    if (config.getDebugMode()) {
+      console.warn('[nonInteractiveCli] RAG processing failed for original user input:', ragError);
+    }
+    // Continue execution even if RAG fails
+  }
   try {
     while (true) {
       turnCount++;
@@ -77,6 +94,7 @@ export async function runNonInteractive(
         return;
       }
       const functionCalls: FunctionCall[] = [];
+      let completeResponseText = ''; // Accumulate complete response for RAG processing
 
       const responseStream = await chat.sendMessageStream(
         {
@@ -99,9 +117,28 @@ export async function runNonInteractive(
         const textPart = getResponseText(resp);
         if (textPart) {
           process.stdout.write(textPart);
+          completeResponseText += textPart; // Accumulate for RAG processing
         }
         if (resp.functionCalls) {
           functionCalls.push(...resp.functionCalls);
+        }
+      }
+
+      // Point 2: RAG processing after model reply (think tags already filtered) - non-interactive mode
+      if (completeResponseText) {
+        try {
+          const contextAgent = config.getContextAgent();
+          if (contextAgent) {
+            await contextAgent.injectContextIntoDynamicSystem(completeResponseText);
+            if (config.getDebugMode()) {
+              console.log('[nonInteractiveCli] ✅ RAG processing completed for model response');
+            }
+          }
+        } catch (ragError) {
+          if (config.getDebugMode()) {
+            console.warn('[nonInteractiveCli] RAG processing failed for model response:', ragError);
+          }
+          // Continue execution even if RAG fails
         }
       }
 

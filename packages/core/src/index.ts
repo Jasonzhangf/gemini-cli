@@ -64,3 +64,41 @@ export { sessionId } from './utils/session.js';
 // Export session history management
 export * from './context/sessionHistory.js';
 export * from './context/sessionRestorer.js';
+
+// Export context system
+export * from './context/contextAgent.js';
+
+// Export bacterial programming modules (with explicit naming to avoid conflicts)
+export {
+  OpenAIHijackConfig,
+  ToolCall as OpenAIToolCall,
+  ConversationMessage,
+  ContentMarkers,
+  PathMapping,
+  ToolCategories,
+  ContentIsolator,
+  ToolClassifier,
+  PathProcessor,
+  ToolParser,
+  ConversationManager,
+  ResponseProcessor,
+  StreamAdapter,
+  OpenAIClient,
+  ToolFormatter as OpenAIToolFormatter
+} from './openai/modules/index.js';
+
+export {
+  PromptBuilder,
+  ToolFormatter as GuidanceToolFormatter,
+  SyntaxValidator,
+  ValidationResult,
+  ToolCallExtraction,
+  ValidationSummary,
+  DevelopmentStrategy,
+  AnalysisStrategy,
+  WorkflowStrategy
+} from './tools/guidance/index.js';
+
+// Export slim implementations
+export * from './openai/hijack-slim.js';
+export * from './core/prompts-slim.js';

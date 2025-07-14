@@ -25,6 +25,7 @@ import {
   UnauthorizedError,
   UserPromptEvent,
   DEFAULT_GEMINI_FLASH_MODEL,
+  ContextAgent,
 } from '@google/gemini-cli-core';
 import { type Part, type PartListUnion } from '@google/genai';
 import {
@@ -237,6 +238,22 @@ export const useGeminiStream = (
         // Debug logging to file when debug mode is enabled
         if (config.getDebugMode()) {
           logUserQuery(config.getSessionId(), trimmedQuery);
+        }
+
+        // Point 1: RAG processing at user input's most original state
+        try {
+          const contextAgent = config.getContextAgent();
+          if (contextAgent) {
+            await contextAgent.injectContextIntoDynamicSystem(trimmedQuery);
+            if (config.getDebugMode()) {
+              console.log('[useGeminiStream] ✅ RAG processing completed for original user input');
+            }
+          }
+        } catch (ragError) {
+          if (config.getDebugMode()) {
+            console.warn('[useGeminiStream] RAG processing failed for original user input:', ragError);
+          }
+          // Continue execution even if RAG fails
         }
 
         // Handle UI-only commands first
@@ -608,6 +625,24 @@ export const useGeminiStream = (
           // Debug logging of model response
           if (config.getDebugMode() && pendingHistoryItemRef.current.type === 'gemini') {
             logModelResponse(config.getSessionId(), pendingHistoryItemRef.current.text);
+          }
+          
+          // Point 2: RAG processing after model reply (think tags already filtered)
+          try {
+            const contextAgent = config.getContextAgent();
+            if (contextAgent && pendingHistoryItemRef.current.type === 'gemini') {
+              const modelResponseText = pendingHistoryItemRef.current.text;
+              // Generate dynamic context based on model response
+              await contextAgent.injectContextIntoDynamicSystem(modelResponseText);
+              if (config.getDebugMode()) {
+                console.log('[useGeminiStream] ✅ RAG processing completed for model response');
+              }
+            }
+          } catch (ragError) {
+            if (config.getDebugMode()) {
+              console.warn('[useGeminiStream] RAG processing failed for model response:', ragError);
+            }
+            // Continue execution even if RAG fails
           }
           
           addItem(pendingHistoryItemRef.current, userMessageTimestamp);
