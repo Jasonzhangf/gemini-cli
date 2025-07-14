@@ -198,22 +198,39 @@ export class TodoTool extends BaseTool<TodoToolParams, ToolResult> {
       tasks[0].status = 'in_progress';
     }
     
-    // 保存任务到TodoService
-    await this.todoService.saveTasks(tasks);
-    
-    // 通过contextManager创建任务列表（这会设置维护模式）
-    if (this.contextManager) {
-      await this.contextManager.createTaskList(tasks);
-    }
-    
-    // 自动设置第一个任务为当前任务
-    if (tasks.length > 0) {
-      await this.todoService.setCurrentTask(tasks[0].id);
-      if (this.contextManager) {
-        await this.contextManager.updateTaskStatus(tasks[0].id, 'in_progress');
+    // 确保所有状态设置操作完成后再返回结果，保证UI显示的一致性
+    try {
+      // 1. 保存任务到TodoService
+      await this.todoService.saveTasks(tasks);
+      
+      // 2. 并行设置当前任务和contextManager状态
+      const promises: Promise<any>[] = [];
+      
+      if (tasks.length > 0) {
+        promises.push(this.todoService.setCurrentTask(tasks[0].id));
       }
+      
+      if (this.contextManager) {
+        promises.push(this.contextManager.createTaskList(tasks));
+        if (tasks.length > 0) {
+          promises.push(this.contextManager.updateTaskStatus(tasks[0].id, 'in_progress'));
+        }
+      }
+      
+      // 等待所有关键状态操作完成
+      await Promise.all(promises);
+      
+    } catch (error) {
+      // 如果状态设置失败，清理已保存的任务
+      try {
+        await this.todoService.clearTasks();
+      } catch (cleanupError) {
+        console.warn('Failed to cleanup tasks after error:', cleanupError);
+      }
+      throw error;
     }
     
+    // 所有状态设置完成后，返回最终一致的结果
     return {
       action: 'create_list',
       message: `已创建包含 ${tasks.length} 个任务的任务列表`,
@@ -224,6 +241,7 @@ export class TodoTool extends BaseTool<TodoToolParams, ToolResult> {
       })),
       currentTaskId: tasks[0]?.id,
       maintenanceMode: true,
+      timestamp: new Date().toISOString(), // 添加时间戳确保状态同步
     };
   }
 
@@ -262,29 +280,57 @@ export class TodoTool extends BaseTool<TodoToolParams, ToolResult> {
       task.completedAt = new Date().toISOString();
     }
 
-    await this.todoService.saveTasks(tasks);
-    if (this.contextManager) {
-      await this.contextManager.updateTaskStatus(params.taskId, params.status);
+    // 确保所有状态更新操作原子化完成
+    let nextTask: any = undefined;
+    let nextTaskInfo = '';
+    
+    try {
+      // 1. 保存基本任务状态
+      await this.todoService.saveTasks(tasks);
+      
+      // 2. 并行更新相关状态
+      const promises: Promise<any>[] = [];
+      
+      if (this.contextManager) {
+        promises.push(this.contextManager.updateTaskStatus(params.taskId, params.status));
+      }
+      
+      // 3. 如果任务完成，处理下一个任务的设置
+      if (params.status === 'completed' && oldStatus !== 'completed') {
+        nextTask = tasks.find(t => t.status !== 'completed');
+        if (nextTask) {
+          // 并行设置下一个任务
+          promises.push(this.todoService.setCurrentTask(nextTask.id));
+          promises.push(this.todoService.updateTaskStatus(nextTask.id, 'in_progress'));
+          if (this.contextManager) {
+            promises.push(this.contextManager.updateTaskStatus(nextTask.id, 'in_progress'));
+          }
+          
+          nextTaskInfo = `\n\n🎯 **新工作目标已分配**: "${nextTask.description}"
+⚡ **立即开始**: 专注执行新的工作目标
+📋 **完成后记得**: 使用 todo 工具标记完成状态`;
+        }
+      }
+      
+      // 等待所有状态更新完成
+      await Promise.all(promises);
+      
+    } catch (error) {
+      // 如果状态更新失败，尝试回滚任务状态
+      try {
+        task.status = oldStatus;
+        if (task.completedAt && oldStatus !== 'completed') {
+          delete task.completedAt;
+        }
+        await this.todoService.saveTasks(tasks);
+      } catch (rollbackError) {
+        console.warn('Failed to rollback task status:', rollbackError);
+      }
+      throw error;
     }
 
     const completedCount = tasks.filter(t => t.status === 'completed').length;
     const allCompleted = completedCount === tasks.length;
-
-    // 如果任务被标记为完成，自动设置下一个任务为当前任务
-    let nextTaskInfo = '';
-    if (params.status === 'completed' && oldStatus !== 'completed') {
-      const nextTask = tasks.find(t => t.status !== 'completed');
-      if (nextTask) {
-        await this.todoService.setCurrentTask(nextTask.id);
-        await this.todoService.updateTaskStatus(nextTask.id, 'in_progress');
-        if (this.contextManager) {
-          await this.contextManager.updateTaskStatus(nextTask.id, 'in_progress');
-        }
-        nextTaskInfo = `\n\n🎯 **新工作目标已分配**: "${nextTask.description}"
-⚡ **立即开始**: 专注执行新的工作目标
-📋 **完成后记得**: 使用 todo 工具标记完成状态`;
-      }
-    }
 
     const baseMessage = `任务 "${task.description}" 状态已更新为: ${params.status}`;
     const fullMessage = allCompleted 
@@ -297,8 +343,9 @@ export class TodoTool extends BaseTool<TodoToolParams, ToolResult> {
       task: { id: task.id, description: task.description, status: task.status },
       progress: `${completedCount}/${tasks.length}`,
       allCompleted,
-      nextTask: nextTaskInfo ? tasks.find(t => t.status !== 'completed') : undefined,
+      nextTask: nextTask ? { id: nextTask.id, description: nextTask.description, status: 'in_progress' } : undefined,
       suggestion: allCompleted ? '所有任务已完成，建议调用 end_maintenance 结束任务维护模式' : undefined,
+      timestamp: new Date().toISOString(), // 添加时间戳确保状态同步
     };
   }
 

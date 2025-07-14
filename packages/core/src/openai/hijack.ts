@@ -149,6 +149,14 @@ You have access to powerful tools to help analyze and work with files and data. 
 
 ✦ {"name": "tool_name", "arguments": {"param": "value"}}
 
+🚨🚨🚨 ABSOLUTE RULES - NO EXCEPTIONS 🚨🚨🚨:
+1. NEVER claim to have created, written, or modified files without using the actual tools
+2. NEVER say "已保存到", "已写入", "saved to", "written to" unless you used the write_file tool
+3. NEVER describe what you would do - ALWAYS use tools to actually do it
+4. If you need to write a file, you MUST use: ✦ {"name": "write_file", "arguments": {"file_path": "./path", "content": "..."}}
+5. If you need to modify a file, you MUST use: ✦ {"name": "replace", "arguments": {"file_path": "./path", "old_string": "...", "new_string": "..."}}
+6. WITHOUT TOOL CALLS, YOUR RESPONSE IS JUST PLANNING - NOT EXECUTION
+
 🎯 🚨 CRITICAL TASK MANAGEMENT RULE 🚨:
 For ANY request involving 2+ distinct operations (like "清理空文件夹" + "合并目录"), you MUST IMMEDIATELY create a task list BEFORE starting work:
 ✦ {"name": "todo", "arguments": {"action": "create_list", "tasks": ["清理空文件夹", "识别相似目录", "合并目录", "分类整理"]}}
@@ -162,16 +170,9 @@ Examples requiring IMMEDIATE task creation:
 📋 AVAILABLE TOOLS:
 ${toolDescriptions}
 
-⚠️ CRITICAL GUIDELINES:
-- 🚨 NEVER just describe what to do - USE TOOLS to actually do it!
-- ALWAYS start tool calls with the ✦ symbol
-- Use EXACT tool names as shown above
-- Provide complete, valid JSON for arguments
-- Use relative paths when possible (e.g., "./README.md" not "/full/path/README.md")
-- For file operations, start with current directory (./) 
-- Wait for tool results before continuing your analysis
-- You can chain multiple tool calls to complete complex tasks
-- Required parameters are marked with *
+⚠️ MANDATORY EXECUTION PATTERN:
+✅ CORRECT: "I will create the file now:" followed by ✦ {"name": "write_file", ...}
+❌ WRONG: "I have created the file at ./docs/example.md" (without tool call)
 
 🚨 DANGEROUS TOOLS:
 Tools marked with ⚠️ [DANGEROUS] can modify the system or files and require explicit user approval before execution. These include:
@@ -1106,6 +1107,39 @@ The user will execute the tools and provide you with the results. Use the result
           console.log('- Contains ✦:', fullResponse.includes('✦'));
           console.log('- Contains write_file:', fullResponse.includes('write_file'));
           console.log('- Contains JSON braces:', fullResponse.includes('{'));
+          
+          // Check for model claims without tool calls
+          const suspiciousPatterns = [
+            /已保存到|已写入|saved to|written to/i,
+            /文件创建|file created|文档生成|document generated/i,
+            /代码更新|code updated|修改完成|modification completed/i
+          ];
+          
+          const hasSuspiciousClaims = suspiciousPatterns.some(pattern => pattern.test(fullResponse));
+          if (hasSuspiciousClaims) {
+            console.warn('[OpenAI Hijack] ⚠️  DETECTED SUSPICIOUS CLAIM: Model claims to have performed actions without using tools!');
+            console.warn('[OpenAI Hijack] This is a critical issue - model thinks it performed operations but no tool calls detected.');
+            
+            // Inject a correction response to inform the model that no actions were actually taken
+            const correctionMessage = `
+⚠️ **重要提醒**: 您刚才的响应中声称执行了文件操作，但实际上没有使用工具调用。
+
+**实际情况**: 
+- 没有创建任何文件
+- 没有写入任何内容  
+- 没有执行任何操作
+
+**正确做法**: 
+如需创建/写入文件，必须使用: ✦ {"name": "write_file", "arguments": {"file_path": "./path", "content": "..."}}
+
+请使用正确的工具调用格式重新执行所需操作。`;
+
+            // Emit the correction as content
+            yield {
+              type: GeminiEventType.Content,
+              value: correctionMessage,
+            };
+          }
         }
       }
 
