@@ -54,6 +54,7 @@ import {
   TrackedCancelledToolCall,
 } from './useReactToolScheduler.js';
 import { useSessionStats } from '../contexts/SessionContext.js';
+import { logUserQuery, logContext, logModelResponse, logToolCall } from '../../utils/debug.js';
 
 export function mergePartListUnions(list: PartListUnion[]): PartListUnion {
   const resultParts: PartListUnion = [];
@@ -232,6 +233,11 @@ export const useGeminiStream = (
         );
         onDebugMessage(`User query: '${trimmedQuery}'`);
         await logger?.logMessage(MessageSenderType.USER, trimmedQuery);
+        
+        // Debug logging to file when debug mode is enabled
+        if (config.getDebugMode()) {
+          logUserQuery(config.getSessionId(), trimmedQuery);
+        }
 
         // Handle UI-only commands first
         const slashCommandResult = await handleSlashCommand(trimmedQuery);
@@ -281,6 +287,11 @@ export const useGeminiStream = (
       } else {
         // It's a function response (PartListUnion that isn't a string)
         localQueryToSendToGemini = query;
+        
+        // Debug logging for non-string queries (tool responses, images, etc.)
+        if (config.getDebugMode()) {
+          logUserQuery(config.getSessionId(), query);
+        }
       }
 
       if (localQueryToSendToGemini === null) {
@@ -497,6 +508,13 @@ export const useGeminiStream = (
         }
       }
       if (toolCallRequests.length > 0) {
+        // Debug logging of tool calls
+        if (config.getDebugMode()) {
+          for (const toolCall of toolCallRequests) {
+            logToolCall(config.getSessionId(), toolCall);
+          }
+        }
+        
         scheduleToolCalls(toolCallRequests, signal);
       }
       return StreamProcessingStatus.Completed;
@@ -508,6 +526,7 @@ export const useGeminiStream = (
       scheduleToolCalls,
       handleChatCompressionEvent,
       handleMaxSessionTurnsEvent,
+      config,
     ],
   );
 
@@ -563,6 +582,13 @@ export const useGeminiStream = (
         if (!geminiClient) {
           throw new Error('GeminiClient is not yet initialized. Please wait...');
         }
+        
+        // Debug logging of context sent to Gemini
+        if (config.getDebugMode() && queryToSend) {
+          const contextParts = Array.isArray(queryToSend) ? queryToSend : [queryToSend];
+          logContext(config.getSessionId(), contextParts);
+        }
+        
         const stream = geminiClient.sendMessageStream(
           queryToSend,
           abortSignal,
@@ -579,6 +605,11 @@ export const useGeminiStream = (
         }
 
         if (pendingHistoryItemRef.current) {
+          // Debug logging of model response
+          if (config.getDebugMode() && pendingHistoryItemRef.current.type === 'gemini') {
+            logModelResponse(config.getSessionId(), pendingHistoryItemRef.current.text);
+          }
+          
           addItem(pendingHistoryItemRef.current, userMessageTimestamp);
           setPendingHistoryItem(null);
         }

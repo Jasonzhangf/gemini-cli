@@ -60,6 +60,8 @@ import { ClearcutLogger } from '../telemetry/clearcut-logger/clearcut-logger.js'
 import { ContextManager } from '../context/contextManager.js';
 import { PromptEnhancer } from '../context/promptEnhancer.js';
 import { ToolCallInterceptor } from '../context/toolCallInterceptor.js';
+import { ContextAgent } from '../context/contextAgent.js';
+import { StandardContextIntegrator } from '../context/standardContextIntegrator.js';
 
 export enum ApprovalMode {
   DEFAULT = 'default',
@@ -209,6 +211,7 @@ export class Config {
   private contextManager: ContextManager | null = null;
   private promptEnhancer: PromptEnhancer | null = null;
   private toolCallInterceptor: ToolCallInterceptor | null = null;
+  private contextAgent: ContextAgent | null = null;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -293,10 +296,22 @@ export class Config {
     this.contextManager = new ContextManager(this.targetDir, this.debugMode);
     await this.contextManager.initialize();
     
+    // Initialize StandardContextIntegrator for enhanced debug logging
+    const standardContextIntegrator = new StandardContextIntegrator(this, this.targetDir);
+    this.contextManager.setStandardContextIntegrator(standardContextIntegrator);
+    
     // Initialize enhancers that wrap existing functionality
     this.promptEnhancer = new PromptEnhancer(this);
     await this.promptEnhancer.initialize();
     this.toolCallInterceptor = new ToolCallInterceptor(this);
+    
+    // Initialize ContextAgent (Milestone 2)
+    this.contextAgent = new ContextAgent({
+      config: this,
+      projectDir: this.targetDir,
+      sessionId: this.sessionId
+    });
+    await this.contextAgent.initialize();
   }
 
   async refreshAuth(authMethod: AuthType) {
@@ -610,6 +625,13 @@ export class Config {
       throw new Error('ToolCallInterceptor not initialized. Call initialize() first.');
     }
     return this.toolCallInterceptor;
+  }
+
+  getContextAgent(): ContextAgent {
+    if (!this.contextAgent) {
+      throw new Error('ContextAgent not initialized. Call initialize() first.');
+    }
+    return this.contextAgent;
   }
 
   async createToolRegistry(): Promise<ToolRegistry> {

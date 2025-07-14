@@ -52,7 +52,10 @@ import { DetailedMessagesDisplay } from './components/DetailedMessagesDisplay.js
 import { HistoryItemDisplay } from './components/HistoryItemDisplay.js';
 import { ContextSummaryDisplay } from './components/ContextSummaryDisplay.js';
 import { TodoDisplay } from './components/TodoDisplay.js';
+import { SessionSelector } from './components/SessionSelector.js';
+import { SessionRestorePrompt } from './components/SessionRestorePrompt.js';
 import { useTodoState } from './hooks/useTodoState.js';
+import { useSessionHistory } from './hooks/useSessionHistory.js';
 import { useHistory } from './hooks/useHistoryManager.js';
 import process from 'node:process';
 import {
@@ -159,6 +162,9 @@ const App = ({
   // Todo state management
   const todoState = useTodoState(config);
   const [lastTodoSnapshot, setLastTodoSnapshot] = useState<string>('');
+  
+  // Session history management
+  const sessionHistory = useSessionHistory(config);
 
   const openPrivacyNotice = useCallback(() => {
     setShowPrivacyNotice(true);
@@ -529,6 +535,9 @@ const App = ({
       handleExit(ctrlDPressedOnce, setCtrlDPressedOnce, ctrlDTimerRef);
     } else if (key.ctrl && input === 's' && !enteringConstrainHeightMode) {
       setConstrainHeight(false);
+    } else if (key.escape) {
+      // Handle double ESC for session selector
+      sessionHistory.handleEscapeKey();
     }
   });
 
@@ -734,6 +743,25 @@ const App = ({
         </OverflowProvider>
 
         {showHelp && <Help commands={slashCommands} />}
+        
+        {/* Session History Management */}
+        {sessionHistory.showRestorePrompt && sessionHistory.unfinishedTaskInfo && (
+          <SessionRestorePrompt
+            taskInfo={sessionHistory.unfinishedTaskInfo}
+            onContinue={sessionHistory.continueSession}
+            onNewSession={sessionHistory.startNewSession}
+            visible={sessionHistory.showRestorePrompt}
+          />
+        )}
+        
+        {sessionHistory.showSessionSelector && (
+          <SessionSelector
+            sessions={sessionHistory.sessionHistory}
+            onSelect={sessionHistory.selectSession}
+            onCancel={sessionHistory.hideSessionSelector}
+            visible={sessionHistory.showSessionSelector}
+          />
+        )}
 
         <Box flexDirection="column" ref={mainControlsRef}>
           {startupWarnings.length > 0 && (

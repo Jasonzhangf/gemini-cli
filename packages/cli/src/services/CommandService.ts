@@ -9,10 +9,12 @@ import { memoryCommand } from '../ui/commands/memoryCommand.js';
 import { helpCommand } from '../ui/commands/helpCommand.js';
 import { clearCommand } from '../ui/commands/clearCommand.js';
 import { themeCommand } from '../ui/commands/themeCommand.js';
+import { initCommand } from '../ui/commands/initCommand.js';
 
 const loadBuiltInCommands = async (): Promise<SlashCommand[]> => [
   clearCommand,
   helpCommand,
+  initCommand,
   memoryCommand,
   themeCommand,
 ];

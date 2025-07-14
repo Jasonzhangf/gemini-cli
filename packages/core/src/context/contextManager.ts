@@ -10,6 +10,7 @@ import { homedir } from 'os';
 import { Content } from '@google/genai';
 import { TodoService } from './todoService.js';
 import { MemoryStorageService, MemoryType } from './memoryStorageService.js';
+import { StandardContextIntegrator } from './standardContextIntegrator.js';
 
 export interface ContextData {
   historyRecords: Content[];
@@ -51,6 +52,7 @@ export class ContextManager {
   private context: ContextData;
   private todoService: TodoService;
   private memoryService: MemoryStorageService;
+  private standardContextIntegrator: StandardContextIntegrator | null = null;
   private projectRoot: string;
   private debugMode: boolean;
 
@@ -77,6 +79,11 @@ export class ContextManager {
    */
   async initialize(): Promise<void> {
     await this.loadStaticContext();
+    
+    // Initialize StandardContextIntegrator for enhanced debug logging
+    // Note: We need to pass a Config instance, but we don't have access to it here
+    // This will be set by the Config class after initialization
+    
     if (this.debugMode) {
       const totalGlobalRules = this.context.staticContext.globalRules.length;
       const totalProjectRules = this.context.staticContext.projectRules.length;
@@ -84,6 +91,20 @@ export class ContextManager {
       const totalProjectMemories = this.context.staticContext.projectMemories.length;
       console.log(`[ContextManager] Initialized with ${totalGlobalRules} global rules, ${totalProjectRules} project rules, ${totalGlobalMemories} global memories, ${totalProjectMemories} project memories`);
     }
+  }
+
+  /**
+   * Set StandardContextIntegrator (called by Config after initialization)
+   */
+  setStandardContextIntegrator(integrator: StandardContextIntegrator): void {
+    this.standardContextIntegrator = integrator;
+  }
+
+  /**
+   * Get StandardContextIntegrator for debug logging
+   */
+  getStandardContextIntegrator(): StandardContextIntegrator | null {
+    return this.standardContextIntegrator;
   }
 
   /**

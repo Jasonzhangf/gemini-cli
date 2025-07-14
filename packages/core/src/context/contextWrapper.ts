@@ -7,7 +7,6 @@
 import { Content } from '@google/genai';
 import { ContextManager } from './contextManager.js';
 import { Config } from '../config/config.js';
-import { ContextDebugger } from './contextDebugger.js';
 
 /**
  * 上下文包装器 - 用于集成现有的内存系统和新的上下文管理系统
@@ -16,19 +15,18 @@ import { ContextDebugger } from './contextDebugger.js';
 export class ContextWrapper {
   private contextManager: ContextManager;
   private config: Config;
-  private debugger: ContextDebugger;
 
   constructor(config: Config) {
     this.config = config;
     this.contextManager = config.getContextManager();
-    this.debugger = new ContextDebugger(config.getSessionId(), config.getDebugMode(), config.getProjectRoot());
   }
 
   /**
    * 初始化包装器
    */
   async initialize(): Promise<void> {
-    await this.debugger.initialize();
+    // 移除旧的调试器初始化，统一使用新的 DebugLogger
+    // 初始化工作现在在 ContextManager 中完成
   }
 
   /**
@@ -157,23 +155,18 @@ export class ContextWrapper {
 
   /**
    * 手动保存debug快照（用于额外的debug记录点）
+   * 现在使用统一的 DebugLogger 替代旧的调试器
    */
-  async saveDebugSnapshot(enhancedPrompt?: string, userMessage?: string): Promise<void> {
-    if (this.debugger.isDebugEnabled()) {
-      await this.debugger.saveContextSnapshot(
-        this.contextManager.getContext(),
-        this.config.getUserMemory(),
-        this.config.getGeminiMdFileCount(),
-        enhancedPrompt,
-        userMessage
-      );
-    }
+  async saveDebugSnapshot(_enhancedPrompt?: string, _userMessage?: string): Promise<void> {
+    // 移除旧的调试器方法，现在统一使用 DebugLogger
+    // Debug 快照现在在 OpenAI hijack 模块中统一处理
   }
 
   /**
    * 获取调试器当前轮次
+   * 现在返回默认值，实际轮次由 DebugLogger 管理
    */
   getCurrentDebugTurn(): number {
-    return this.debugger.getCurrentTurn();
+    return 0; // 旧的调试器已移除，返回默认值
   }
 }
