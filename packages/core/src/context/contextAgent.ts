@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Config } from '../config/config.js';
+import { Config, AnalysisMode } from '../config/config.js';
 import { FileScanner, FileScanOptions, ScanResult } from './fileScanner.js';
 import { StaticAnalyzer, AnalysisResult } from './staticAnalyzer.js';
 import { KnowledgeGraph } from './knowledgeGraph.js';
 import { LayeredContextManager } from './layeredContextManager.js';
+import { SemanticAnalysisService, AnalysisResult as SemanticAnalysisResult } from '../analysis/semanticAnalysisService.js';
 
 export interface ContextAgentOptions {
   config: Config;
@@ -35,6 +36,9 @@ export class ContextAgent {
   
   // Milestone 4 components
   private layeredContextManager: LayeredContextManager;
+  
+  // Semantic analysis components
+  private semanticAnalysisService: SemanticAnalysisService | null = null;
 
   constructor(options: ContextAgentOptions) {
     this.config = options.config;
@@ -46,6 +50,11 @@ export class ContextAgent {
     this.staticAnalyzer = new StaticAnalyzer(this.projectDir);
     this.knowledgeGraph = new KnowledgeGraph(this.projectDir);
     this.layeredContextManager = new LayeredContextManager(this.knowledgeGraph);
+    
+    // Initialize semantic analysis service if needed
+    if (this.config.getAnalysisMode() === AnalysisMode.LLM) {
+      this.semanticAnalysisService = new SemanticAnalysisService(this.config);
+    }
   }
 
   /**
@@ -115,16 +124,17 @@ export class ContextAgent {
   /**
    * Inject layered context into dynamic context system
    * Milestone 4: Better integration with dynamic context
-   * MODIFIED: Force enable context injection
+   * 
+   * 为确保系统健墮性和稳定性，始终尝试注入上下文，即使在错误情况下也提供最小上下文。
    */
   async injectContextIntoDynamicSystem(userInput?: string): Promise<void> {
     if (!this.initialized) {
       if (this.config.getDebugMode()) {
-        console.log('[ContextAgent] ⚠️ Not initialized for injection, attempting to initialize now...');
+        console.log('[ContextAgent] Auto-initializing for dynamic context injection...');
       }
       await this.initialize();
       if (!this.initialized) {
-        console.log('[ContextAgent] ❌ Failed to initialize for injection, skipping');
+        console.log('[ContextAgent] Initialization failed for injection, skipping');
         return;
       }
     }
@@ -133,10 +143,10 @@ export class ContextAgent {
       // Filter out <think> tags from user input before processing
       const filteredUserInput = userInput ? this.filterThinkingContent(userInput) : userInput;
       
-      // FORCE ENABLE: Always get context, even if empty
+      // 始终获取上下文，即使为空也要尝试
       const contextOutput = await this.getContextForPrompt(filteredUserInput);
       
-      // FORCE ENABLE: Inject context even if it seems empty
+      // 注入上下文，即使看起来为空也要尝试
       const contextManager = this.config.getContextManager();
       
       // Clear previous ContextAgent dynamic context and inject new layered content
@@ -147,24 +157,24 @@ export class ContextAgent {
         contextManager.addDynamicContext(contextOutput);
         
         if (this.config.getDebugMode()) {
-          console.log(`[ContextAgent] ✅ FORCE ENABLED injection: ${contextOutput.length} characters into dynamic context`);
+          console.log(`[ContextAgent] Injected ${contextOutput.length} characters into dynamic context`);
           if (userInput !== filteredUserInput) {
-            console.log(`[ContextAgent] ✅ Filtered <think> tags from user input`);
+            console.log(`[ContextAgent] Filtered <think> tags from user input`);
           }
         }
       } else {
-        // FORCE ENABLE: Add minimal context even if generation failed
+        // 即使生成失败也添加最小上下文
         const minimalContext = '# 🧠 Project Context (Minimal)\n*ContextAgent is active but found no specific context for this input*';
         contextManager.addDynamicContext(minimalContext);
         
         if (this.config.getDebugMode()) {
-          console.log(`[ContextAgent] ⚠️ FORCE ENABLED minimal context injection due to empty output`);
+          console.log(`[ContextAgent] Added minimal context due to empty output`);
         }
       }
     } catch (error) {
       console.error('[ContextAgent] ❌ Failed to inject context into dynamic system:', error);
       
-      // FORCE ENABLE: Even on error, inject minimal context
+      // 即使出现错误也注入最小上下文以保证系统健墮性
       try {
         const contextManager = this.config.getContextManager();
         const errorContext = '# 🧠 Project Context (Error Recovery)\n*ContextAgent encountered errors but is still active*';
@@ -172,10 +182,10 @@ export class ContextAgent {
         contextManager.addDynamicContext(errorContext);
         
         if (this.config.getDebugMode()) {
-          console.log(`[ContextAgent] ✅ FORCE ENABLED error recovery context injection`);
+          console.log(`[ContextAgent] Error recovery context injection completed`);
         }
       } catch (recoveryError) {
-        console.error('[ContextAgent] ❌ Even error recovery injection failed:', recoveryError);
+        console.error('[ContextAgent] Error recovery injection failed:', recoveryError);
       }
     }
   }
@@ -183,22 +193,24 @@ export class ContextAgent {
   /**
    * Get context for prompt injection
    * Milestone 4: Intelligent layered context injection with token budget management
-   * MODIFIED: Force enable core context injection and disable token budget limits
+   * 
+   * 为确保功能完整性和最佳上下文分析效果，L0/L1缓存默认开启，且不设Token限制。
+   * 这种设计确保了语义片段始终能够从知识图谱中被正确提取和注入。
    */
   async getContextForPrompt(userInput?: string): Promise<string> {
     if (!this.initialized) {
       if (this.config.getDebugMode()) {
-        console.log('[ContextAgent] ⚠️ Not initialized, attempting to initialize now...');
+        console.log('[ContextAgent] Auto-initializing for context injection...');
       }
       await this.initialize();
       if (!this.initialized) {
-        console.log('[ContextAgent] ❌ Failed to initialize, returning empty context');
+        console.log('[ContextAgent] Initialization failed, returning empty context');
         return '';
       }
     }
 
     if (this.config.getDebugMode()) {
-      console.log('[ContextAgent] 🚀 FORCE ENABLED getContextForPrompt called (Milestone 4: layered context injection)');
+      console.log('[ContextAgent] Context injection called (Milestone 4: layered context injection)');
     }
     
     try {
@@ -211,49 +223,73 @@ export class ContextAgent {
         // Don't return empty - proceed with context generation even without graph data
       }
 
-      // FORCE ENABLE: Use layered context manager with unlimited budget
-      // Ignore configured budget - use unlimited budget to ensure core context is always included
-      const unlimitedBudget = 100000; // Effectively unlimited tokens
+      // 使用分层上下文管理器，采用无限制Token预算确保核心上下文始终被包含
+      const unlimitedBudget = 100000; // 实际上的无限制Token数
       const layeredResult = await this.layeredContextManager.generateLayeredContext(
         userInput || '',
-        unlimitedBudget // Force unlimited budget
+        unlimitedBudget // 无限制预算确保完整上下文
       );
       
       if (this.config.getDebugMode()) {
-        console.log(`[ContextAgent] 🚀 FORCE ENABLED layered context: ${layeredResult.totalTokens} tokens across ${layeredResult.layers.length} layers`);
-        console.log(`[ContextAgent] ✅ Context layers generated: ${layeredResult.layers.map(l => l.level).join(', ')}`);
+        console.log(`[ContextAgent] Generated layered context: ${layeredResult.totalTokens} tokens across ${layeredResult.layers.length} layers`);
+        console.log(`[ContextAgent] Context layers generated: ${layeredResult.layers.map(l => l.level).join(', ')}`);
+      }
+      
+      // 执行语义分析（如果已配置）
+      let semanticContext = '';
+      if (userInput) {
+        const semanticResult = await this.performSemanticAnalysis(userInput);
+        if (semanticResult) {
+          semanticContext = this.formatSemanticAnalysisForContext(semanticResult);
+        }
       }
       
       // Format the layered context for model consumption
       const formattedContext = this.layeredContextManager.formatLayeredContextForModel(layeredResult);
       
-      // FORCE ENABLE: Always provide context, even if layers are empty
-      if (layeredResult.layers.length === 0) {
+      // 合并语义分析结果和分层上下文
+      const contextSections: string[] = [];
+      
+      if (semanticContext) {
+        contextSections.push(semanticContext);
+      }
+      
+      if (formattedContext) {
+        contextSections.push(formattedContext);
+      }
+      
+      // 始终提供上下文，即使层级为空也使用后备上下文
+      if (contextSections.length === 0) {
         if (this.config.getDebugMode()) {
-          console.log('[ContextAgent] ⚠️ No layers generated, using fallback context');
+          console.log('[ContextAgent] No context generated, using fallback context');
         }
         const fallbackContext = this.generateFallbackContext(stats);
         return fallbackContext;
       }
       
+      const finalContext = contextSections.join('\n\n---\n\n');
+      
       if (this.config.getDebugMode()) {
-        console.log(`[ContextAgent] ✅ FORCE ENABLED context injection complete: ${formattedContext.length} characters`);
+        console.log(`[ContextAgent] Context injection complete: ${finalContext.length} characters`);
+        if (semanticContext) {
+          console.log('[ContextAgent] 包含语义分析结果');
+        }
       }
       
-      return formattedContext;
+      return finalContext;
       
     } catch (error) {
       console.error('[ContextAgent] ❌ Failed to generate layered context:', error);
       
-      // FORCE ENABLE: Always provide fallback context
+      // 始终提供后备上下文，确保系统健壮性
       try {
         const stats = this.knowledgeGraph.getStatistics();
         const fallbackContext = this.generateFallbackContext(stats);
-        console.log('[ContextAgent] ✅ Using fallback context due to error');
+        console.log('[ContextAgent] Using fallback context due to error');
         return fallbackContext;
       } catch (fallbackError) {
-        console.error('[ContextAgent] ❌ Fallback context generation also failed:', fallbackError);
-        // Return basic context as absolute last resort
+        console.error('[ContextAgent] Fallback context generation also failed:', fallbackError);
+        // 最后的紧急后备上下文
         return '# 🧠 Project Context (Emergency Fallback)\n*ContextAgent encountered errors but is providing minimal context*';
       }
     }
@@ -600,6 +636,72 @@ export class ContextAgent {
   private filterThinkingContent(content: string): string {
     // Remove content between <think> and </think> tags (case insensitive, multiline)
     return content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  }
+
+  /**
+   * 执行语义分析（基于配置的分析模式）
+   * @param userInput 用户输入文本
+   * @returns 语义分析结果或null（如果未启用或失败）
+   */
+  private async performSemanticAnalysis(userInput: string): Promise<SemanticAnalysisResult | null> {
+    const analysisMode = this.config.getAnalysisMode();
+    
+    if (analysisMode !== AnalysisMode.LLM || !this.semanticAnalysisService) {
+      return null;
+    }
+
+    try {
+      if (this.config.getDebugMode()) {
+        console.log('[ContextAgent] 执行LLM语义分析...');
+      }
+      
+      const result = await this.semanticAnalysisService.analyze(userInput);
+      
+      if (this.config.getDebugMode()) {
+        console.log(`[ContextAgent] 语义分析完成: 发现${result.entities.length}个实体, 意图: ${result.intent}`);
+      }
+      
+      return result;
+    } catch (error) {
+      if (this.config.getDebugMode()) {
+        console.warn('[ContextAgent] 语义分析失败:', error);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * 将语义分析结果集成到上下文中
+   * @param semanticResult 语义分析结果
+   * @returns 格式化的语义上下文字符串
+   */
+  private formatSemanticAnalysisForContext(semanticResult: SemanticAnalysisResult): string {
+    const sections: string[] = [];
+    
+    sections.push('# 🧠 语义分析结果');
+    sections.push(`**用户意图**: ${semanticResult.intent}`);
+    sections.push(`**置信度**: ${(semanticResult.confidence * 100).toFixed(1)}%`);
+    
+    if (semanticResult.entities.length > 0) {
+      sections.push('');
+      sections.push('**识别的实体**:');
+      semanticResult.entities.forEach(entity => {
+        sections.push(`- ${entity}`);
+      });
+    }
+    
+    if (semanticResult.keyConcepts.length > 0) {
+      sections.push('');
+      sections.push('**关键概念**:');
+      semanticResult.keyConcepts.forEach(concept => {
+        sections.push(`- ${concept}`);
+      });
+    }
+    
+    sections.push('');
+    sections.push(`*分析耗时: ${semanticResult.analysisTime}ms*`);
+    
+    return sections.join('\n');
   }
 
   /**

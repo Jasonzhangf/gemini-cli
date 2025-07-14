@@ -71,18 +71,19 @@ export class LayeredContextManager {
 
   /**
    * Generate layered context based on user input with intelligent prioritization
-   * MODIFIED: Force enable core context injection and disable token budget limits
+   * 
+   * 为确保功能完整性和最佳上下文分析效果，禁用Token预算限制，强制启用核心上下文注入。
    */
   async generateLayeredContext(
     userInput: string,
     maxTokens: number = this.defaultMaxTokens
   ): Promise<LayeredContextResult> {
-    // Force disable token budget limits - set to very high value
-    const forceMaxTokens = 100000; // Effectively unlimited
+    // 禁用Token预算限制，设置为非常高的值以确保完整上下文
+    const unlimitedTokens = 100000; // 实际上的无限制
     const budget: TokenBudget = {
-      maxTokens: forceMaxTokens,
+      maxTokens: unlimitedTokens,
       usedTokens: 0,
-      remainingTokens: forceMaxTokens
+      remainingTokens: unlimitedTokens
     };
 
     const layers: ContextLayer[] = [];
@@ -90,16 +91,16 @@ export class LayeredContextManager {
     let truncationDetails = '';
 
     try {
-      // Step 1: Generate L0 (Core Context) - FORCE ENABLE, highest priority
+      // 步骤 1: 生成 L0 (核心上下文) - 最高优先级，必须包含
       const l0Context = await this.generateL0Context(userInput, budget);
       if (l0Context) {
-        // L0 is ALWAYS included, regardless of budget
+        // L0 始终被包含，不受预算限制
         layers.push(l0Context);
         this.consumeBudget(l0Context.estimatedTokens, budget);
         
-        console.log(`[LayeredContextManager] ✅ FORCE ENABLED L0 context with ${l0Context.coreEntities.length} entities and ${l0Context.directRelations.length} relations`);
+        console.log(`[LayeredContextManager] L0 context generated with ${l0Context.coreEntities.length} entities and ${l0Context.directRelations.length} relations`);
       } else {
-        // If L0 context generation fails, force create a minimal one
+        // 如果 L0 上下文生成失败，强制创建一个最小的
         const fallbackEntities = this.extractCoreEntitiesFromInput(userInput);
         const fallbackL0: L0CoreContext = {
           level: 'L0',
@@ -110,18 +111,18 @@ export class LayeredContextManager {
         };
         layers.push(fallbackL0);
         this.consumeBudget(fallbackL0.estimatedTokens, budget);
-        console.log(`[LayeredContextManager] ✅ FORCE CREATED fallback L0 context with ${fallbackEntities.length} entities`);
+        console.log(`[LayeredContextManager] Created fallback L0 context with ${fallbackEntities.length} entities`);
       }
 
-      // Step 2: Generate L1 (Immediate Context) - high priority, no budget constraint
+      // 步骤 2: 生成 L1 (直接上下文) - 高优先级，无预算约束
       const l1Context = await this.generateL1Context(userInput, l0Context?.coreEntities || [], budget);
       if (l1Context) {
         layers.push(l1Context);
         this.consumeBudget(l1Context.estimatedTokens, budget);
-        console.log(`[LayeredContextManager] ✅ L1 context added with ${l1Context.relatedEntities.length} related entities`);
+        console.log(`[LayeredContextManager] L1 context added with ${l1Context.relatedEntities.length} related entities`);
       }
 
-      // Step 3: Generate L2 (Extended Context) - medium priority, no budget constraint
+      // 步骤 3: 生成 L2 (扩展上下文) - 中等优先级，无预算约束
       const allEntities = [
         ...(l0Context?.coreEntities || []),
         ...(layers.find(l => l.level === 'L1') as L1ImmediateContext)?.relatedEntities || []
@@ -130,27 +131,27 @@ export class LayeredContextManager {
       if (l2Context) {
         layers.push(l2Context);
         this.consumeBudget(l2Context.estimatedTokens, budget);
-        console.log(`[LayeredContextManager] ✅ L2 context added with ${l2Context.neighboringEntities.length} neighboring entities`);
+        console.log(`[LayeredContextManager] L2 context added with ${l2Context.neighboringEntities.length} neighboring entities`);
       }
 
-      // Step 4: Generate L3 (Global Context) - lowest priority, no budget constraint
+      // 步骤 4: 生成 L3 (全局上下文) - 最低优先级，无预算约束
       const l3Context = await this.generateL3Context(budget);
       if (l3Context) {
         layers.push(l3Context);
         this.consumeBudget(l3Context.estimatedTokens, budget);
-        console.log(`[LayeredContextManager] ✅ L3 context added with project summary`);
+        console.log(`[LayeredContextManager] L3 context added with project summary`);
       }
 
     } catch (error) {
       console.error('[LayeredContextManager] Error generating layered context:', error);
     }
 
-    console.log(`[LayeredContextManager] 🚀 FORCE ENABLED context generation complete: ${layers.length} layers, ${budget.usedTokens} tokens`);
+    console.log(`[LayeredContextManager] Context generation complete: ${layers.length} layers, ${budget.usedTokens} tokens`);
 
     return {
       layers,
       totalTokens: budget.usedTokens,
-      truncated: false, // Never truncated with unlimited budget
+      truncated: false, // 由于采用无限制预算，不会被截断
       truncationDetails: undefined
     };
   }

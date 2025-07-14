@@ -5,6 +5,7 @@
  */
 
 import { GenerateContentResponse, Part, FunctionCall } from '@google/genai';
+import { filterThinkTags } from './fileUtils.js';
 
 export function getResponseText(
   response: GenerateContentResponse,
@@ -20,7 +21,10 @@ export function getResponseText(
   if (textSegments.length === 0) {
     return undefined;
   }
-  return textSegments.join('');
+  
+  // 在返回前过滤掉模型的思维过程标签
+  const rawText = textSegments.join('');
+  return filterThinkTags(rawText);
 }
 
 export function getResponseTextFromParts(parts: Part[]): string | undefined {
@@ -34,7 +38,10 @@ export function getResponseTextFromParts(parts: Part[]): string | undefined {
   if (textSegments.length === 0) {
     return undefined;
   }
-  return textSegments.join('');
+  
+  // 在返回前过滤掉模型的思维过程标签
+  const rawText = textSegments.join('');
+  return filterThinkTags(rawText);
 }
 
 export function getFunctionCalls(

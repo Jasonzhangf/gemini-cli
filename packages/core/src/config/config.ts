@@ -69,6 +69,18 @@ export enum ApprovalMode {
   YOLO = 'yolo',
 }
 
+export enum AnalysisMode {
+  STATIC = 'static',
+  LLM = 'llm',
+  VECTOR = 'vector',
+}
+
+export interface AnalysisSettings {
+  mode: AnalysisMode;
+  timeout?: number;
+  enableCache?: boolean;
+}
+
 export interface AccessibilitySettings {
   disableLoadingPhrases?: boolean;
 }
@@ -162,6 +174,7 @@ export interface ConfigParameters {
   activeExtensions?: ActiveExtension[];
   noBrowser?: boolean;
   openaiMode?: boolean;
+  analysis?: AnalysisSettings;
 }
 
 export class Config {
@@ -212,6 +225,7 @@ export class Config {
   private promptEnhancer: PromptEnhancer | null = null;
   private toolCallInterceptor: ToolCallInterceptor | null = null;
   private contextAgent: ContextAgent | null = null;
+  private readonly analysisSettings: AnalysisSettings;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -258,6 +272,11 @@ export class Config {
     this._activeExtensions = params.activeExtensions ?? [];
     this.noBrowser = params.noBrowser ?? false;
     this.openaiMode = params.openaiMode ?? false;
+    this.analysisSettings = {
+      mode: params.analysis?.mode ?? AnalysisMode.STATIC,
+      timeout: params.analysis?.timeout ?? 30000,
+      enableCache: params.analysis?.enableCache ?? true,
+    };
 
     if (this.debugMode) {
       console.log(`[Gemini Client] Initializing, OpenAI mode: ${this.openaiMode}`);
@@ -405,6 +424,14 @@ export class Config {
 
   getProjectRoot(): string {
     return this.targetDir;
+  }
+
+  getAnalysisSettings(): AnalysisSettings {
+    return this.analysisSettings;
+  }
+
+  getAnalysisMode(): AnalysisMode {
+    return this.analysisSettings.mode;
   }
 
   getToolRegistry(): Promise<ToolRegistry> {

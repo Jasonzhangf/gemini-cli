@@ -10,6 +10,7 @@ import { Content, Tool } from '@google/genai';
 import { ServerGeminiStreamEvent, GeminiEventType } from '../core/turn.js';
 import { Config } from '../config/config.js';
 import { DebugLogger } from '../context/debugLogger.js';
+import { filterThinkTags } from '../utils/fileUtils.js';
 
 export interface OpenAIHijackConfig {
   apiKey: string;
@@ -1696,10 +1697,10 @@ The user will execute the tools and provide you with the results. Use the result
 
   /**
    * Filter out thinking content between <think> </think> tags
+   * 使用标准工具函数确保一致性
    */
   private filterThinkingContent(content: string): string {
-    // Remove content between <think> and </think> tags (case insensitive, multiline)
-    return content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    return filterThinkTags(content);
   }
 
   /**
