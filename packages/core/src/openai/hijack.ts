@@ -908,12 +908,19 @@ The user will execute the tools and provide you with the results. Use the result
     signal: AbortSignal,
     prompt_id: string
   ): AsyncGenerator<ServerGeminiStreamEvent, any> {
-    // Ensure we have a turn ID for tool responses
-    if (!this.currentTurnId) {
-      this.currentTurnId = `turn-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-    }
+    // Start a new turn for tool responses
+    this.currentTurnId = `turn-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     
     const toolResults = this.extractToolResultsFromRequest(request);
+    
+    // Start new debug turn for tool response
+    if (this.debugMode && this.debugLogger) {
+      const toolResultMessage = this.formatToolResultsForModel(toolResults);
+      this.debugLogger.startTurn(this.currentTurnId, `Tool results: ${toolResults.map(r => r.name).join(', ')}`);
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] Started new debug turn for tool response:', this.currentTurnId);
+      }
+    }
     
     // Log tool results to debug logger
     if (this.debugLogger && toolResults.length > 0) {
@@ -979,16 +986,11 @@ The user will execute the tools and provide you with the results. Use the result
     // Add tool result to conversation history
     this.conversationHistory.push({ role: 'user' as const, content: toolResultMessage });
 
-    // Process model response and finalize the turn after tool completion
+    // Process model response - turn finalization will happen in processModelResponse
     yield* this.processModelResponse(toolResultMessage, signal, prompt_id, true);
     
-    // Finalize debug turn after tool completion
-    if (this.debugLogger && this.currentTurnId) {
-      await this.debugLogger.finalizeTurn();
-      if (this.debugMode) {
-        console.log('[OpenAI Hijack] ✅ Turn finalized after tool completion for turn:', this.currentTurnId);
-      }
-    }
+    // Note: Turn finalization is handled in processModelResponse finally block
+    // to avoid duplicate finalization
   }
 
   /**
@@ -1267,35 +1269,17 @@ The user will execute the tools and provide you with the results. Use the result
         }
       }
       
-      // Enhanced finalization logic for better debug logging
+      // Enhanced finalization logic - always finalize turns to ensure all conversations are captured
       if (this.debugLogger && this.currentTurnId) {
-        if (!toolCalls || toolCalls.length === 0) {
-          // No tool calls - finalize immediately
+        try {
           await this.debugLogger.finalizeTurn();
           if (this.debugMode) {
-            console.log('[OpenAI Hijack] ✅ Turn finalized successfully for turn (no tools):', this.currentTurnId);
+            console.log('[OpenAI Hijack] ✅ Turn finalized successfully for turn:', this.currentTurnId);
           }
-        } else {
-          // Has tool calls - schedule finalization with timeout fallback
+        } catch (error) {
           if (this.debugMode) {
-            console.log('[OpenAI Hijack] Deferring turn finalization - waiting for tool completion');
+            console.warn('[OpenAI Hijack] Turn finalization failed:', error);
           }
-          
-          // Add a fallback timer to ensure turns get finalized even if tool flow breaks
-          setTimeout(async () => {
-            if (this.debugLogger && this.currentTurnId) {
-              try {
-                await this.debugLogger.finalizeTurn();
-                if (this.debugMode) {
-                  console.log('[OpenAI Hijack] ⏰ Turn finalized via timeout fallback:', this.currentTurnId);
-                }
-              } catch (error) {
-                if (this.debugMode) {
-                  console.warn('[OpenAI Hijack] Fallback finalization failed:', error);
-                }
-              }
-            }
-          }, 30000); // 30 second fallback timeout
         }
       } else if (this.debugMode) {
         console.log('[OpenAI Hijack] Skipping finalize - debugLogger:', !!this.debugLogger, 'turnId:', this.currentTurnId);

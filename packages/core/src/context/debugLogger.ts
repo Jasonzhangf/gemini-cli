@@ -36,6 +36,7 @@ export class DebugLogger {
   private enabled: boolean;
   private currentTurn: Partial<DebugTurnData> = {};
   private turnCounter: number = 0;
+  private finalizedTurns: Set<string> = new Set(); // Track finalized turn IDs
 
   constructor(sessionId: string, projectDir: string, enabled: boolean = false) {
     this.sessionId = sessionId;
@@ -152,6 +153,12 @@ export class DebugLogger {
       return;
     }
 
+    // Check if this turn has already been finalized
+    if (this.finalizedTurns.has(this.currentTurn.turnId)) {
+      console.log(`[DebugLogger] Turn ${this.currentTurn.turnId} already finalized, skipping`);
+      return;
+    }
+
     console.log(`[DebugLogger] Finalizing turn ${this.turnCounter}: ${this.currentTurn.turnId}...`);
 
     try {
@@ -182,6 +189,9 @@ export class DebugLogger {
         hasSystemContext: !!this.currentTurn.systemContext,
         hasTaskContext: !!this.currentTurn.taskContext
       });
+      
+      // Mark this turn as finalized
+      this.finalizedTurns.add(this.currentTurn.turnId);
       
     } catch (error) {
       console.warn('[DebugLogger] Failed to write turn data:', error);
