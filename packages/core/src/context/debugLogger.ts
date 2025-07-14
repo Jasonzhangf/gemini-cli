@@ -201,6 +201,9 @@ export class DebugLogger {
       const markdownPath = filepath.replace('.json', '.md');
       await fs.writeFile(markdownPath, markdownContent, 'utf-8');
       
+      // Write separate component files for easier navigation
+      await this.writeSeparateComponentFiles(turnNumber, timestamp);
+      
       console.log(`[DebugLogger] ✅ Turn ${this.currentTurn.turnId} logged to: ${filepath}`);
       console.log(`[DebugLogger] Turn data summary:`, {
         hasUserInput: !!this.currentTurn.userInput,
@@ -218,6 +221,226 @@ export class DebugLogger {
     } finally {
       this.currentTurn = {};
     }
+  }
+
+  private async writeSeparateComponentFiles(turnNumber: string, timestamp: string) {
+    try {
+      const baseFilename = `turn-${turnNumber}-${this.currentTurn.turnId}-${timestamp}`;
+      const componentsDir = path.join(this.sessionDir, 'components');
+      
+      // Create components directory
+      await fs.mkdir(componentsDir, { recursive: true });
+      
+      // Write user query file
+      if (this.currentTurn.userInput) {
+        const userQueryPath = path.join(componentsDir, `${baseFilename}-user-query.md`);
+        const userQueryContent = `# User Query\n\n**Turn**: ${this.currentTurn.turnId}\n**Timestamp**: ${this.currentTurn.timestamp}\n\n---\n\n${this.currentTurn.userInput}`;
+        await fs.writeFile(userQueryPath, userQueryContent, 'utf-8');
+      }
+      
+      // Write dynamic context file
+      if (this.currentTurn.dynamicContext) {
+        const dynamicContextPath = path.join(componentsDir, `${baseFilename}-dynamic-context.md`);
+        const dynamicContextContent = this.formatDynamicContextForSeparateFile(this.currentTurn.dynamicContext);
+        await fs.writeFile(dynamicContextPath, dynamicContextContent, 'utf-8');
+      }
+      
+      // Write static context file
+      if (this.currentTurn.staticContext) {
+        const staticContextPath = path.join(componentsDir, `${baseFilename}-static-context.md`);
+        const staticContextContent = this.formatStaticContextForSeparateFile(this.currentTurn.staticContext);
+        await fs.writeFile(staticContextPath, staticContextContent, 'utf-8');
+      }
+      
+      // Write model response file
+      if (this.currentTurn.modelResponse) {
+        const modelResponsePath = path.join(componentsDir, `${baseFilename}-model-response.md`);
+        const modelResponseContent = `# Model Response\n\n**Turn**: ${this.currentTurn.turnId}\n**Timestamp**: ${this.currentTurn.timestamp}\n\n---\n\n${this.currentTurn.modelResponse}`;
+        await fs.writeFile(modelResponsePath, modelResponseContent, 'utf-8');
+      }
+      
+      // Write tool guidance file (from sent to model data)
+      if (this.currentTurn.sentToModel?.systemPrompt) {
+        const toolGuidancePath = path.join(componentsDir, `${baseFilename}-tool-guidance.md`);
+        const toolGuidanceContent = this.formatToolGuidanceForSeparateFile(this.currentTurn.sentToModel.systemPrompt);
+        await fs.writeFile(toolGuidancePath, toolGuidanceContent, 'utf-8');
+      }
+      
+      // Write enhanced system prompt file (complete context)
+      if (this.currentTurn.sentToModel?.enhancedSystemPrompt) {
+        const enhancedPromptPath = path.join(componentsDir, `${baseFilename}-enhanced-system-prompt.md`);
+        const enhancedPromptContent = `# Enhanced System Prompt\n\n**Turn**: ${this.currentTurn.turnId}\n**Timestamp**: ${this.currentTurn.timestamp}\n\n---\n\n${this.currentTurn.sentToModel.enhancedSystemPrompt}`;
+        await fs.writeFile(enhancedPromptPath, enhancedPromptContent, 'utf-8');
+      }
+      
+      console.log(`[DebugLogger] ✅ Separate component files written to: ${componentsDir}`);
+      
+    } catch (error) {
+      console.warn('[DebugLogger] Failed to write separate component files:', error);
+    }
+  }
+
+  private formatDynamicContextForSeparateFile(dynamicContext: any): string {
+    const sections: string[] = [];
+    
+    sections.push('# Dynamic Context');
+    sections.push(`**Turn**: ${this.currentTurn.turnId}`);
+    sections.push(`**Timestamp**: ${this.currentTurn.timestamp}`);
+    sections.push('');
+    sections.push('---');
+    sections.push('');
+    
+    // Check if it's the new structured dynamic context
+    if (dynamicContext.recentOperations || dynamicContext.runtimeInfo || dynamicContext.userInstructions) {
+      if (dynamicContext.recentOperations && Array.isArray(dynamicContext.recentOperations)) {
+        sections.push('## Recent Operations');
+        sections.push('');
+        sections.push(dynamicContext.recentOperations.join('\n'));
+        sections.push('');
+      }
+
+      if (dynamicContext.runtimeInfo && Array.isArray(dynamicContext.runtimeInfo)) {
+        sections.push('## Runtime Info');
+        sections.push('');
+        sections.push(dynamicContext.runtimeInfo.join('\n'));
+        sections.push('');
+      }
+
+      if (dynamicContext.userInstructions && Array.isArray(dynamicContext.userInstructions)) {
+        sections.push('## User Instructions');
+        sections.push('');
+        sections.push(dynamicContext.userInstructions.join('\n'));
+        sections.push('');
+      }
+
+      if (dynamicContext.errorHistory && Array.isArray(dynamicContext.errorHistory) && dynamicContext.errorHistory.length > 0) {
+        sections.push('## Error History');
+        sections.push('');
+        sections.push(dynamicContext.errorHistory.join('\n'));
+        sections.push('');
+      }
+    } else {
+      // Fallback to JSON for other formats
+      sections.push('## Dynamic Context Data');
+      sections.push('');
+      sections.push('```json');
+      sections.push(JSON.stringify(dynamicContext, null, 2));
+      sections.push('```');
+    }
+    
+    return sections.join('\n');
+  }
+
+  private formatStaticContextForSeparateFile(staticContext: any): string {
+    const sections: string[] = [];
+    
+    sections.push('# Static Context');
+    sections.push(`**Turn**: ${this.currentTurn.turnId}`);
+    sections.push(`**Timestamp**: ${this.currentTurn.timestamp}`);
+    sections.push('');
+    sections.push('---');
+    sections.push('');
+    
+    if (staticContext.globalRules && Array.isArray(staticContext.globalRules) && staticContext.globalRules.length > 0) {
+      sections.push('## Global Rules');
+      sections.push('');
+      sections.push(staticContext.globalRules.join('\n\n'));
+      sections.push('');
+    }
+
+    if (staticContext.projectRules && Array.isArray(staticContext.projectRules) && staticContext.projectRules.length > 0) {
+      sections.push('## Project Rules');
+      sections.push('');
+      sections.push(staticContext.projectRules.join('\n\n'));
+      sections.push('');
+    }
+
+    if (staticContext.globalMemories && Array.isArray(staticContext.globalMemories) && staticContext.globalMemories.length > 0) {
+      sections.push('## Global Memories');
+      sections.push('');
+      sections.push(staticContext.globalMemories.join('\n\n'));
+      sections.push('');
+    }
+
+    if (staticContext.projectMemories && Array.isArray(staticContext.projectMemories) && staticContext.projectMemories.length > 0) {
+      sections.push('## Project Memories');
+      sections.push('');
+      sections.push(staticContext.projectMemories.join('\n\n'));
+      sections.push('');
+    }
+
+    if (staticContext.projectStructure) {
+      sections.push('## Project Structure');
+      sections.push('');
+      sections.push('```');
+      sections.push(staticContext.projectStructure);
+      sections.push('```');
+      sections.push('');
+    }
+
+    if (staticContext.dependencies && Array.isArray(staticContext.dependencies) && staticContext.dependencies.length > 0) {
+      sections.push('## Dependencies');
+      sections.push('');
+      sections.push(staticContext.dependencies.join('\n\n'));
+      sections.push('');
+    }
+
+    if (staticContext.gitStatus) {
+      sections.push('## Git Status');
+      sections.push('');
+      sections.push('```');
+      sections.push(staticContext.gitStatus);
+      sections.push('```');
+      sections.push('');
+    }
+
+    // If no specific content, show raw JSON
+    if (sections.length === 5) { // Only header sections
+      sections.push('## Static Context Data');
+      sections.push('');
+      sections.push('```json');
+      sections.push(JSON.stringify(staticContext, null, 2));
+      sections.push('```');
+    }
+    
+    return sections.join('\n');
+  }
+
+  private formatToolGuidanceForSeparateFile(systemPrompt: string): string {
+    const sections: string[] = [];
+    
+    sections.push('# Tool Guidance');
+    sections.push(`**Turn**: ${this.currentTurn.turnId}`);
+    sections.push(`**Timestamp**: ${this.currentTurn.timestamp}`);
+    sections.push('');
+    sections.push('---');
+    sections.push('');
+    
+    // Extract tool guidance section from system prompt
+    // Look for tool-related sections
+    const toolSections = systemPrompt.split('\n').filter(line => 
+      line.includes('tool') || 
+      line.includes('Tool') || 
+      line.includes('TOOL') ||
+      line.includes('function') ||
+      line.includes('available') ||
+      line.includes('Available')
+    );
+    
+    if (toolSections.length > 0) {
+      sections.push('## Tool-Related System Prompt Sections');
+      sections.push('');
+      sections.push(toolSections.join('\n'));
+      sections.push('');
+      sections.push('---');
+      sections.push('');
+    }
+    
+    sections.push('## Complete System Prompt');
+    sections.push('');
+    sections.push(systemPrompt);
+    
+    return sections.join('\n');
   }
 
   private formatTurnAsMarkdown(turn: DebugTurnData): string {

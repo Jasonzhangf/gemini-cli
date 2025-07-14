@@ -177,27 +177,24 @@ export class StandardContextIntegrator {
     // 从历史记录中提取最近的用户指令（用于上下文连贯性）
     const userInstructions = this.extractUserInstructions(existingContext);
     
-    // 构建结构化的动态上下文 - 包含实际的ContextAgent内容
+    // 构建结构化的动态上下文 - 直接使用ContextAgent注入的内容
     const recentOperations: string[] = [];
     
-    // 如果有ContextAgent内容，包含实际的layered context内容
+    // 如果有ContextAgent内容，直接使用它们（它们已经是格式化的内容）
     if (contextAgentContent.length > 0) {
-      recentOperations.push(`ContextAgent layered context (${contextAgentContent.length} entries):`);
-      
-      // 添加实际的ContextAgent生成的内容
-      contextAgentContent.forEach((content, index) => {
-        recentOperations.push(`L${index}: ${content}`);
-      });
-      
-      recentOperations.push(`Dynamic context updated: ${new Date().toLocaleTimeString()}`);
+      // 直接添加ContextAgent生成的内容，不要重新格式化
+      recentOperations.push(...contextAgentContent);
+      recentOperations.push(`\n📍 Context updated: ${new Date().toLocaleTimeString()}`);
     } else {
-      recentOperations.push(`Session started: ${this.config.getSessionId()}`);
-      recentOperations.push(`Working directory: ${this.projectDir}`);
+      // 如果没有ContextAgent内容，显示会话基本信息
+      recentOperations.push(`📍 Session: ${this.config.getSessionId()}`);
+      recentOperations.push(`📂 Working directory: ${this.projectDir}`);
+      recentOperations.push(`⏰ No dynamic context available yet`);
     }
     
     return {
       recentOperations,
-      errorHistory: [], // 错误历史保持为空或从其他地方收集
+      errorHistory: this.extractErrorHistory(), // 实际提取错误历史
       runtimeInfo,
       userInstructions
     };
@@ -360,7 +357,7 @@ export class StandardContextIntegrator {
   /**
    * 将标准化上下文格式化为模型可读的字符串
    */
-  formatStandardContextForModel(context: StandardContext): string {
+  formatStandardContextForModel(context: StandardContext, saveDebug: boolean = true): string {
     const sections: string[] = [];
 
     // 1. 系统上下文
@@ -375,10 +372,10 @@ export class StandardContextIntegrator {
     // 4. 任务上下文
     sections.push(this.formatTaskContext(context.task));
 
-    const formattedContext = sections.join('\n\n' + '='.repeat(80) + '\n\n');
+    const formattedContext = sections.join('\n\n' + '▀'.repeat(120) + '\n\n');
 
-    // Save memory context in debug mode
-    if (this.config?.getDebugMode()) {
+    // Save memory context in debug mode only when explicitly requested
+    if (saveDebug && this.config?.getDebugMode()) {
       this.saveDebugMemoryContext(context).catch(error => {
         console.error('[StandardContextIntegrator] Failed to save debug memory context:', error);
       });
@@ -398,9 +395,7 @@ export class StandardContextIntegrator {
 
 **工作目录**: ${context.workingDirectory}
 **会话时间**: ${context.timestamp}
-**会话ID**: ${context.sessionId}
-**可用工具**: ${context.tools.join(', ')}
-**系统能力**: ${context.capabilities.join(', ')}`);
+**会话ID**: ${context.sessionId}`);
 
     // 添加对话历史
     if (context.conversationHistory && context.conversationHistory.length > 0) {
@@ -696,10 +691,9 @@ ${context.userInstructions.join('\n')}`);
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      const { homedir } = await import('os');
 
-      // 创建调试目录
-      const debugDir = path.join(homedir(), '.gemini', 'debug', 'memory-contexts');
+      // 创建调试目录 - 使用项目目录而不是用户主目录
+      const debugDir = path.join(this.projectDir, '.gemini', 'debug', 'memory-contexts');
       await fs.mkdir(debugDir, { recursive: true });
 
       // 生成文件名（包含时间戳）

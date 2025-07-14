@@ -37,7 +37,7 @@ export class OpenAIHijackAdapter {
   private conversationHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [];
   private debugMode: boolean = false;
   private dangerousTools: Set<string> = new Set(['run_shell_command', 'write_file', 'replace']);
-  private complexTools: Set<string> = new Set(['write_file', 'replace', 'create_tasks']); // Tools requiring JSON format
+  private complexTools: Set<string> = new Set(['write_file', 'replace']); // Tools requiring JSON format
   
   // Content isolation system for complex parameters
   private readonly CONTENT_START_MARKER = '<*#*#CONTENT#*#*>';
@@ -1127,6 +1127,28 @@ The user will execute the tools and provide you with the results. Use the result
     const filteredUserMessage = this.filterThinkingContent(userMessage);
     this.conversationHistory.push({ role: 'user' as const, content: filteredUserMessage });
 
+    // Inject user context for dynamic analysis BEFORE model processing
+    try {
+      const contextAgent = this.coreConfig.getContextAgent();
+      if (contextAgent) {
+        if (this.debugMode) {
+          console.log('[OpenAI Hijack] Triggering ContextAgent for user input analysis');
+          console.log('[OpenAI Hijack] User input:', filteredUserMessage.substring(0, 100) + '...');
+        }
+        
+        // Update dynamic context based on user input
+        await contextAgent.injectContextIntoDynamicSystem(filteredUserMessage);
+        
+        if (this.debugMode) {
+          console.log('[OpenAI Hijack] ✅ ContextAgent updated dynamic context for user input');
+        }
+      }
+    } catch (contextAgentError) {
+      if (this.debugMode) {
+        console.warn('[OpenAI Hijack] ContextAgent failed during user input analysis:', contextAgentError);
+      }
+    }
+
     if (this.debugMode) {
       console.log('[OpenAI Hijack] Sending user message to model:', this.config.model);
       console.log('[OpenAI Hijack] Message length:', userMessage.length);
@@ -1252,44 +1274,14 @@ The user will execute the tools and provide you with the results. Use the result
         let contextComponents: any = {};
         let dynamicContextContent = '';
         
-        // First, get the core system prompt (enhanced if available, but extract dynamic context)
+        // Get the enhanced system prompt (this handles all context integration internally)
         try {
           const { getEnhancedSystemPromptIfAvailable } = await import('../context/index.js');
           
-          // Get the context manager to extract dynamic context separately
-          const contextManager = this.coreConfig.getContextManager();
-          const context = contextManager.getContext();
+          // Get enhanced system prompt - this already includes properly integrated context
+          systemPrompt = await getEnhancedSystemPromptIfAvailable(this.coreConfig, message);
           
-          // Extract both static and dynamic context for separate system message
-          const staticContextContent = contextManager.generateStaticContextContent();
-          
-          if (context.dynamicContext && context.dynamicContext.length > 0 || staticContextContent) {
-            const contextParts = [];
-            
-            if (staticContextContent && staticContextContent.trim()) {
-              contextParts.push(`**Static Context**:\n${staticContextContent}`);
-            }
-            
-            if (context.dynamicContext && context.dynamicContext.length > 0) {
-              contextParts.push(`**Dynamic Context**:\n${context.dynamicContext.join('\n')}`);
-            }
-            
-            dynamicContextContent = `# Contextual Information for Current Task\n\nThe following information is provided to help you understand the current project and codebase context for the user's request:\n\n${contextParts.join('\n\n')}`;
-            
-            // Temporarily clear dynamic context to prevent it from being included in system prompt
-            const originalDynamicContext = [...context.dynamicContext];
-            contextManager.clearDynamicContext();
-            
-            // Get enhanced system prompt without dynamic context
-            systemPrompt = await getEnhancedSystemPromptIfAvailable(this.coreConfig, message);
-            
-            // Restore dynamic context for subsequent operations
-            originalDynamicContext.forEach(ctx => contextManager.addDynamicContext(ctx));
-          } else {
-            systemPrompt = await getEnhancedSystemPromptIfAvailable(this.coreConfig, message);
-          }
-          
-          // Collect detailed context information for debug logging
+          // Collect detailed context information for debug logging only
           if (this.debugMode && this.debugLogger) {
             try {
               const standardIntegrator = this.coreConfig.getContextManager().getStandardContextIntegrator();
@@ -1302,11 +1294,17 @@ The user will execute the tools and provide you with the results. Use the result
                   taskContext: fullContext.task
                 };
                 
-                // Log each context component separately
+                // Log each context component separately for debugging
                 this.debugLogger.logSystemContext(contextComponents.systemContext);
                 this.debugLogger.logStaticContext(contextComponents.staticContext);
                 this.debugLogger.logDynamicContext(contextComponents.dynamicContext);
                 this.debugLogger.logTaskContext(contextComponents.taskContext);
+                
+                // Format the dynamic context content for display purposes only (no debug save)
+                const formattedDynamicContext = standardIntegrator.formatStandardContextForModel(fullContext, false);
+                if (formattedDynamicContext && formattedDynamicContext.trim()) {
+                  dynamicContextContent = formattedDynamicContext;
+                }
               }
             } catch (contextError) {
               console.warn('[OpenAI Hijack] Failed to collect detailed context for debug:', contextError);
@@ -1314,9 +1312,9 @@ The user will execute the tools and provide you with the results. Use the result
           }
           
           if (this.debugMode) {
-            console.log('[OpenAI Hijack] Using enhanced system prompt with context management');
+            console.log('[OpenAI Hijack] Using enhanced system prompt with integrated context management');
             if (dynamicContextContent) {
-              console.log('[OpenAI Hijack] Extracted dynamic context for separate injection:', dynamicContextContent.length, 'characters');
+              console.log('[OpenAI Hijack] Context content available for debug logging:', dynamicContextContent.length, 'characters');
             }
           }
         } catch (error) {
@@ -1332,19 +1330,11 @@ The user will execute the tools and provide you with the results. Use the result
         // Then add tool guidance if tools are available
         if (this.toolDeclarations.length > 0) {
           const toolGuidance = this.generateToolGuidance();
-          systemPrompt += '\n\n' + toolGuidance;
+          systemPrompt += '\n\n' + '●'.repeat(120) + '\n\n' + toolGuidance;
         }
         
-        // Construct messages: system prompt + context in one message, then conversation history
+        // Use the enhanced system prompt as-is (it already includes integrated context)
         let fullSystemPrompt = systemPrompt;
-        
-        // Append context information to the system prompt if available
-        if (dynamicContextContent && dynamicContextContent.trim().length > 0) {
-          fullSystemPrompt += '\n\n' + dynamicContextContent;
-          if (this.debugMode) {
-            console.log('[OpenAI Hijack] Added context information to system prompt');
-          }
-        }
         
         messages = [
           { role: 'system', content: fullSystemPrompt },

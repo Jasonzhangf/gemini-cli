@@ -434,12 +434,22 @@ export class Config {
     return this.analysisSettings.mode;
   }
 
+  setAnalysisSettings(settings: AnalysisSettings): void {
+    (this.analysisSettings as any).mode = settings.mode;
+    (this.analysisSettings as any).timeout = settings.timeout;
+    (this.analysisSettings as any).enableCache = settings.enableCache;
+  }
+
   getToolRegistry(): Promise<ToolRegistry> {
     return Promise.resolve(this.toolRegistry);
   }
 
   getDebugMode(): boolean {
     return this.debugMode;
+  }
+
+  setDebugMode(mode: boolean): void {
+    (this as any).debugMode = mode;
   }
 
   getOpenAIMode(): boolean {

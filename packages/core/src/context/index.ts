@@ -42,23 +42,8 @@ export async function getEnhancedSystemPromptIfAvailable(config: Config, userMes
     const promptEnhancer = config.getPromptEnhancer();
     let enhancedPrompt = await promptEnhancer.getEnhancedSystemPrompt(userMessage);
     
-    // ContextAgent integration (Milestone 4) - Trigger on user input
-    try {
-      const contextAgent = config.getContextAgent();
-      if (contextAgent?.isInitialized()) {
-        // Generate context based on user input for current turn
-        await contextAgent.injectContextIntoDynamicSystem(userMessage);
-        
-        if (config.getDebugMode()) {
-          console.log('[Context] ContextAgent layered context injected based on user input');
-        }
-      }
-    } catch (contextAgentError) {
-      // ContextAgent is optional, don't break the flow if it fails
-      if (config.getDebugMode()) {
-        console.log('[Context] ContextAgent not available or failed:', contextAgentError);
-      }
-    }
+    // ContextAgent integration is now handled in hijack.ts for better timing
+    // This avoids duplicate injection calls
     
     // 在每次调用时保存debug快照（如果启用了debug模式）
     if (config.getDebugMode()) {

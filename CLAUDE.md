@@ -137,3 +137,7 @@ For OpenAI compatibility issues:
 ## Terminology
 
 - `openai` indicates OpenAI-compatible models, not the official OpenAI models
+
+## Memory Notes
+
+- Text guided tool call使用tool_call格式，这是我们现在必选的feature
