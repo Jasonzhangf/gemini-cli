@@ -113,6 +113,36 @@ export class ContextAgent {
   }
 
   /**
+   * Inject layered context into dynamic context system
+   * Milestone 4: Better integration with dynamic context
+   */
+  async injectContextIntoDynamicSystem(userInput?: string): Promise<void> {
+    if (!this.initialized) {
+      return;
+    }
+
+    try {
+      const contextOutput = await this.getContextForPrompt(userInput);
+      if (contextOutput && contextOutput.trim().length > 0) {
+        // Inject into the context manager's dynamic context
+        const contextManager = this.config.getContextManager();
+        
+        // Clear any existing ContextAgent context to avoid accumulation
+        contextManager.clearDynamicContext();
+        
+        // Add the new layered context
+        contextManager.addDynamicContext(contextOutput);
+        
+        if (this.config.getDebugMode()) {
+          console.log(`[ContextAgent] Injected ${contextOutput.length} characters into dynamic context`);
+        }
+      }
+    } catch (error) {
+      console.error('[ContextAgent] Failed to inject context into dynamic system:', error);
+    }
+  }
+
+  /**
    * Get context for prompt injection
    * Milestone 4: Intelligent layered context injection with token budget management
    */

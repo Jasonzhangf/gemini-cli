@@ -10,6 +10,7 @@ export { TodoService } from './todoService.js';
 export { ContextWrapper } from './contextWrapper.js';
 export { PromptEnhancer } from './promptEnhancer.js';
 export { ToolCallInterceptor } from './toolCallInterceptor.js';
+export { ContextAgent } from './contextAgent.js';
 
 // 便捷函数：检查是否启用了上下文增强功能
 export function isContextEnhancementEnabled(): boolean {
@@ -39,7 +40,25 @@ export async function getEnhancedSystemPromptIfAvailable(config: Config, userMes
     }
     
     const promptEnhancer = config.getPromptEnhancer();
-    const enhancedPrompt = await promptEnhancer.getEnhancedSystemPrompt(userMessage);
+    let enhancedPrompt = await promptEnhancer.getEnhancedSystemPrompt(userMessage);
+    
+    // ContextAgent integration (Milestone 4) - Inject into dynamic context
+    try {
+      const contextAgent = config.getContextAgent();
+      if (contextAgent?.isInitialized()) {
+        // Use the new injection method for better dynamic context integration
+        await contextAgent.injectContextIntoDynamicSystem(userMessage);
+        
+        if (config.getDebugMode()) {
+          console.log('[Context] ContextAgent layered context injected into dynamic context system');
+        }
+      }
+    } catch (contextAgentError) {
+      // ContextAgent is optional, don't break the flow if it fails
+      if (config.getDebugMode()) {
+        console.log('[Context] ContextAgent not available or failed:', contextAgentError);
+      }
+    }
     
     // 在每次调用时保存debug快照（如果启用了debug模式）
     if (config.getDebugMode()) {

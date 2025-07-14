@@ -63,7 +63,7 @@ export class OpenAIHijackAdapter {
     this.coreConfig = coreConfig;
     this.toolDeclarations = toolDeclarations;
     this.debugMode = coreConfig.getDebugMode();
-    this.sessionId = this.generateSessionId();
+    this.sessionId = coreConfig.getSessionId();
 
     this.openai = new OpenAI({
       apiKey: config.apiKey,
@@ -75,8 +75,9 @@ export class OpenAIHijackAdapter {
 
     // Initialize debug logger if debug mode is enabled (async)
     if (this.debugMode) {
+      console.log('[OpenAI Hijack] Constructor: Scheduling debug logger initialization for session:', this.sessionId);
       this.initializeDebugLogger().catch(error => {
-        console.warn('[OpenAI Hijack] Failed to initialize debug logger in constructor:', error);
+        console.warn('[OpenAI Hijack] ❌ Failed to initialize debug logger in constructor:', error);
       });
     }
 
@@ -88,17 +89,17 @@ export class OpenAIHijackAdapter {
     }
   }
 
-  private generateSessionId(): string {
-    return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  }
 
   private async initializeDebugLogger() {
     if (this.debugMode) {
       try {
         const projectDir = this.coreConfig.getTargetDir();
+        console.log('[OpenAI Hijack] Initializing debug logger for session:', this.sessionId, 'in project:', projectDir);
         this.debugLogger = await DebugLogger.create(this.sessionId, projectDir, true);
+        console.log('[OpenAI Hijack] ✅ Debug logger initialized successfully in constructor');
       } catch (error) {
-        console.warn('[OpenAI Hijack] Failed to initialize debug logger:', error);
+        console.warn('[OpenAI Hijack] ❌ Failed to initialize debug logger in constructor:', error);
+        console.warn('[OpenAI Hijack] Error details:', error instanceof Error ? error.message : String(error));
       }
     }
   }
@@ -790,11 +791,22 @@ The user will execute the tools and provide you with the results. Use the result
     // Check if this is a tool result being sent back to the model
     const isToolResponse = this.isToolResponse(request);
     
+    if (this.debugMode) {
+      console.log('[OpenAI Hijack] Request type check - isToolResponse:', isToolResponse);
+      console.log('[OpenAI Hijack] Request sample:', JSON.stringify(request).substring(0, 200) + '...');
+    }
+    
     if (isToolResponse) {
       // Handle tool response - continue conversation with tool results
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] Handling tool response');
+      }
       yield* this.handleToolResponse(request, signal, prompt_id);
     } else {
       // Handle initial user message
+      if (this.debugMode) {
+        console.log('[OpenAI Hijack] Handling user message');
+      }
       yield* this.handleUserMessage(request, signal, prompt_id);
     }
     
@@ -828,14 +840,18 @@ The user will execute the tools and provide you with the results. Use the result
       if (!this.debugLogger) {
         try {
           const projectDir = this.coreConfig.getTargetDir();
+          console.log('[OpenAI Hijack] Creating debug logger for session:', this.sessionId, 'in project:', projectDir);
           this.debugLogger = await DebugLogger.create(this.sessionId, projectDir, true);
+          console.log('[OpenAI Hijack] ✅ Debug logger created successfully');
         } catch (error) {
-          console.warn('[OpenAI Hijack] Failed to create debug logger on demand:', error);
+          console.warn('[OpenAI Hijack] ❌ Failed to create debug logger on demand:', error);
         }
       }
       
       if (this.debugLogger) {
+        console.log('[OpenAI Hijack] Starting debug turn:', this.currentTurnId);
         this.debugLogger.startTurn(this.currentTurnId, userMessage);
+        console.log('[OpenAI Hijack] ✅ Debug turn started successfully');
         
         // Log contexts
         try {
@@ -1063,17 +1079,23 @@ The user will execute the tools and provide you with the results. Use the result
         console.log('[OpenAI Hijack] Received complete response:', fullResponse.length, 'characters');
       }
 
+      // Filter out <think></think> tags before parsing tool calls
+      const cleanedResponse = fullResponse.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      
       // Parse tool calls once from the complete response
       if (this.debugMode) {
-        console.log('[OpenAI Hijack] About to parse tool calls from response:', fullResponse.substring(0, 500) + '...');
+        if (fullResponse !== cleanedResponse) {
+          console.log('[OpenAI Hijack] Filtered out <think> tags from response');
+        }
+        console.log('[OpenAI Hijack] About to parse tool calls from response:', cleanedResponse.substring(0, 500) + '...');
         // Check for specific tool patterns
-        const hasWriteFile = fullResponse.includes('write_file');
-        const hasToolSymbol = fullResponse.includes('✦');
-        const hasJsonBlocks = fullResponse.includes('{');
+        const hasWriteFile = cleanedResponse.includes('write_file');
+        const hasToolSymbol = cleanedResponse.includes('✦');
+        const hasJsonBlocks = cleanedResponse.includes('{');
         console.log('[OpenAI Hijack] Response contains - write_file:', hasWriteFile, '✦ symbol:', hasToolSymbol, 'JSON blocks:', hasJsonBlocks);
       }
       
-      toolCalls = this.parseTextGuidedToolCalls(fullResponse);
+      toolCalls = this.parseTextGuidedToolCalls(cleanedResponse);
       
       if (this.debugMode) {
         console.log('[OpenAI Hijack] Parsed tool calls count:', toolCalls.length);
@@ -1211,19 +1233,38 @@ The user will execute the tools and provide you with the results. Use the result
         }
       }
       
-      // Only finalize the turn if we're not expecting more tool interactions
-      // For responses with tool calls, we'll finalize after all tools complete
-      if (this.debugLogger && this.currentTurnId && (!toolCalls || toolCalls.length === 0)) {
-        await this.debugLogger.finalizeTurn();
-        if (this.debugMode) {
-          console.log('[OpenAI Hijack] ✅ Turn finalized successfully for turn:', this.currentTurnId);
+      // Enhanced finalization logic for better debug logging
+      if (this.debugLogger && this.currentTurnId) {
+        if (!toolCalls || toolCalls.length === 0) {
+          // No tool calls - finalize immediately
+          await this.debugLogger.finalizeTurn();
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] ✅ Turn finalized successfully for turn (no tools):', this.currentTurnId);
+          }
+        } else {
+          // Has tool calls - schedule finalization with timeout fallback
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] Deferring turn finalization - waiting for tool completion');
+          }
+          
+          // Add a fallback timer to ensure turns get finalized even if tool flow breaks
+          setTimeout(async () => {
+            if (this.debugLogger && this.currentTurnId) {
+              try {
+                await this.debugLogger.finalizeTurn();
+                if (this.debugMode) {
+                  console.log('[OpenAI Hijack] ⏰ Turn finalized via timeout fallback:', this.currentTurnId);
+                }
+              } catch (error) {
+                if (this.debugMode) {
+                  console.warn('[OpenAI Hijack] Fallback finalization failed:', error);
+                }
+              }
+            }
+          }, 30000); // 30 second fallback timeout
         }
       } else if (this.debugMode) {
-        if (toolCalls && toolCalls.length > 0) {
-          console.log('[OpenAI Hijack] Deferring turn finalization - waiting for tool completion');
-        } else {
-          console.log('[OpenAI Hijack] Skipping finalize - debugLogger:', !!this.debugLogger, 'turnId:', this.currentTurnId);
-        }
+        console.log('[OpenAI Hijack] Skipping finalize - debugLogger:', !!this.debugLogger, 'turnId:', this.currentTurnId);
       }
     }
   }
