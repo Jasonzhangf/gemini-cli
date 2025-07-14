@@ -15,6 +15,7 @@ export interface SystemContext {
   sessionId: string;
   tools: string[];
   capabilities: string[];
+  conversationHistory?: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: string }>;
 }
 
 export interface StaticContext {
@@ -80,6 +81,26 @@ export class StandardContextIntegrator {
     const toolRegistry = await this.config.getToolRegistry();
     const tools = toolRegistry.getAllTools().map((tool: any) => tool.name);
 
+    // 获取对话历史
+    let conversationHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: string }> = [];
+    
+    try {
+      // 从现有上下文中获取历史记录
+      const existingContext = this.contextManager.getContext();
+      if (existingContext.historyRecords && Array.isArray(existingContext.historyRecords)) {
+        conversationHistory = existingContext.historyRecords.slice(-10).map((record: any) => {
+          const content = record.parts?.[0]?.text || record.content || '';
+          return {
+            role: record.role || 'user',
+            content: this.filterThinkingContent(content), // 过滤<think>标签
+            timestamp: record.timestamp || new Date().toISOString()
+          };
+        });
+      }
+    } catch (error) {
+      console.warn('[StandardContextIntegrator] Failed to get conversation history:', error);
+    }
+
     return {
       workingDirectory: this.projectDir,
       timestamp: new Date().toISOString(),
@@ -92,7 +113,8 @@ export class StandardContextIntegrator {
         'memory_management',
         'task_management',
         'workflow_templates'
-      ]
+      ],
+      conversationHistory
     };
   }
 
@@ -141,56 +163,46 @@ export class StandardContextIntegrator {
 
   /**
    * 收集动态上下文
+   * 动态上下文主要来自ContextAgent基于当前用户输入生成的分层上下文
    */
   private async getDynamicContext(): Promise<DynamicContext> {
     const existingContext = this.contextManager.getContext();
     
-    // 收集最近的操作历史
-    const recentOperations = this.extractRecentOperations();
+    // 从ContextManager获取当前的动态上下文（由ContextAgent注入的分层内容）
+    const contextAgentContent = existingContext.dynamicContext || [];
     
-    // 收集错误历史
-    const errorHistory = this.extractErrorHistory();
-    
-    // 收集运行时信息
+    // 收集基本的运行时信息
     const runtimeInfo = this.collectRuntimeInfo();
     
-    // 从历史记录中提取用户指令
+    // 从历史记录中提取最近的用户指令（用于上下文连贯性）
     const userInstructions = this.extractUserInstructions(existingContext);
+    
+    // 构建结构化的动态上下文 - 包含实际的ContextAgent内容
+    const recentOperations: string[] = [];
+    
+    // 如果有ContextAgent内容，包含实际的layered context内容
+    if (contextAgentContent.length > 0) {
+      recentOperations.push(`ContextAgent layered context (${contextAgentContent.length} entries):`);
+      
+      // 添加实际的ContextAgent生成的内容
+      contextAgentContent.forEach((content, index) => {
+        recentOperations.push(`L${index}: ${content}`);
+      });
+      
+      recentOperations.push(`Dynamic context updated: ${new Date().toLocaleTimeString()}`);
+    } else {
+      recentOperations.push(`Session started: ${this.config.getSessionId()}`);
+      recentOperations.push(`Working directory: ${this.projectDir}`);
+    }
     
     return {
       recentOperations,
-      errorHistory,
+      errorHistory: [], // 错误历史保持为空或从其他地方收集
       runtimeInfo,
       userInstructions
     };
   }
 
-  /**
-   * 提取最近的操作记录
-   */
-  private extractRecentOperations(): string[] {
-    const operations: string[] = [];
-    
-    try {
-      // 从任务服务获取最近完成的任务
-      const todoService = this.contextManager['todoService'];
-      if (todoService) {
-        const completedTasks: any[] = [];
-        operations.push(...completedTasks.slice(-3).map((task: any) => `Completed: ${task}`));
-      }
-      
-      // 添加会话信息
-      operations.push(`Session started: ${this.config.getSessionId()}`);
-      
-      // 如果有项目切换等操作也可以添加
-      operations.push(`Working directory: ${this.projectDir}`);
-      
-    } catch (error) {
-      operations.push(`Failed to collect recent operations: ${error}`);
-    }
-    
-    return operations.slice(-5); // 最多保留5条最近操作
-  }
 
   /**
    * 提取错误历史
@@ -379,14 +391,33 @@ export class StandardContextIntegrator {
    * 格式化系统上下文
    */
   private formatSystemContext(context: SystemContext): string {
-    return `# 🖥️ 系统上下文 (System Context)
+    const sections: string[] = [];
+
+    sections.push(`# 🖥️ 系统上下文 (System Context)
 *来源: 当前运行环境和系统状态*
 
 **工作目录**: ${context.workingDirectory}
 **会话时间**: ${context.timestamp}
 **会话ID**: ${context.sessionId}
 **可用工具**: ${context.tools.join(', ')}
-**系统能力**: ${context.capabilities.join(', ')}`;
+**系统能力**: ${context.capabilities.join(', ')}`);
+
+    // 添加对话历史
+    if (context.conversationHistory && context.conversationHistory.length > 0) {
+      sections.push(`## 💬 对话历史 (最近${context.conversationHistory.length}条)
+*过滤掉思考标签的对话记录*`);
+      
+      context.conversationHistory.forEach((msg, index) => {
+        const role = msg.role === 'user' ? '👤 用户' : 
+                    msg.role === 'assistant' ? '🤖 助手' : '⚙️ 系统';
+        const content = msg.content.length > 200 ? 
+                       msg.content.substring(0, 200) + '...' : 
+                       msg.content;
+        sections.push(`${index + 1}. ${role}: ${content}`);
+      });
+    }
+
+    return sections.join('\n\n');
   }
 
   /**
@@ -580,7 +611,10 @@ ${context.userInstructions.join('\n')}`);
     // 设置第一个任务为当前任务
     if (taskObjects.length > 0) {
       await todoService.setCurrentTask(taskObjects[0].id);
-      await todoService.updateTaskStatus(taskObjects[0].id, 'in_progress');
+      
+      // 直接修改任务状态而不是重新加载文件
+      taskObjects[0].status = 'in_progress';
+      await todoService.saveTasks(taskObjects);
     }
 
     // 更新上下文管理器
@@ -737,5 +771,15 @@ ${context.static.projectRules.join('\n\n')}`);
     }
 
     return sections.join('\n\n');
+  }
+
+  /**
+   * Filter out <think> tags and their content from text
+   * @param content The text to filter
+   * @returns Text with <think> tags and their content removed
+   */
+  private filterThinkingContent(content: string): string {
+    // Remove content between <think> and </think> tags (case insensitive, multiline)
+    return content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   }
 }

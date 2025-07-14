@@ -71,15 +71,18 @@ export class LayeredContextManager {
 
   /**
    * Generate layered context based on user input with intelligent prioritization
+   * MODIFIED: Force enable core context injection and disable token budget limits
    */
   async generateLayeredContext(
     userInput: string,
     maxTokens: number = this.defaultMaxTokens
   ): Promise<LayeredContextResult> {
+    // Force disable token budget limits - set to very high value
+    const forceMaxTokens = 100000; // Effectively unlimited
     const budget: TokenBudget = {
-      maxTokens,
+      maxTokens: forceMaxTokens,
       usedTokens: 0,
-      remainingTokens: maxTokens
+      remainingTokens: forceMaxTokens
     };
 
     const layers: ContextLayer[] = [];
@@ -87,65 +90,68 @@ export class LayeredContextManager {
     let truncationDetails = '';
 
     try {
-      // Step 1: Generate L0 (Core Context) - highest priority
+      // Step 1: Generate L0 (Core Context) - FORCE ENABLE, highest priority
       const l0Context = await this.generateL0Context(userInput, budget);
-      if (l0Context && this.fitsInBudget(l0Context, budget)) {
+      if (l0Context) {
+        // L0 is ALWAYS included, regardless of budget
         layers.push(l0Context);
         this.consumeBudget(l0Context.estimatedTokens, budget);
+        
+        console.log(`[LayeredContextManager] ✅ FORCE ENABLED L0 context with ${l0Context.coreEntities.length} entities and ${l0Context.directRelations.length} relations`);
       } else {
-        truncated = true;
-        truncationDetails += 'L0 context exceeds budget; ';
+        // If L0 context generation fails, force create a minimal one
+        const fallbackEntities = this.extractCoreEntitiesFromInput(userInput);
+        const fallbackL0: L0CoreContext = {
+          level: 'L0',
+          coreEntities: fallbackEntities,
+          directRelations: [],
+          priority: 4,
+          estimatedTokens: 100
+        };
+        layers.push(fallbackL0);
+        this.consumeBudget(fallbackL0.estimatedTokens, budget);
+        console.log(`[LayeredContextManager] ✅ FORCE CREATED fallback L0 context with ${fallbackEntities.length} entities`);
       }
 
-      // Step 2: Generate L1 (Immediate Context) - high priority
-      if (budget.remainingTokens > 0) {
-        const l1Context = await this.generateL1Context(userInput, l0Context?.coreEntities || [], budget);
-        if (l1Context && this.fitsInBudget(l1Context, budget)) {
-          layers.push(l1Context);
-          this.consumeBudget(l1Context.estimatedTokens, budget);
-        } else {
-          truncated = true;
-          truncationDetails += 'L1 context exceeds remaining budget; ';
-        }
+      // Step 2: Generate L1 (Immediate Context) - high priority, no budget constraint
+      const l1Context = await this.generateL1Context(userInput, l0Context?.coreEntities || [], budget);
+      if (l1Context) {
+        layers.push(l1Context);
+        this.consumeBudget(l1Context.estimatedTokens, budget);
+        console.log(`[LayeredContextManager] ✅ L1 context added with ${l1Context.relatedEntities.length} related entities`);
       }
 
-      // Step 3: Generate L2 (Extended Context) - medium priority
-      if (budget.remainingTokens > 0) {
-        const allEntities = [
-          ...(l0Context?.coreEntities || []),
-          ...(layers.find(l => l.level === 'L1') as L1ImmediateContext)?.relatedEntities || []
-        ];
-        const l2Context = await this.generateL2Context(userInput, allEntities, budget);
-        if (l2Context && this.fitsInBudget(l2Context, budget)) {
-          layers.push(l2Context);
-          this.consumeBudget(l2Context.estimatedTokens, budget);
-        } else {
-          truncated = true;
-          truncationDetails += 'L2 context exceeds remaining budget; ';
-        }
+      // Step 3: Generate L2 (Extended Context) - medium priority, no budget constraint
+      const allEntities = [
+        ...(l0Context?.coreEntities || []),
+        ...(layers.find(l => l.level === 'L1') as L1ImmediateContext)?.relatedEntities || []
+      ];
+      const l2Context = await this.generateL2Context(userInput, allEntities, budget);
+      if (l2Context) {
+        layers.push(l2Context);
+        this.consumeBudget(l2Context.estimatedTokens, budget);
+        console.log(`[LayeredContextManager] ✅ L2 context added with ${l2Context.neighboringEntities.length} neighboring entities`);
       }
 
-      // Step 4: Generate L3 (Global Context) - lowest priority
-      if (budget.remainingTokens > 0) {
-        const l3Context = await this.generateL3Context(budget);
-        if (l3Context && this.fitsInBudget(l3Context, budget)) {
-          layers.push(l3Context);
-          this.consumeBudget(l3Context.estimatedTokens, budget);
-        } else {
-          truncated = true;
-          truncationDetails += 'L3 context exceeds remaining budget';
-        }
+      // Step 4: Generate L3 (Global Context) - lowest priority, no budget constraint
+      const l3Context = await this.generateL3Context(budget);
+      if (l3Context) {
+        layers.push(l3Context);
+        this.consumeBudget(l3Context.estimatedTokens, budget);
+        console.log(`[LayeredContextManager] ✅ L3 context added with project summary`);
       }
 
     } catch (error) {
       console.error('[LayeredContextManager] Error generating layered context:', error);
     }
 
+    console.log(`[LayeredContextManager] 🚀 FORCE ENABLED context generation complete: ${layers.length} layers, ${budget.usedTokens} tokens`);
+
     return {
       layers,
       totalTokens: budget.usedTokens,
-      truncated,
-      truncationDetails: truncated ? truncationDetails : undefined
+      truncated: false, // Never truncated with unlimited budget
+      truncationDetails: undefined
     };
   }
 
@@ -239,6 +245,7 @@ export class LayeredContextManager {
 
   /**
    * Extract core entities from user input using keyword matching and patterns
+   * Enhanced to be more permissive and extract meaningful entities from general input
    */
   private extractCoreEntitiesFromInput(userInput: string): string[] {
     const entities: string[] = [];
@@ -266,6 +273,25 @@ export class LayeredContextManager {
     const identifierPatterns = input.match(/\b[A-Z][a-zA-Z0-9]*\b/g);
     if (identifierPatterns) {
       entities.push(...identifierPatterns);
+    }
+
+    // Enhanced: Extract meaningful words as potential entities
+    const meaningfulWords = input.match(/\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b/g);
+    if (meaningfulWords) {
+      // Filter out common stop words but keep programming-relevant terms
+      const stopWords = new Set(['the', 'and', 'for', 'are', 'you', 'can', 'how', 'what', 'when', 'where', 'why', 'this', 'that', 'with', 'from', 'they', 'have', 'will', 'been', 'some', 'like', 'into', 'make', 'time', 'than', 'only', 'come', 'could', 'also', 'your', 'would', 'there', 'their', 'about', 'which', 'other', 'after', 'first', 'well', 'work', 'such', 'make', 'them', 'want', 'here', 'just', 'over', 'think', 'through', 'back', 'much', 'before', 'need', 'should', 'very', 'still', 'more', 'even', 'being', 'under', 'between', 'again', 'never', 'every', 'above', 'below', 'during', 'within', 'without', 'might', 'since', 'while', 'where', 'whether', 'these', 'those', 'same', 'different', 'another', 'many', 'most', 'several', 'each', 'either', 'neither', 'both', 'all', 'any', 'some', 'none', 'few', 'little', 'much', 'more', 'most', 'less', 'least', 'enough', 'quite', 'rather', 'too', 'very', 'really', 'actually', 'probably', 'possibly', 'certainly', 'definitely', 'maybe', 'perhaps', 'almost', 'nearly', 'hardly', 'scarcely', 'barely', 'already', 'still', 'yet', 'soon', 'later', 'now', 'then', 'today', 'tomorrow', 'yesterday', 'always', 'never', 'sometimes', 'often', 'usually', 'frequently', 'rarely', 'occasionally', 'normally', 'generally', 'typically', 'particularly', 'especially', 'mainly', 'mostly', 'largely', 'partly', 'completely', 'entirely', 'totally', 'fully', 'exactly', 'precisely', 'approximately', 'roughly', 'about', 'around', 'nearly', 'almost', 'quite', 'fairly', 'rather', 'pretty', 'very', 'really', 'extremely', 'incredibly', 'amazingly', 'absolutely', 'completely', 'totally', 'entirely', 'perfectly', 'exactly', 'precisely', 'definitely', 'certainly', 'surely', 'obviously', 'clearly', 'apparently', 'presumably', 'supposedly', 'allegedly', 'reportedly', 'seemingly', 'evidently', 'probably', 'likely', 'possibly', 'maybe', 'perhaps', 'potentially', 'hopefully', 'unfortunately', 'fortunately', 'luckily', 'unluckily', 'surprisingly', 'interestingly', 'importantly', 'significantly', 'notably', 'particularly', 'especially', 'specifically', 'generally', 'usually', 'normally', 'typically', 'commonly', 'frequently', 'regularly', 'consistently', 'constantly', 'continuously', 'repeatedly', 'occasionally', 'sometimes', 'rarely', 'seldom', 'hardly', 'barely', 'scarcely', 'never', 'always', 'forever', 'permanently', 'temporarily', 'briefly', 'quickly', 'slowly', 'gradually', 'suddenly', 'immediately', 'instantly', 'directly', 'indirectly', 'clearly', 'obviously', 'apparently', 'seemingly', 'evidently', 'presumably', 'supposedly', 'allegedly', 'reportedly', 'actually', 'really', 'truly', 'indeed', 'certainly', 'definitely', 'surely', 'undoubtedly', 'obviously', 'clearly', 'plainly', 'simply', 'basically', 'essentially', 'fundamentally', 'primarily', 'mainly', 'chiefly', 'principally', 'largely', 'mostly', 'generally', 'typically', 'usually', 'normally', 'commonly', 'frequently', 'regularly', 'consistently', 'constantly', 'continuously', 'repeatedly', 'occasionally', 'sometimes', 'rarely', 'seldom', 'hardly', 'barely', 'scarcely']);
+      
+      const filtered = meaningfulWords.filter(word => 
+        !stopWords.has(word) && 
+        word.length >= 3 && 
+        word.length <= 30
+      );
+      entities.push(...filtered);
+    }
+
+    // If no entities found, use the entire input as a fallback entity
+    if (entities.length === 0 && userInput.trim().length > 0) {
+      entities.push(userInput.trim());
     }
 
     return [...new Set(entities)]; // Remove duplicates
@@ -339,10 +365,10 @@ export class LayeredContextManager {
   }
 
   /**
-   * Generate project summary from statistics
+   * Generate project summary from statistics - SIMPLIFIED
    */
   private generateProjectSummary(stats: any): string {
-    return `Project contains ${stats.totalNodes} code entities: ${stats.fileNodes} files, ${stats.functionNodes} functions, ${stats.classNodes} classes, with ${stats.importRelations} imports and ${stats.callRelations} function calls.`;
+    return `${stats.fileNodes}f/${stats.functionNodes}fn/${stats.classNodes}c`;
   }
 
   /**
@@ -380,36 +406,22 @@ export class LayeredContextManager {
   }
 
   /**
-   * Format layered context for model consumption
+   * Format layered context for model consumption - SIMPLIFIED VERSION
    */
   formatLayeredContextForModel(result: LayeredContextResult): string {
     const sections: string[] = [];
 
-    sections.push('# 🎯 Intelligent Context Analysis');
-    sections.push('*Dynamically layered based on your query with smart token management*');
-    sections.push('');
-
-    // Add layers in priority order
+    // Add layers in priority order - simplified format
     const sortedLayers = result.layers.sort((a, b) => b.priority - a.priority);
 
     for (const layer of sortedLayers) {
-      sections.push(this.formatContextLayer(layer));
-      sections.push('');
-    }
-
-    // Add metadata
-    if (result.truncated) {
-      sections.push('## ⚠️ Context Truncation Notice');
-      sections.push(`Some context was truncated due to token budget limits (${result.totalTokens} tokens used).`);
-      if (result.truncationDetails) {
-        sections.push(`Details: ${result.truncationDetails}`);
+      const formatted = this.formatContextLayer(layer);
+      if (formatted.trim()) {
+        sections.push(formatted);
       }
-      sections.push('');
     }
 
-    sections.push(`*Context generated using ${result.totalTokens} tokens across ${result.layers.length} layers*`);
-
-    return sections.join('\n');
+    return sections.join('\n\n');
   }
 
   /**
@@ -431,55 +443,33 @@ export class LayeredContextManager {
   }
 
   private formatL0Context(layer: L0CoreContext): string {
-    const sections = [
-      '## 🎯 L0: Core Context (Query-Specific)',
-      `**Entities directly relevant to your query:**`
-    ];
+    const parts: string[] = [];
 
     if (layer.coreEntities.length > 0) {
-      sections.push(...layer.coreEntities.map(entity => `- ${entity}`));
+      parts.push('Core: ' + layer.coreEntities.slice(0, 5).join(', '));
     }
 
     if (layer.directRelations.length > 0) {
-      sections.push('', '**Direct relationships:**');
-      sections.push(...layer.directRelations.slice(0, 5).map(rel => 
-        `- ${rel.from} → ${rel.to} (${rel.type})`
-      ));
+      const relations = layer.directRelations.slice(0, 3).map(rel => 
+        `${rel.from}→${rel.to}`
+      );
+      parts.push('Relations: ' + relations.join(', '));
     }
 
-    return sections.join('\n');
+    return parts.join(' | ');
   }
 
   private formatL1Context(layer: L1ImmediateContext): string {
-    const sections = [
-      '## 🔗 L1: Immediate Context (One-Hop)',
-      `**Related entities (${layer.relatedEntities.length} found):**`
-    ];
-
-    if (layer.relatedEntities.length > 0) {
-      sections.push(...layer.relatedEntities.slice(0, 10).map(entity => `- ${entity}`));
-    }
-
-    return sections.join('\n');
+    if (layer.relatedEntities.length === 0) return '';
+    return 'Related: ' + layer.relatedEntities.slice(0, 6).join(', ');
   }
 
   private formatL2Context(layer: L2ExtendedContext): string {
-    const sections = [
-      '## 🌐 L2: Extended Context (Two-Hop)',
-      `**Neighboring entities (${layer.neighboringEntities.length} found):**`
-    ];
-
-    if (layer.neighboringEntities.length > 0) {
-      sections.push(...layer.neighboringEntities.slice(0, 8).map(entity => `- ${entity}`));
-    }
-
-    return sections.join('\n');
+    if (layer.neighboringEntities.length === 0) return '';
+    return 'Extended: ' + layer.neighboringEntities.slice(0, 4).join(', ');
   }
 
   private formatL3Context(layer: L3GlobalContext): string {
-    return [
-      '## 📊 L3: Global Context (Project Overview)',
-      layer.projectSummary
-    ].join('\n');
+    return 'Project: ' + layer.projectSummary;
   }
 }

@@ -115,44 +115,90 @@ export class ContextAgent {
   /**
    * Inject layered context into dynamic context system
    * Milestone 4: Better integration with dynamic context
+   * MODIFIED: Force enable context injection
    */
   async injectContextIntoDynamicSystem(userInput?: string): Promise<void> {
     if (!this.initialized) {
-      return;
+      if (this.config.getDebugMode()) {
+        console.log('[ContextAgent] ⚠️ Not initialized for injection, attempting to initialize now...');
+      }
+      await this.initialize();
+      if (!this.initialized) {
+        console.log('[ContextAgent] ❌ Failed to initialize for injection, skipping');
+        return;
+      }
     }
 
     try {
-      const contextOutput = await this.getContextForPrompt(userInput);
+      // Filter out <think> tags from user input before processing
+      const filteredUserInput = userInput ? this.filterThinkingContent(userInput) : userInput;
+      
+      // FORCE ENABLE: Always get context, even if empty
+      const contextOutput = await this.getContextForPrompt(filteredUserInput);
+      
+      // FORCE ENABLE: Inject context even if it seems empty
+      const contextManager = this.config.getContextManager();
+      
+      // Clear previous ContextAgent dynamic context and inject new layered content
+      // This is correct - dynamic context should be based on current user input, not accumulated
+      contextManager.clearDynamicContext();
+      
       if (contextOutput && contextOutput.trim().length > 0) {
-        // Inject into the context manager's dynamic context
-        const contextManager = this.config.getContextManager();
-        
-        // Clear any existing ContextAgent context to avoid accumulation
-        contextManager.clearDynamicContext();
-        
-        // Add the new layered context
         contextManager.addDynamicContext(contextOutput);
         
         if (this.config.getDebugMode()) {
-          console.log(`[ContextAgent] Injected ${contextOutput.length} characters into dynamic context`);
+          console.log(`[ContextAgent] ✅ FORCE ENABLED injection: ${contextOutput.length} characters into dynamic context`);
+          if (userInput !== filteredUserInput) {
+            console.log(`[ContextAgent] ✅ Filtered <think> tags from user input`);
+          }
+        }
+      } else {
+        // FORCE ENABLE: Add minimal context even if generation failed
+        const minimalContext = '# 🧠 Project Context (Minimal)\n*ContextAgent is active but found no specific context for this input*';
+        contextManager.addDynamicContext(minimalContext);
+        
+        if (this.config.getDebugMode()) {
+          console.log(`[ContextAgent] ⚠️ FORCE ENABLED minimal context injection due to empty output`);
         }
       }
     } catch (error) {
-      console.error('[ContextAgent] Failed to inject context into dynamic system:', error);
+      console.error('[ContextAgent] ❌ Failed to inject context into dynamic system:', error);
+      
+      // FORCE ENABLE: Even on error, inject minimal context
+      try {
+        const contextManager = this.config.getContextManager();
+        const errorContext = '# 🧠 Project Context (Error Recovery)\n*ContextAgent encountered errors but is still active*';
+        contextManager.clearDynamicContext();
+        contextManager.addDynamicContext(errorContext);
+        
+        if (this.config.getDebugMode()) {
+          console.log(`[ContextAgent] ✅ FORCE ENABLED error recovery context injection`);
+        }
+      } catch (recoveryError) {
+        console.error('[ContextAgent] ❌ Even error recovery injection failed:', recoveryError);
+      }
     }
   }
 
   /**
    * Get context for prompt injection
    * Milestone 4: Intelligent layered context injection with token budget management
+   * MODIFIED: Force enable core context injection and disable token budget limits
    */
   async getContextForPrompt(userInput?: string): Promise<string> {
     if (!this.initialized) {
-      return '';
+      if (this.config.getDebugMode()) {
+        console.log('[ContextAgent] ⚠️ Not initialized, attempting to initialize now...');
+      }
+      await this.initialize();
+      if (!this.initialized) {
+        console.log('[ContextAgent] ❌ Failed to initialize, returning empty context');
+        return '';
+      }
     }
 
     if (this.config.getDebugMode()) {
-      console.log('[ContextAgent] getContextForPrompt called (Milestone 4: layered context injection)');
+      console.log('[ContextAgent] 🚀 FORCE ENABLED getContextForPrompt called (Milestone 4: layered context injection)');
     }
     
     try {
@@ -160,44 +206,55 @@ export class ContextAgent {
       const stats = this.knowledgeGraph.getStatistics();
       if (!stats || stats.totalNodes === 0) {
         if (this.config.getDebugMode()) {
-          console.log('[ContextAgent] No knowledge graph data available');
+          console.log('[ContextAgent] ⚠️ No knowledge graph data available, but proceeding anyway');
         }
-        return '';
+        // Don't return empty - proceed with context generation even without graph data
       }
 
-      // Use layered context manager for intelligent context generation
+      // FORCE ENABLE: Use layered context manager with unlimited budget
+      // Ignore configured budget - use unlimited budget to ensure core context is always included
+      const unlimitedBudget = 100000; // Effectively unlimited tokens
       const layeredResult = await this.layeredContextManager.generateLayeredContext(
         userInput || '',
-        8000 // Token budget - adjust based on model context window
+        unlimitedBudget // Force unlimited budget
       );
       
       if (this.config.getDebugMode()) {
-        console.log(`[ContextAgent] Generated layered context: ${layeredResult.totalTokens} tokens across ${layeredResult.layers.length} layers`);
-        if (layeredResult.truncated) {
-          console.log(`[ContextAgent] Context was truncated: ${layeredResult.truncationDetails}`);
-        }
+        console.log(`[ContextAgent] 🚀 FORCE ENABLED layered context: ${layeredResult.totalTokens} tokens across ${layeredResult.layers.length} layers`);
+        console.log(`[ContextAgent] ✅ Context layers generated: ${layeredResult.layers.map(l => l.level).join(', ')}`);
       }
       
       // Format the layered context for model consumption
       const formattedContext = this.layeredContextManager.formatLayeredContextForModel(layeredResult);
       
-      // Add legacy fallback information for compatibility
+      // FORCE ENABLE: Always provide context, even if layers are empty
       if (layeredResult.layers.length === 0) {
-        return this.generateFallbackContext(stats);
+        if (this.config.getDebugMode()) {
+          console.log('[ContextAgent] ⚠️ No layers generated, using fallback context');
+        }
+        const fallbackContext = this.generateFallbackContext(stats);
+        return fallbackContext;
+      }
+      
+      if (this.config.getDebugMode()) {
+        console.log(`[ContextAgent] ✅ FORCE ENABLED context injection complete: ${formattedContext.length} characters`);
       }
       
       return formattedContext;
       
     } catch (error) {
-      console.error('[ContextAgent] Failed to generate layered context:', error);
+      console.error('[ContextAgent] ❌ Failed to generate layered context:', error);
       
-      // Fallback to basic context if layered context fails
+      // FORCE ENABLE: Always provide fallback context
       try {
         const stats = this.knowledgeGraph.getStatistics();
-        return this.generateFallbackContext(stats);
+        const fallbackContext = this.generateFallbackContext(stats);
+        console.log('[ContextAgent] ✅ Using fallback context due to error');
+        return fallbackContext;
       } catch (fallbackError) {
-        console.error('[ContextAgent] Fallback context generation also failed:', fallbackError);
-        return '';
+        console.error('[ContextAgent] ❌ Fallback context generation also failed:', fallbackError);
+        // Return basic context as absolute last resort
+        return '# 🧠 Project Context (Emergency Fallback)\n*ContextAgent encountered errors but is providing minimal context*';
       }
     }
   }
@@ -533,6 +590,16 @@ export class ContextAgent {
    */
   getSessionId(): string {
     return this.sessionId;
+  }
+
+  /**
+   * Filter out <think> tags and their content from text
+   * @param content The text to filter
+   * @returns Text with <think> tags and their content removed
+   */
+  private filterThinkingContent(content: string): string {
+    // Remove content between <think> and </think> tags (case insensitive, multiline)
+    return content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   }
 
   /**

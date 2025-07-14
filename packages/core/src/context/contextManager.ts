@@ -278,6 +278,7 @@ export class ContextManager {
     this.context.dynamicContext = [];
   }
 
+
   /**
    * 创建新的任务列表并进入任务维护模式
    */
@@ -377,7 +378,65 @@ export class ContextManager {
   }
 
   /**
-   * 生成用于模型的完整上下文字符串
+   * 生成静态上下文内容（用于上下文系统消息）
+   * 包含全局规则、项目规则、全局记忆、项目记忆、任务上下文
+   * 不包含动态上下文（动态上下文单独处理）
+   */
+  generateStaticContextContent(): string {
+    const sections: string[] = [];
+
+    // 静态上下文 - 分离全局和项目规则、记忆
+    const hasGlobalRules = this.context.staticContext.globalRules.length > 0;
+    const hasProjectRules = this.context.staticContext.projectRules.length > 0;
+    const hasGlobalMemories = this.context.staticContext.globalMemories.length > 0;
+    const hasProjectMemories = this.context.staticContext.projectMemories.length > 0;
+    
+    if (hasGlobalRules || hasProjectRules || hasGlobalMemories || hasProjectMemories) {
+      // 全局规则
+      if (hasGlobalRules) {
+        sections.push(`**Global Rules**: ${this.context.staticContext.globalRules.join(' | ')}`);
+      }
+      
+      // 项目规则
+      if (hasProjectRules) {
+        sections.push(`**Project Rules**: ${this.context.staticContext.projectRules.join(' | ')}`);
+      }
+      
+      // 全局记忆 - 简化显示
+      if (hasGlobalMemories) {
+        const memories = this.context.staticContext.globalMemories.map(m => 
+          m.length > 100 ? m.substring(0, 100) + '...' : m
+        );
+        sections.push(`**Global Memory**: ${memories.join(' | ')}`);
+      }
+      
+      // 项目记忆 - 简化显示
+      if (hasProjectMemories) {
+        const memories = this.context.staticContext.projectMemories.map(m => 
+          m.length > 100 ? m.substring(0, 100) + '...' : m
+        );
+        sections.push(`**Project Memory**: ${memories.join(' | ')}`);
+      }
+    }
+
+    // 任务列表上下文 - 简化显示
+    if (this.context.taskList && this.context.taskList.isMaintenanceMode) {
+      const currentTask = this.getCurrentTask();
+      const completedCount = this.context.taskList.tasks.filter(t => t.status === 'completed').length;
+      const totalCount = this.context.taskList.tasks.length;
+      
+      if (currentTask) {
+        sections.push(`**Current Task**: ${currentTask.description} (${completedCount}/${totalCount} completed)`);
+      } else {
+        sections.push(`**Tasks**: All ${totalCount} tasks completed`);
+      }
+    }
+
+    return sections.join('\n');
+  }
+
+  /**
+   * 生成用于模型的完整上下文字符串（仅上下文部分，不包含系统提示）
    */
   generateModelContext(): string {
     const sections: string[] = [];

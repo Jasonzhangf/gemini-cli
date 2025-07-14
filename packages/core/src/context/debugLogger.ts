@@ -27,6 +27,16 @@ export interface DebugTurnData {
   }>;
   errors?: string[];
   metadata?: any;
+  // 新增：完整的发送给模型的内容
+  sentToModel?: {
+    systemPrompt?: string;
+    enhancedSystemPrompt?: string;
+    messages?: Array<{
+      role: string;
+      content: string;
+    }>;
+    fullRequest?: any;
+  };
 }
 
 export class DebugLogger {
@@ -140,6 +150,16 @@ export class DebugLogger {
     this.currentTurn.metadata = { ...this.currentTurn.metadata, ...metadata };
   }
 
+  logSentToModel(sentData: {
+    systemPrompt?: string;
+    enhancedSystemPrompt?: string;
+    messages?: Array<{ role: string; content: string; }>;
+    fullRequest?: any;
+  }) {
+    if (!this.enabled) return;
+    this.currentTurn.sentToModel = sentData;
+  }
+
   async finalizeTurn() {
     if (!this.enabled) {
       console.log('[DebugLogger] Not enabled, skipping finalize');
@@ -234,16 +254,86 @@ export class DebugLogger {
 
     if (turn.dynamicContext) {
       sections.push('## Dynamic Context');
-      sections.push('```json');
-      sections.push(JSON.stringify(turn.dynamicContext, null, 2));
-      sections.push('```');
-      sections.push('');
+      
+      // Check if it's the new structured dynamic context
+      if (turn.dynamicContext.recentOperations || turn.dynamicContext.runtimeInfo || turn.dynamicContext.userInstructions) {
+        if (turn.dynamicContext.recentOperations && Array.isArray(turn.dynamicContext.recentOperations)) {
+          sections.push('### Recent Operations');
+          sections.push('```');
+          sections.push(turn.dynamicContext.recentOperations.join('\n'));
+          sections.push('```');
+          sections.push('');
+        }
+
+        if (turn.dynamicContext.runtimeInfo && Array.isArray(turn.dynamicContext.runtimeInfo)) {
+          sections.push('### Runtime Info');
+          sections.push('```');
+          sections.push(turn.dynamicContext.runtimeInfo.join('\n'));
+          sections.push('```');
+          sections.push('');
+        }
+
+        if (turn.dynamicContext.userInstructions && Array.isArray(turn.dynamicContext.userInstructions)) {
+          sections.push('### User Instructions');
+          sections.push('```');
+          sections.push(turn.dynamicContext.userInstructions.join('\n'));
+          sections.push('```');
+          sections.push('');
+        }
+
+        if (turn.dynamicContext.errorHistory && Array.isArray(turn.dynamicContext.errorHistory) && turn.dynamicContext.errorHistory.length > 0) {
+          sections.push('### Error History');
+          sections.push('```');
+          sections.push(turn.dynamicContext.errorHistory.join('\n'));
+          sections.push('```');
+          sections.push('');
+        }
+      } else {
+        // Fallback to JSON for other formats
+        sections.push('```json');
+        sections.push(JSON.stringify(turn.dynamicContext, null, 2));
+        sections.push('```');
+        sections.push('');
+      }
     }
 
     if (turn.taskContext) {
       sections.push('## Task Context');
       sections.push('```json');
       sections.push(JSON.stringify(turn.taskContext, null, 2));
+      sections.push('```');
+      sections.push('');
+    }
+
+    if (turn.sentToModel) {
+      sections.push('## Sent to Model (Complete Request)');
+      sections.push('### System Prompt');
+      if (turn.sentToModel.systemPrompt) {
+        sections.push('```');
+        sections.push(turn.sentToModel.systemPrompt);
+        sections.push('```');
+      } else {
+        sections.push('*No system prompt*');
+      }
+      sections.push('');
+      
+      sections.push('### Messages');
+      if (turn.sentToModel.messages && turn.sentToModel.messages.length > 0) {
+        turn.sentToModel.messages.forEach((msg, index) => {
+          sections.push(`#### Message ${index + 1} (${msg.role})`);
+          sections.push('```');
+          sections.push(msg.content);
+          sections.push('```');
+          sections.push('');
+        });
+      } else {
+        sections.push('*No messages*');
+        sections.push('');
+      }
+      
+      sections.push('### Request Config');
+      sections.push('```json');
+      sections.push(JSON.stringify(turn.sentToModel.fullRequest || {}, null, 2));
       sections.push('```');
       sections.push('');
     }

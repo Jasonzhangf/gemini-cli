@@ -42,15 +42,15 @@ export async function getEnhancedSystemPromptIfAvailable(config: Config, userMes
     const promptEnhancer = config.getPromptEnhancer();
     let enhancedPrompt = await promptEnhancer.getEnhancedSystemPrompt(userMessage);
     
-    // ContextAgent integration (Milestone 4) - Inject into dynamic context
+    // ContextAgent integration (Milestone 4) - Trigger on user input
     try {
       const contextAgent = config.getContextAgent();
       if (contextAgent?.isInitialized()) {
-        // Use the new injection method for better dynamic context integration
+        // Generate context based on user input for current turn
         await contextAgent.injectContextIntoDynamicSystem(userMessage);
         
         if (config.getDebugMode()) {
-          console.log('[Context] ContextAgent layered context injected into dynamic context system');
+          console.log('[Context] ContextAgent layered context injected based on user input');
         }
       }
     } catch (contextAgentError) {

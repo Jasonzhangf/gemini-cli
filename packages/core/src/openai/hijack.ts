@@ -36,6 +36,12 @@ export class OpenAIHijackAdapter {
   private conversationHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [];
   private debugMode: boolean = false;
   private dangerousTools: Set<string> = new Set(['run_shell_command', 'write_file', 'replace']);
+  private complexTools: Set<string> = new Set(['write_file', 'replace', 'create_tasks']); // Tools requiring JSON format
+  
+  // Content isolation system for complex parameters
+  private readonly CONTENT_START_MARKER = '<*#*#CONTENT#*#*>';
+  private readonly CONTENT_END_MARKER = '</*#*#CONTENT#*#*>';
+  private readonly CONTENT_MARKER_PATTERN = /<\*#\*#CONTENT#\*#\*>([\s\S]*?)<\/\*#\*#CONTENT#\*#\*>/g;
   private pathArgsMap: Record<string, string[]> = {
     'read_file': ['absolute_path'],
     'write_file': ['file_path'],
@@ -124,6 +130,7 @@ export class OpenAIHijackAdapter {
       const params = tool.parameters?.properties || {};
       const required = tool.parameters?.required || [];
       const isDangerous = this.dangerousTools.has(tool.name);
+      const isComplex = this.complexTools.has(tool.name);
       
       // Build parameter descriptions
       const paramDescriptions = Object.entries(params).map(([name, prop]: [string, any]) => {
@@ -136,10 +143,11 @@ export class OpenAIHijackAdapter {
       // Create examples based on tool type
       const example = this.generateToolExample(tool.name, params);
       
-      // Add dangerous tool warning
+      // Add warning labels
       const dangerousWarning = isDangerous ? ' ⚠️ [DANGEROUS - Requires user approval]' : '';
+      const complexWarning = isComplex ? ' ⚡ [JSON OR CONTENT ISOLATION - No simple descriptive format]' : '';
 
-      return `• ${tool.name}${dangerousWarning}: ${tool.description || 'No description'}
+      return `• ${tool.name}${dangerousWarning}${complexWarning}: ${tool.description || 'No description'}
 ${paramDescriptions}
   Example: ${example}`;
     }).join('\n\n');
@@ -149,6 +157,26 @@ You have access to powerful tools to help analyze and work with files and data. 
 
 ✦ {"name": "tool_name", "arguments": {"param": "value"}}
 
+📝 ALTERNATIVE FORMATS:
+
+**JSON Formats:**
+- \`\`\`json\n{"name": "tool_name", "arguments": {"param": "value"}}\n\`\`\`
+- tool_call: {"name": "tool_name", "arguments": {"param": "value"}}
+- \`\`\`\n{"name": "tool_name", "arguments": {"param": "value"}}\n\`\`\`
+
+**🆕 CONTENT ISOLATION FORMAT (for write_file, replace with large content):**
+- ✦ write_file ./path/to/file.md <*#*#CONTENT#*#*>
+Your actual file content here...
+Can span multiple lines
+And contain any characters including { } " ' 
+</*#*#CONTENT#*#*>
+
+- ✦ replace ./path/to/file.js <*#*#CONTENT#*#*>
+old code here|||new code here
+</*#*#CONTENT#*#*>
+
+**Note:** For replace tool, use "|||" to separate old_string from new_string
+
 🚨🚨🚨 ABSOLUTE RULES - NO EXCEPTIONS 🚨🚨🚨:
 1. NEVER claim to have created, written, or modified files without using the actual tools
 2. NEVER say "已保存到", "已写入", "saved to", "written to" unless you used the write_file tool
@@ -156,6 +184,7 @@ You have access to powerful tools to help analyze and work with files and data. 
 4. If you need to write a file, you MUST use: ✦ {"name": "write_file", "arguments": {"file_path": "./path", "content": "..."}}
 5. If you need to modify a file, you MUST use: ✦ {"name": "replace", "arguments": {"file_path": "./path", "old_string": "...", "new_string": "..."}}
 6. WITHOUT TOOL CALLS, YOUR RESPONSE IS JUST PLANNING - NOT EXECUTION
+7. FOR COMPLEX TOOLS (write_file, replace, create_tasks): ONLY use JSON format - descriptive format will FAIL
 
 🎯 🚨 CRITICAL TASK MANAGEMENT RULE 🚨:
 For ANY request involving 2+ distinct operations (like "清理空文件夹" + "合并目录"), you MUST IMMEDIATELY create a task list BEFORE starting work:
@@ -180,6 +209,12 @@ Tools marked with ⚠️ [DANGEROUS] can modify the system or files and require 
 - write_file: Create or overwrite files  
 - replace: Modify file contents
 Always ask for permission before using these tools and explain what you plan to do.
+
+⚡ COMPLEX TOOLS REQUIRING SPECIAL FORMAT:
+These tools MUST use JSON format OR Content Isolation format and CANNOT use simple descriptive format:
+- write_file: Use JSON or ✦ write_file ./path <*#*#CONTENT#*#*>content</*#*#CONTENT#*#*>
+- replace: Use JSON or ✦ replace ./path <*#*#CONTENT#*#*>old|||new</*#*#CONTENT#*#*>  
+- create_tasks: Use JSON format for structured task arrays
 
 The user will execute the tools and provide you with the results. Use the results to provide comprehensive analysis and insights.`;
   }
@@ -225,11 +260,20 @@ The user will execute the tools and provide you with the results. Use the result
     const toolCalls: ToolCall[] = [];
     const processedPositions = new Set<number>();
     
-    // First try parsing standard JSON format patterns
+    // First try parsing standard JSON format patterns with improved bracket matching
     const jsonPatterns = [
-      /✦\s*(\{[^}]*\})/g,                    // ✦ symbol prefix
-      /(?:tool_call|function_call):\s*(\{[^}]*\})/gi, // explicit tool_call labels
-      /```json\s*(\{[^}]*\})\s*```/gi,       // json code blocks
+      /✦\s*(\{[\s\S]*?\})/g,                    // ✦ symbol prefix - improved to handle multiline
+      /(?:tool_call|function_call):\s*(\{[\s\S]*?\})/gi, // explicit tool_call labels
+      /```json\s*(\{[\s\S]*?\})\s*```/gi,       // json code blocks
+      /```\s*(\{[\s\S]*?\})\s*```/gi,           // generic code blocks with JSON
+    ];
+    
+    // Content isolation patterns for complex tools
+    const contentIsolationPatterns = [
+      // Pattern: ✦ tool_name file_path <*#*#CONTENT#*#*>content</*#*#CONTENT#*#*>
+      /✦\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+([^\s]+)\s+<\*#\*#CONTENT#\*#\*>([\s\S]*?)<\/\*#\*#CONTENT#\*#\*>/g,
+      // Pattern: [tool_call: tool_name for file_path] <*#*#CONTENT#*#*>content</*#*#CONTENT#*#*>
+      /\[tool_call:\s*([a-zA-Z_][a-zA-Z0-9_]*)\s+for\s+([^\]]+)\]\s*<\*#\*#CONTENT#\*#\*>([\s\S]*?)<\/\*#\*#CONTENT#\*#\*>/g,
     ];
     
     // Then try parsing descriptive format patterns (ordered from most specific to most general)
@@ -248,7 +292,74 @@ The user will execute the tools and provide you with the results. Use the result
       /\[([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.+)\]/gi,                     // [tool: params] format
     ];
 
-    // Process JSON patterns first
+    // Process content isolation patterns first (highest priority)
+    for (const pattern of contentIsolationPatterns) {
+      let match;
+      while ((match = pattern.exec(content)) !== null) {
+        if (processedPositions.has(match.index)) {
+          continue;
+        }
+        
+        try {
+          const toolName = this.normalizeToolName(match[1]);
+          const filePath = match[2].trim().replace(/^['"`]|['"`]$/g, '');
+          const contentValue = match[3];
+          
+          // Validate that the tool exists
+          const isValidTool = this.toolDeclarations.some(tool => tool.name === toolName);
+          if (!isValidTool) {
+            if (this.debugMode) {
+              console.warn(`[OpenAI Hijack] Skipping unknown content isolation tool: ${toolName}`);
+            }
+            continue;
+          }
+          
+          const callId = `content_isolation_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          let args: any = {};
+          
+          // Handle different tool types with content isolation
+          if (toolName === 'write_file') {
+            args = { file_path: filePath, content: contentValue };
+          } else if (toolName === 'replace') {
+            // For replace, we need both old_string and new_string
+            // Try to parse content as "old_string|||new_string" or similar delimiter
+            const parts = contentValue.split('|||');
+            if (parts.length >= 2) {
+              args = { file_path: filePath, old_string: parts[0].trim(), new_string: parts[1].trim() };
+            } else {
+              args = { file_path: filePath, old_string: '', new_string: contentValue };
+            }
+          } else {
+            // Generic content parameter
+            args = { [this.getContentParameterName(toolName)]: contentValue };
+            if (filePath && filePath !== '') {
+              args.file_path = filePath;
+            }
+          }
+          
+          const transformedArgs = this.transformPathArguments(toolName, args);
+          
+          toolCalls.push({
+            callId,
+            name: toolName,
+            args: transformedArgs,
+          });
+          
+          this.updateToolCallTracker(toolName, 'discovered');
+          processedPositions.add(match.index);
+          
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] Parsed content isolation tool call:', toolName, 'content length:', contentValue.length);
+          }
+        } catch (error) {
+          if (this.debugMode) {
+            console.warn('[OpenAI Hijack] Failed to parse content isolation tool call:', match[0], error);
+          }
+        }
+      }
+    }
+
+    // Process JSON patterns second with improved bracket matching
     for (const pattern of jsonPatterns) {
       let match;
       while ((match = pattern.exec(content)) !== null) {
@@ -258,15 +369,24 @@ The user will execute the tools and provide you with the results. Use the result
         }
         
         try {
-          const jsonStr = match[1];
+          let jsonStr = match[1];
+          
+          // For patterns that might not capture complete JSON, try to extract balanced braces
+          if (!this.isBalancedBraces(jsonStr)) {
+            const fullMatch = this.extractCompleteJson(content, match.index + match[0].indexOf('{'));
+            if (fullMatch) {
+              jsonStr = fullMatch;
+            }
+          }
+          
           if (this.debugMode) {
-            console.log('[OpenAI Hijack] Attempting to parse JSON tool call:', jsonStr);
+            console.log('[OpenAI Hijack] Attempting to parse JSON tool call:', jsonStr.substring(0, 200) + (jsonStr.length > 200 ? '...' : ''));
           }
           const toolCallJson = this.parseToolCallJson(jsonStr);
           
           if (toolCallJson && toolCallJson.name) {
             if (this.debugMode) {
-              console.log('[OpenAI Hijack] Successfully parsed tool call JSON:', toolCallJson.name);
+              // Successful tool call parse - no debug log needed to reduce noise
             }
             const callId = `text_guided_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             const toolName = this.normalizeToolName(toolCallJson.name);
@@ -341,6 +461,18 @@ The user will execute the tools and provide you with the results. Use the result
             }
             continue;
           }
+
+          // Skip complex tools that require JSON or content isolation format for proper parameter handling
+          if (this.complexTools.has(toolName)) {
+            if (this.debugMode) {
+              console.warn(`[OpenAI Hijack] Skipping complex tool '${toolName}' in descriptive format - requires JSON format or content isolation format`);
+            }
+            
+            // Don't create synthetic tool calls that might interfere with processing
+            // Just skip and let the model get guidance from the system prompt
+            processedPositions.add(match.index);
+            continue;
+          }
           
           // Parse parameters based on tool type
           const args = this.parseDescriptiveToolArgs(toolName, paramText);
@@ -413,14 +545,90 @@ The user will execute the tools and provide you with the results. Use the result
   }
 
   /**
+   * Get the main content parameter name for a tool
+   */
+  private getContentParameterName(toolName: string): string {
+    const contentParams: Record<string, string> = {
+      'write_file': 'content',
+      'replace': 'new_string',
+      'create_tasks': 'tasks',
+      'save_memory': 'content',
+      'run_shell_command': 'command',
+    };
+    return contentParams[toolName] || 'content';
+  }
+
+  /**
+   * Check if a string has balanced braces
+   */
+  private isBalancedBraces(str: string): boolean {
+    let count = 0;
+    for (const char of str) {
+      if (char === '{') count++;
+      else if (char === '}') count--;
+      if (count < 0) return false;
+    }
+    return count === 0;
+  }
+
+  /**
+   * Extract complete JSON object starting from a position in the content
+   */
+  private extractCompleteJson(content: string, startPos: number): string | null {
+    let braceCount = 0;
+    let inString = false;
+    let escaped = false;
+    let i = startPos;
+    
+    // Find the opening brace
+    while (i < content.length && content[i] !== '{') {
+      i++;
+    }
+    
+    if (i >= content.length) return null;
+    
+    const start = i;
+    
+    for (; i < content.length; i++) {
+      const char = content[i];
+      
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      
+      if (char === '\\' && inString) {
+        escaped = true;
+        continue;
+      }
+      
+      if (char === '"' && !escaped) {
+        inString = !inString;
+        continue;
+      }
+      
+      if (!inString) {
+        if (char === '{') {
+          braceCount++;
+        } else if (char === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            return content.substring(start, i + 1);
+          }
+        }
+      }
+    }
+    
+    return null; // Unbalanced braces
+  }
+
+  /**
    * Parse JSON with bracket balancing for complex nested structures
    */
   private parseToolCallJson(jsonStr: string): any {
     try {
       const parsed = JSON.parse(jsonStr);
-      if (this.debugMode) {
-        console.log('[OpenAI Hijack] JSON parse successful:', parsed);
-      }
+      // Successful parse - no debug log needed to reduce noise
       return parsed;
     } catch (initialError) {
       if (this.debugMode) {
@@ -433,6 +641,9 @@ The user will execute the tools and provide you with the results. Use the result
       
       // Remove any ✦ symbols that might be inside the JSON
       fixed = fixed.replace(/✦/g, '');
+      
+      // Remove trailing quotes that might be outside the JSON
+      fixed = fixed.replace(/}["'`]*$/, '}');
       
       // Add missing closing braces
       const openBraces = (fixed.match(/\{/g) || []).length;
@@ -459,8 +670,9 @@ The user will execute the tools and provide you with the results. Use the result
       
       try {
         const parsed = JSON.parse(fixed);
-        if (this.debugMode) {
-          console.log('[OpenAI Hijack] JSON fix successful:', parsed);
+        // Successful fix - only log if there were multiple failures
+        if (this.debugMode && initialError) {
+          console.log('[OpenAI Hijack] JSON fix successful after initial failure');
         }
         return parsed;
       } catch (finalError) {
@@ -637,13 +849,28 @@ The user will execute the tools and provide you with the results. Use the result
               // Clean up any prefix issues in parsed tasks
               const cleanedTasks = parsedTasks.map(task => {
                 if (typeof task === 'string') {
-                  return task.replace(/^tasks\s*\[\s*["']?/, '').replace(/["']?\s*\]?$/, '');
+                  let cleaned = task.trim();
+                  // Only remove prefix/suffix if they actually exist
+                  if (cleaned.startsWith('tasks [')) {
+                    cleaned = cleaned.replace(/^tasks\s*\[\s*["']?/, '');
+                  }
+                  if (cleaned.endsWith(']')) {
+                    cleaned = cleaned.replace(/["']?\s*\]$/, '');
+                  }
+                  return cleaned.trim();
                 }
                 return task;
-              }).filter(t => t && t.length > 0);
+              }).filter(t => t && typeof t === 'string' && t.length > 0);
+              
+              if (this.debugMode) {
+                console.log('[OpenAI Hijack] Task parsing - JSON array result:', cleanedTasks);
+              }
               return { tasks: cleanedTasks };
             }
           } catch (e) {
+            if (this.debugMode) {
+              console.log('[OpenAI Hijack] JSON parsing failed:', e instanceof Error ? e.message : String(e));
+            }
             // Continue to next method
           }
         }
@@ -662,12 +889,20 @@ The user will execute the tools and provide you with the results. Use the result
         if (cleanParam.includes(',')) {
           const tasks = cleanParam.split(',').map(t => {
             let cleaned = t.trim().replace(/^['"]|['"]$/g, '');
-            // Remove "tasks [" prefix if present
-            cleaned = cleaned.replace(/^tasks\s*\[\s*["']?/, '');
-            // Remove trailing "]" or quotes
-            cleaned = cleaned.replace(/["']?\s*\]?$/, '');
-            return cleaned;
+            // More careful removal of "tasks [" prefix - only at the very beginning
+            if (cleaned.startsWith('tasks [')) {
+              cleaned = cleaned.replace(/^tasks\s*\[\s*["']?/, '');
+            }
+            // More careful removal of trailing "]" or quotes - only at the very end
+            if (cleaned.endsWith(']')) {
+              cleaned = cleaned.replace(/["']?\s*\]$/, '');
+            }
+            return cleaned.trim();
           }).filter(t => t.length > 0);
+          
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] Task parsing - split by comma result:', tasks);
+          }
           return { tasks };
         }
         
@@ -887,8 +1122,9 @@ The user will execute the tools and provide you with the results. Use the result
       }
     }
     
-    // Add to conversation history
-    this.conversationHistory.push({ role: 'user' as const, content: userMessage });
+    // Filter user message at source and add to conversation history
+    const filteredUserMessage = this.filterThinkingContent(userMessage);
+    this.conversationHistory.push({ role: 'user' as const, content: filteredUserMessage });
 
     if (this.debugMode) {
       console.log('[OpenAI Hijack] Sending user message to model:', this.config.model);
@@ -983,8 +1219,9 @@ The user will execute the tools and provide you with the results. Use the result
     // Format tool results for the model
     const toolResultMessage = this.formatToolResultsForModel(toolResults);
     
-    // Add tool result to conversation history
-    this.conversationHistory.push({ role: 'user' as const, content: toolResultMessage });
+    // Filter tool result message at source and add to conversation history
+    const filteredToolResultMessage = this.filterThinkingContent(toolResultMessage);
+    this.conversationHistory.push({ role: 'user' as const, content: filteredToolResultMessage });
 
     // Process model response - turn finalization will happen in processModelResponse
     yield* this.processModelResponse(toolResultMessage, signal, prompt_id, true);
@@ -1007,16 +1244,49 @@ The user will execute the tools and provide you with the results. Use the result
     try {
       // Prepare messages for OpenAI API
       let messages: any[] = [...this.conversationHistory];
+      let systemPrompt = '';
       
       // Inject comprehensive system prompt with tool guidance
       if (includeGuidance) {
-        let systemPrompt = '';
         let contextComponents: any = {};
+        let dynamicContextContent = '';
         
-        // First, get the core system prompt (enhanced if available)
+        // First, get the core system prompt (enhanced if available, but extract dynamic context)
         try {
           const { getEnhancedSystemPromptIfAvailable } = await import('../context/index.js');
-          systemPrompt = await getEnhancedSystemPromptIfAvailable(this.coreConfig, message);
+          
+          // Get the context manager to extract dynamic context separately
+          const contextManager = this.coreConfig.getContextManager();
+          const context = contextManager.getContext();
+          
+          // Extract both static and dynamic context for separate system message
+          const staticContextContent = contextManager.generateStaticContextContent();
+          
+          if (context.dynamicContext && context.dynamicContext.length > 0 || staticContextContent) {
+            const contextParts = [];
+            
+            if (staticContextContent && staticContextContent.trim()) {
+              contextParts.push(`**Static Context**:\n${staticContextContent}`);
+            }
+            
+            if (context.dynamicContext && context.dynamicContext.length > 0) {
+              contextParts.push(`**Dynamic Context**:\n${context.dynamicContext.join('\n')}`);
+            }
+            
+            dynamicContextContent = `# Contextual Information for Current Task\n\nThe following information is provided to help you understand the current project and codebase context for the user's request:\n\n${contextParts.join('\n\n')}`;
+            
+            // Temporarily clear dynamic context to prevent it from being included in system prompt
+            const originalDynamicContext = [...context.dynamicContext];
+            contextManager.clearDynamicContext();
+            
+            // Get enhanced system prompt without dynamic context
+            systemPrompt = await getEnhancedSystemPromptIfAvailable(this.coreConfig, message);
+            
+            // Restore dynamic context for subsequent operations
+            originalDynamicContext.forEach(ctx => contextManager.addDynamicContext(ctx));
+          } else {
+            systemPrompt = await getEnhancedSystemPromptIfAvailable(this.coreConfig, message);
+          }
           
           // Collect detailed context information for debug logging
           if (this.debugMode && this.debugLogger) {
@@ -1044,6 +1314,9 @@ The user will execute the tools and provide you with the results. Use the result
           
           if (this.debugMode) {
             console.log('[OpenAI Hijack] Using enhanced system prompt with context management');
+            if (dynamicContextContent) {
+              console.log('[OpenAI Hijack] Extracted dynamic context for separate injection:', dynamicContextContent.length, 'characters');
+            }
           }
         } catch (error) {
           // Fallback to original system prompt
@@ -1061,10 +1334,36 @@ The user will execute the tools and provide you with the results. Use the result
           systemPrompt += '\n\n' + toolGuidance;
         }
         
+        // Construct messages: system prompt + context in one message, then conversation history
+        let fullSystemPrompt = systemPrompt;
+        
+        // Append context information to the system prompt if available
+        if (dynamicContextContent && dynamicContextContent.trim().length > 0) {
+          fullSystemPrompt += '\n\n' + dynamicContextContent;
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] Added context information to system prompt');
+          }
+        }
+        
         messages = [
-          { role: 'system', content: systemPrompt },
-          ...messages
+          { role: 'system', content: fullSystemPrompt },
+          ...this.conversationHistory
         ];
+      }
+
+      // Log the complete request being sent to the model for debugging
+      if (this.debugLogger) {
+        this.debugLogger.logSentToModel({
+          systemPrompt: includeGuidance ? (messages[0]?.content || systemPrompt) : systemPrompt,
+          enhancedSystemPrompt: includeGuidance ? (messages[0]?.content || systemPrompt) : undefined,
+          messages: messages,
+          fullRequest: {
+            model: this.config.model,
+            temperature: this.config.temperature || 0.7,
+            max_tokens: this.config.maxTokens || 4096,
+            stream: false
+          }
+        });
       }
 
       // Use OpenAI chat completions API with non-streaming for better tool call handling
@@ -1084,6 +1383,9 @@ The user will execute the tools and provide you with the results. Use the result
 
       // Filter out <think></think> tags before parsing tool calls
       const cleanedResponse = fullResponse.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      
+      // Note: ContextAgent will be triggered again after tool calls complete
+      // to incorporate both model response and tool results
       
       // Parse tool calls once from the complete response
       if (this.debugMode) {
@@ -1168,14 +1470,14 @@ The user will execute the tools and provide you with the results. Use the result
         };
       }
 
+      // Filter out thinking content from the full response at the source
+      const filteredFullResponse = this.filterThinkingContent(fullResponse);
+
       // If the response contained tool calls, do not yield any content.
       // The UI should only show the tool call status.
       // If there are no tool calls, it's a regular text response.
-      if (toolCalls.length === 0 && fullResponse.trim()) {
-        let finalContent = fullResponse;
-        
-        // Filter out thinking content between <think> </think> tags
-        finalContent = this.filterThinkingContent(finalContent);
+      if (toolCalls.length === 0 && filteredFullResponse.trim()) {
+        let finalContent = filteredFullResponse;
         
         // Add task change detection if available
         try {
@@ -1200,8 +1502,8 @@ The user will execute the tools and provide you with the results. Use the result
         };
       }
       
-      // Add assistant's raw response to history for context
-      this.conversationHistory.push({ role: 'assistant' as const, content: fullResponse });
+      // Add assistant's filtered response to history for context
+      this.conversationHistory.push({ role: 'assistant' as const, content: filteredFullResponse });
 
       // Log model response to debug logger
       if (this.debugMode) {
@@ -1231,6 +1533,35 @@ The user will execute the tools and provide you with the results. Use the result
         
         if (this.debugMode) {
           console.log('[OpenAI Hijack] Model response and raw response logged to debug logger');
+        }
+      }
+
+      // Trigger ContextAgent based on model response and tool calls for next turn context
+      try {
+        const contextAgent = this.coreConfig.getContextAgent();
+        if (contextAgent?.isInitialized()) {
+          // Combine model response and tool call information for context generation
+          let contextInput = cleanedResponse;
+          if (toolCalls.length > 0) {
+            const toolSummary = `\nTool calls: ${toolCalls.map(tc => tc.name).join(', ')}`;
+            contextInput += toolSummary;
+          }
+          
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] Triggering ContextAgent based on model response and tool calls');
+            console.log('[OpenAI Hijack] Context input length:', contextInput.length, 'Tool calls:', toolCalls.length);
+          }
+          
+          // Update dynamic context for next turn based on current model response and tool calls
+          await contextAgent.injectContextIntoDynamicSystem(contextInput);
+          
+          if (this.debugMode) {
+            console.log('[OpenAI Hijack] ✅ ContextAgent updated dynamic context based on model response + tool calls');
+          }
+        }
+      } catch (contextAgentError) {
+        if (this.debugMode) {
+          console.warn('[OpenAI Hijack] ContextAgent failed during post-response update:', contextAgentError);
         }
       }
 
@@ -1404,10 +1735,12 @@ The user will execute the tools and provide you with the results. Use the result
   addHistory(content: Content): void {
     if (content.role === 'user') {
       const text = content.parts?.map(part => part.text).join('') || '';
-      this.conversationHistory.push({ role: 'user' as const, content: text });
+      const filteredText = this.filterThinkingContent(text);
+      this.conversationHistory.push({ role: 'user' as const, content: filteredText });
     } else if (content.role === 'model') {
       const text = content.parts?.map(part => part.text).join('') || '';
-      this.conversationHistory.push({ role: 'assistant' as const, content: text });
+      const filteredText = this.filterThinkingContent(text);
+      this.conversationHistory.push({ role: 'assistant' as const, content: filteredText });
     }
   }
 

@@ -634,6 +634,24 @@ export class Config {
     return this.contextAgent;
   }
 
+  /**
+   * Get the context budget for ContextAgent layered context generation
+   * Returns a configurable token budget with default of 8000 tokens
+   */
+  getContextBudget(): number {
+    // Allow environment variable override for context budget
+    const envBudget = process.env.GEMINI_CONTEXT_BUDGET;
+    if (envBudget) {
+      const parsed = parseInt(envBudget, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+    
+    // Default budget is 25000 tokens for layered context
+    return 25000;
+  }
+
   async createToolRegistry(): Promise<ToolRegistry> {
     const registry = new ToolRegistry(this);
     const targetDir = this.getTargetDir();

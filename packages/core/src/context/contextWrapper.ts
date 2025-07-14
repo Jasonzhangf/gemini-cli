@@ -31,31 +31,12 @@ export class ContextWrapper {
 
   /**
    * 包装现有的getUserMemory方法，添加上下文管理功能
+   * 注意：现在ContextManager统一处理系统提示词，这里只返回原始内存
    */
   async getEnhancedUserMemory(_userMessage?: string): Promise<string> {
-    // 获取原始的用户内存
-    const originalMemory = this.config.getUserMemory();
-    
-    // 获取上下文管理器生成的额外上下文
-    const contextualMemory = this.contextManager.generateModelContext();
-    
-    // 合并内存内容
-    const sections: string[] = [];
-    
-    if (originalMemory && originalMemory.trim().length > 0) {
-      sections.push('# 用户记忆 (Memory Tool)\n' + originalMemory.trim());
-    }
-    
-    if (contextualMemory && contextualMemory.trim().length > 0) {
-      sections.push(contextualMemory.trim());
-    }
-    
-    const enhancedMemory = sections.join('\n\n---\n\n');
-    
-    // NOTE: Debug快照现在在getEnhancedSystemPromptIfAvailable中统一处理
-    // 避免重复记录debug信息
-    
-    return enhancedMemory;
+    // 现在由ContextManager统一处理系统提示词和上下文，避免重复
+    // 这里只返回原始用户内存
+    return this.config.getUserMemory();
   }
 
   /**

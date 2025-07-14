@@ -33,14 +33,15 @@ export class PromptEnhancer {
 
   /**
    * 生成增强的系统提示
-   * 包装原有的getCoreSystemPrompt，添加上下文管理功能
+   * 只包含基础系统提示词和任务管理，不包含动态上下文（动态上下文单独发送）
    */
   async getEnhancedSystemPrompt(userMessage?: string): Promise<string> {
-    // 获取增强的用户内存（包含原始内存 + 上下文管理的内容）
-    const enhancedMemory = await this.contextWrapper.getEnhancedUserMemory(userMessage);
+    // 获取原始的用户内存
+    const originalMemory = this.config.getUserMemory();
     
-    // 使用原有的提示生成函数，但传入增强的内存
-    const basePrompt = getCoreSystemPrompt(enhancedMemory);
+    // 获取基础系统提示词（不包含动态上下文）
+    const { getCoreSystemPrompt } = await import('../core/prompts.js');
+    const basePrompt = getCoreSystemPrompt(originalMemory);
     
     // 获取当前任务信息
     const currentTaskPrompt = await this.generateCurrentTaskPrompt();

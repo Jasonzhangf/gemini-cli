@@ -335,3 +335,27 @@ export async function processSingleFileContent(
     };
   }
 }
+
+/**
+ * Filter out <think> tags and their content from text
+ * This is important for conversation history and context processing
+ * @param text The text to filter
+ * @returns Text with <think> tags and their content removed
+ */
+export function filterThinkTags(text: string): string {
+  if (!text) return text;
+  
+  // Remove <think>...</think> blocks (including content)
+  // This regex handles multiline content and nested angle brackets
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+}
+
+/**
+ * Check if text contains <think> tags
+ * @param text The text to check
+ * @returns True if text contains <think> tags
+ */
+export function hasThinkTags(text: string): boolean {
+  if (!text) return false;
+  return /<think>/i.test(text);
+}
