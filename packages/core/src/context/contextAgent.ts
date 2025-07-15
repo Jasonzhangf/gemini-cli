@@ -418,19 +418,33 @@ export class ContextAgent {
 
       // Primary: Use RAG system if available (LightRAG implementation)
       if (this.contextExtractor && userInput) {
+        console.log('[🧠 RAG] ContextAgent正在调用RAG系统...');
+        console.log(`[🧠 RAG] 用户输入: ${userInput.substring(0, 100)}${userInput.length > 100 ? '...' : ''}`);
         try {
           const ragResult = await this.extractContextWithRAG(userInput);
           if (ragResult) {
             contextSections.push(ragResult);
+            console.log(`[🧠 RAG] ✅ RAG系统成功生成 ${ragResult.length} 字符的上下文`);
             
             if (this.config.getDebugMode()) {
               console.log('[ContextAgent] ✅ Used advanced RAG system for context extraction');
             }
+          } else {
+            console.log('[🧠 RAG] ⚠️  RAG系统返回空结果');
           }
         } catch (ragError) {
+          const errorMessage = ragError instanceof Error ? ragError.message : String(ragError);
+          console.error('[🧠 RAG] ❌ RAG系统调用失败:', errorMessage);
           if (this.config.getDebugMode()) {
             console.warn('[ContextAgent] RAG system failed, falling back to layered context:', ragError);
           }
+        }
+      } else {
+        if (!this.contextExtractor) {
+          console.log('[🧠 RAG] ❌ contextExtractor未初始化');
+        }
+        if (!userInput) {
+          console.log('[🧠 RAG] ❌ userInput为空');
         }
       }
 
@@ -755,6 +769,21 @@ export class ContextAgent {
         sections.push('## 📁 Relevant Files');
         context.code.relevantFiles.forEach((file: any) => {
           sections.push(`- **${file.path || file.name}**: ${file.summary || 'No summary'} (relevance: ${(file.relevance * 100).toFixed(0)}%)`);
+          
+          // 添加文件内容上下文（如果存在）
+          if (file.contextLines && file.contextLines.length > 0) {
+            sections.push('');
+            sections.push(`**📄 File Content Context** (lines ${file.startLine || 'unknown'}-${file.endLine || 'unknown'}):`);
+            sections.push('```');
+            file.contextLines.forEach((line: string, index: number) => {
+              const lineNumber = (file.startLine || 1) + index;
+              const isMatchedLine = index === file.matchedLineIndex;
+              const marker = isMatchedLine ? '→' : ' ';
+              sections.push(`${lineNumber.toString().padStart(4)}${marker}${line}`);
+            });
+            sections.push('```');
+            sections.push('');
+          }
         });
         sections.push('');
         hasCodeContext = true;

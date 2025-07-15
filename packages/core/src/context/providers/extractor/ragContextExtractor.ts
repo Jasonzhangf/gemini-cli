@@ -19,10 +19,12 @@ import { RAGIncrementalIndexer, RAGIndexTrigger, FileChangeType } from './ragInc
 
 /**
  * RAG Level Configuration
- * L1: Basic keyword matching
- * L2: Semantic analysis + graph traversal  
- * L3: Full hybrid retrieval + entity extraction + context enhancement (default)
- * L4: Advanced cognitive analysis + learning adaptation
+ * L1: 基础关键词匹配 + 文件内容提取（±10行上下文）
+ * L2: L1 + 语义分析 + 图遍历扩展邻居节点  
+ * L3: L2 + 完整混合检索 + 动态实体提取 + 上下文增强（默认）
+ * L4: L3 + 高级认知分析 + 学习适应 + 意图演变分析
+ * 
+ * 注意：所有级别都包含基础的文件内容提取功能，更高级别主要增加邻居节点和分析深度
  */
 type RAGLevel = 'L1' | 'L2' | 'L3' | 'L4';
 
@@ -414,7 +416,7 @@ export class RAGContextExtractor implements IContextExtractor {
       threshold: 0.1,
       combineStrategies: true,
       enableSemanticAnalysis: true,
-      debugMode: false,
+      debugMode: false, // 关闭详细调试，减少垃圾信息
       ragLevel: 'L3', // 默认L3级别
       // Advanced RAG defaults
       useHybridRetrieval: true,
@@ -639,7 +641,8 @@ export class RAGContextExtractor implements IContextExtractor {
   }
 
   /**
-   * L1级别：基础关键词匹配
+   * L1级别：基础关键词匹配 + 文件内容提取（±10行上下文）
+   * 包含所有基础的RAG功能，包括文件内容提取和上下文行显示
    */
   private async extractL1Context(ragInput: RAGInputData): Promise<ExtractedContext> {
     const userInput = ragInput.userRawInput;
@@ -660,7 +663,7 @@ export class RAGContextExtractor implements IContextExtractor {
   }
 
   /**
-   * L2级别：语义分析 + 图遍历
+   * L2级别：L1功能 + 语义分析增强 + 图遍历扩展邻居节点
    */
   private async extractL2Context(ragInput: RAGInputData): Promise<ExtractedContext> {
     const userInput = ragInput.modelFilteredInput || ragInput.userRawInput;
@@ -681,7 +684,7 @@ export class RAGContextExtractor implements IContextExtractor {
   }
 
   /**
-   * L3级别：完整混合检索 + 实体提取 + 上下文增强（默认）
+   * L3级别：L2功能 + 完整混合检索 + 动态实体提取 + 上下文增强（默认）
    */
   private async extractL3Context(ragInput: RAGInputData): Promise<ExtractedContext> {
     const userInput = ragInput.modelFilteredInput || ragInput.userRawInput;
@@ -702,7 +705,7 @@ export class RAGContextExtractor implements IContextExtractor {
   }
 
   /**
-   * L4级别：高级认知分析 + 学习适应
+   * L4级别：L3功能 + 高级认知分析 + 学习适应 + 意图演变分析
    */
   private async extractL4Context(ragInput: RAGInputData): Promise<ExtractedContext> {
     const userInput = ragInput.modelFilteredInput || ragInput.userRawInput;
@@ -849,6 +852,7 @@ export class RAGContextExtractor implements IContextExtractor {
     try {
       // Tokenize user input for advanced RAG search
       const queryTokens = this.tokenizeForRAG(userInput);
+      console.log(`[RAG] 搜索关键词: ${queryTokens.slice(0, 5).join(', ')}${queryTokens.length > 5 ? '...' : ''}`);
       
       // Perform advanced RAG search with hybrid retrieval
       const ragResults = await this.performAdvancedRAGSearch(queryTokens, userInput);
@@ -983,6 +987,20 @@ export class RAGContextExtractor implements IContextExtractor {
         
         // 为文件结果添加上下文行提取
         const enhancedResults = await this.enhanceResultsWithContext(allResults, tokens);
+        
+        // 始终显示关键的RAG结果信息
+        console.log(`[RAG] 发现 ${enhancedResults.length} 个相关结果`);
+        const resultsWithContext = enhancedResults.filter(r => r.contextLines && r.contextLines.length > 0);
+        if (resultsWithContext.length > 0) {
+          console.log(`[RAG] 其中 ${resultsWithContext.length} 个包含文件内容上下文`);
+          resultsWithContext.forEach((result, i) => {
+            const filePath = result.metadata?.filePath || 'unknown';
+            const fileName = filePath.split('/').pop() || filePath;
+            console.log(`[RAG] ${i+1}. ${fileName}: ${result.contextLines.length}行内容 (匹配行 ${result.matchedLine})`);
+          });
+        } else {
+          console.log(`[RAG] ⚠️  没有文件包含内容上下文 - 可能需要重建索引`);
+        }
         
         return enhancedResults;
       } else {
@@ -1486,17 +1504,26 @@ export class RAGContextExtractor implements IContextExtractor {
    */
   private extractRelevantFiles(ragResults: any[]): ExtractedContext['code']['relevantFiles'] {
     return ragResults
-      .filter(r => r.type === 'file' || r.metadata?.filePath)
-      .map(r => ({
-        path: r.metadata?.filePath || r.id,
-        relevance: r.relevance,
-        summary: `${r.content.substring(0, 80)}... ${r.contextHint || ''}`,
-        // 添加上下文提取字段
-        contextLines: r.contextLines || [],
-        matchedLine: r.matchedLine || 0,
-        fileName: this.extractFileName(r.metadata?.filePath || r.id),
-        fileExtension: this.extractFileExtension(r.metadata?.filePath || r.id)
-      }));
+      .filter(r => {
+        const filePath = r.metadata?.filePath || r.filePath || r.path;
+        return filePath && r.content;
+      })
+      .map(r => {
+        const filePath = r.metadata?.filePath || r.filePath || r.path;
+        return {
+          path: filePath,
+          relevance: r.relevance || r.relevanceScore || 0,
+          summary: `${(r.content || '').substring(0, 80)}... ${r.contextHint || ''}`,
+          // 添加上下文提取字段
+          contextLines: r.contextLines || [],
+          matchedLine: r.matchedLine || 0,
+          startLine: r.startLine || 0,
+          endLine: r.endLine || 0,
+          matchedLineIndex: r.matchedLineIndex || 0,
+          fileName: this.extractFileName(filePath),
+          fileExtension: this.extractFileExtension(filePath)
+        };
+      });
   }
 
   /**
@@ -1506,7 +1533,9 @@ export class RAGContextExtractor implements IContextExtractor {
     const enhancedResults = [];
     
     for (const result of results) {
-      if (result.type === 'file' && result.metadata?.filePath) {
+      // 放宽条件：只要有文件路径就尝试提取上下文
+      const filePath = result.metadata?.filePath || result.filePath || result.path;
+      if (filePath && result.content) {
         const enhancedResult = { ...result };
         
         // 查找匹配的行号
@@ -1514,12 +1543,20 @@ export class RAGContextExtractor implements IContextExtractor {
         
         if (matchedLine > 0) {
           // 提取上下文行
-          const contextInfo = await this.extractContextLines(result.metadata.filePath, matchedLine, 10);
-          enhancedResult.contextLines = contextInfo.lines;
-          enhancedResult.matchedLine = matchedLine;
-          enhancedResult.startLine = contextInfo.startLine;
-          enhancedResult.endLine = contextInfo.endLine;
-          enhancedResult.matchedLineIndex = contextInfo.matchedLineIndex;
+          const contextInfo = await this.extractContextLines(filePath, matchedLine, 10);
+          if (contextInfo.lines.length > 0) {
+            enhancedResult.contextLines = contextInfo.lines;
+            enhancedResult.matchedLine = matchedLine;
+            enhancedResult.startLine = contextInfo.startLine;
+            enhancedResult.endLine = contextInfo.endLine;
+            enhancedResult.matchedLineIndex = contextInfo.matchedLineIndex;
+            
+            // 确保metadata存在
+            if (!enhancedResult.metadata) {
+              enhancedResult.metadata = {};
+            }
+            enhancedResult.metadata.filePath = filePath;
+          }
         }
         
         enhancedResults.push(enhancedResult);
