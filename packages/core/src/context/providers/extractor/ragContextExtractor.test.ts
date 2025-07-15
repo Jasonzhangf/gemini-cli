@@ -22,7 +22,33 @@ describe('RAGContextExtractor', () => {
     // Mock graph provider
     mockGraphProvider = {
       initialize: vi.fn().mockResolvedValue(undefined),
-      query: vi.fn().mockResolvedValue({
+      query: vi.fn().mockResolvedValue([
+        {
+          id: 'func-1',
+          type: 'function',
+          name: 'createUser',
+          content: 'Creates a new user in the system with authentication and React components',
+          metadata: { filePath: '/src/user.ts', lineStart: 10 },
+          relationships: []
+        },
+        {
+          id: 'file-1',
+          type: 'file',
+          name: 'userService.ts',
+          content: 'User service implementation with TypeScript interfaces and markdown documentation for architecture design',
+          metadata: { filePath: '/src/userService.ts' },
+          relationships: []
+        },
+        {
+          id: 'comp-1',
+          type: 'component',
+          name: 'UserComponent',
+          content: 'React component for user interface with API integration',
+          metadata: { filePath: '/src/components/UserComponent.tsx' },
+          relationships: []
+        }
+      ] as KnowledgeNode[]),
+      queryGraph: vi.fn().mockResolvedValue({
         nodes: [
           {
             id: 'func-1',
@@ -39,22 +65,15 @@ describe('RAGContextExtractor', () => {
             content: 'User service implementation with TypeScript interfaces and markdown documentation for architecture design',
             metadata: { filePath: '/src/userService.ts' },
             relationships: []
-          },
-          {
-            id: 'comp-1',
-            type: 'component',
-            name: 'UserComponent',
-            content: 'React component for user interface with API integration',
-            metadata: { filePath: '/src/components/UserComponent.tsx' },
-            relationships: []
           }
         ] as KnowledgeNode[],
         relationships: [],
-        totalCount: 3,
+        totalCount: 2,
         queryTime: 10
       }),
       getNode: vi.fn().mockResolvedValue(null),
       getNeighbors: vi.fn().mockResolvedValue([]),
+      findRelatedNodes: vi.fn().mockResolvedValue([]),
       upsertNode: vi.fn().mockResolvedValue(undefined),
       removeNode: vi.fn().mockResolvedValue(undefined),
       getStatistics: vi.fn().mockResolvedValue({

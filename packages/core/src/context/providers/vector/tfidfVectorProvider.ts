@@ -88,7 +88,21 @@ export class TFIDFVectorProvider implements IVectorSearchProvider {
     await this.rebuildVocabularyAndVectors();
   }
 
-  async search(query: VectorQuery): Promise<VectorSearchResponse> {
+  async search(query: VectorQuery | string, options?: { maxResults?: number }): Promise<VectorSearchResponse> {
+    // Handle string queries
+    if (typeof query === 'string') {
+      const vectorQuery: VectorQuery = {
+        text: query,
+        topK: options?.maxResults || 10
+      };
+      return this.searchVector(vectorQuery);
+    }
+    
+    // Handle VectorQuery objects
+    return this.searchVector(query);
+  }
+
+  async searchVector(query: VectorQuery): Promise<VectorSearchResponse> {
     const startTime = Date.now();
     
     if (!this.isInitialized || this.documents.size === 0) {

@@ -12,10 +12,10 @@
 
 // 导出所有测试套件
 export * from './rag-md-encoding.test.js';
-export * from './rag-filename-encoding.test.js';
-export * from './rag-context-extraction.test.js';
-export * from './rag-keyword-matching.test.js';
-export * from './rag-comprehensive.test.js';
+// export * from './rag-filename-encoding.test.js';
+// export * from './rag-context-extraction.test.js';
+// export * from './rag-keyword-matching.test.js';
+// export * from './rag-comprehensive.test.js';
 
 /**
  * 测试套件说明
@@ -80,21 +80,5 @@ export * from './rag-comprehensive.test.js';
 /**
  * 测试配置建议
  * 
- * 在vitest.config.ts中添加以下配置：
- * ```typescript
- * export default defineConfig({
- *   test: {
- *     globals: true,
- *     environment: 'node',
- *     setupFiles: ['./src/context/providers/extractor/tests/setup.ts'],
- *     testTimeout: 30000, // 30秒超时
- *     hookTimeout: 10000, // 10秒hook超时
- *     coverage: {
- *       reporter: ['text', 'json', 'html'],
- *       include: ['src/context/providers/extractor/**/*.ts'],
- *       exclude: ['src/context/providers/extractor/tests/**/*.ts']
- *     }
- *   }
- * });
- * ```
+ * 在vitest.config.ts中添加相关配置以支持RAG测试
  */

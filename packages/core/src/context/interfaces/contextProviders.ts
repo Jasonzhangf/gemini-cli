@@ -46,6 +46,13 @@ export interface GraphQueryResult {
   queryTime: number;
 }
 
+export interface RelatedNode {
+  id: string;
+  name: string;
+  content: string;
+  metadata?: Record<string, any>;
+}
+
 export interface IKnowledgeGraphProvider {
   /**
    * Initialize the graph provider
@@ -55,7 +62,13 @@ export interface IKnowledgeGraphProvider {
   /**
    * Query nodes from the graph
    */
+  query(searchTerm: string, options?: { maxResults?: number }): Promise<KnowledgeNode[]>;
   query(query: GraphQuery): Promise<GraphQueryResult>;
+
+  /**
+   * Query nodes from the graph with full result
+   */
+  queryGraph(query: GraphQuery): Promise<GraphQueryResult>;
 
   /**
    * Get a specific node by ID
@@ -66,6 +79,11 @@ export interface IKnowledgeGraphProvider {
    * Get neighbors of a node
    */
   getNeighbors(nodeId: string, maxDepth?: number): Promise<KnowledgeNode[]>;
+
+  /**
+   * Find related nodes by path or ID
+   */
+  findRelatedNodes(pathOrId: string, maxDepth?: number): Promise<RelatedNode[]>;
 
   /**
    * Add or update a node
@@ -133,7 +151,7 @@ export interface IVectorSearchProvider {
   /**
    * Search for similar documents
    */
-  search(query: VectorQuery): Promise<VectorSearchResponse>;
+  search(query: VectorQuery | string, options?: { maxResults?: number }): Promise<VectorSearchResponse>;
 
   /**
    * Remove a document from the index

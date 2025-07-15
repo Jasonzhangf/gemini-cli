@@ -54,8 +54,8 @@ export class StreamAdapter {
       return;
     }
 
-    // 处理完整响应
-    const processed = ResponseProcessor.processResponse(this.accumulatedContent);
+    // 处理完整响应（使用同步版本保持兼容性）
+    const processed = ResponseProcessor.processResponseSync(this.accumulatedContent);
     
     // 发送思考内容（如果有）
     const thinkingContent = ResponseProcessor.extractThinkingContent(this.accumulatedContent);

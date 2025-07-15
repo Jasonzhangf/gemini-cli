@@ -52,9 +52,11 @@ describe('HybridContextExtractor', () => {
     // Mock providers
     mockGraphProvider = {
       initialize: vi.fn().mockResolvedValue(undefined),
-      query: vi.fn().mockResolvedValue({ nodes: [], relationships: [], totalCount: 0, queryTime: 0 }),
+      query: vi.fn().mockResolvedValue([]),
+      queryGraph: vi.fn().mockResolvedValue({ nodes: [], relationships: [], totalCount: 0, queryTime: 0 }),
       getNode: vi.fn().mockResolvedValue(null),
       getNeighbors: vi.fn().mockResolvedValue([]),
+      findRelatedNodes: vi.fn().mockResolvedValue([]),
       upsertNode: vi.fn().mockResolvedValue(undefined),
       removeNode: vi.fn().mockResolvedValue(undefined),
       getStatistics: vi.fn().mockResolvedValue({

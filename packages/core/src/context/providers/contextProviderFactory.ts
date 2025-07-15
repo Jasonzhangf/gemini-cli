@@ -115,7 +115,8 @@ export class ContextProviderFactory implements IContextProviderFactory {
   createContextExtractor(
     config: ContextProviderConfig['extractorProvider'],
     graphProvider: IKnowledgeGraphProvider,
-    vectorProvider: IVectorSearchProvider
+    vectorProvider: IVectorSearchProvider,
+    projectRoot?: string
   ): IContextExtractor {
     const ExtractorClass = this.extractorProviders.get(config.type);
     
@@ -123,7 +124,14 @@ export class ContextProviderFactory implements IContextProviderFactory {
       throw new Error(`Unknown extractor provider type: ${config.type}`);
     }
 
-    return new ExtractorClass(config.config, graphProvider, vectorProvider);
+    // Add project root to RAG extractor config
+    const enhancedConfig = config.type === 'rag' ? {
+      ...config.config,
+      projectRoot: projectRoot || process.cwd(),
+      debugMode: true // Enable debug mode for RAG
+    } : config.config;
+
+    return new ExtractorClass(enhancedConfig, graphProvider, vectorProvider);
   }
 
   /**

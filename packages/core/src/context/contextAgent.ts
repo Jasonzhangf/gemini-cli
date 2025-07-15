@@ -171,7 +171,8 @@ export class ContextAgent {
       this.contextExtractor = this.providerFactory.createContextExtractor(
         providerConfig.extractorProvider,
         this.graphProvider,
-        this.vectorProvider
+        this.vectorProvider,
+        this.projectDir // Pass project root for RAG storage
       );
 
       // Initialize providers

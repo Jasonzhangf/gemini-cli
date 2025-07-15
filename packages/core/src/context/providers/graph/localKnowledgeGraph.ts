@@ -53,7 +53,24 @@ export class LocalKnowledgeGraphProvider implements IKnowledgeGraphProvider {
     this.isInitialized = true;
   }
 
-  async query(query: GraphQuery): Promise<GraphQueryResult> {
+  async query(searchTerm: string, options?: { maxResults?: number }): Promise<KnowledgeNode[]>;
+  async query(query: GraphQuery): Promise<GraphQueryResult>;
+  async query(query: string | GraphQuery, options?: { maxResults?: number }): Promise<KnowledgeNode[] | GraphQueryResult> {
+    // Handle string queries
+    if (typeof query === 'string') {
+      const graphQuery: GraphQuery = {
+        searchTerm: query,
+        maxResults: options?.maxResults || 10
+      };
+      const result = await this.queryGraph(graphQuery);
+      return result.nodes;
+    }
+    
+    // Handle GraphQuery objects
+    return this.queryGraph(query);
+  }
+
+  async queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
     const startTime = Date.now();
     const results: KnowledgeNode[] = [];
     const relationships: Array<{ sourceId: string; targetId: string; type: string; weight?: number }> = [];
@@ -117,6 +134,33 @@ export class LocalKnowledgeGraphProvider implements IKnowledgeGraphProvider {
 
   async getNode(nodeId: string): Promise<KnowledgeNode | null> {
     return this.nodes.get(nodeId) || null;
+  }
+
+  async findRelatedNodes(pathOrId: string, maxDepth: number = 2): Promise<{ id: string; name: string; content: string; metadata?: Record<string, any> }[]> {
+    const relatedNodes: { id: string; name: string; content: string; metadata?: Record<string, any> }[] = [];
+    
+    // Find node by path or ID
+    let startNode: KnowledgeNode | undefined;
+    for (const [nodeId, node] of this.nodes) {
+      if (nodeId === pathOrId || node.metadata?.filePath === pathOrId) {
+        startNode = node;
+        break;
+      }
+    }
+    
+    if (!startNode) {
+      return relatedNodes;
+    }
+    
+    // Get neighbors recursively
+    const neighbors = await this.getNeighbors(startNode.id, maxDepth);
+    
+    return neighbors.map(node => ({
+      id: node.id,
+      name: node.name,
+      content: node.content || '',
+      metadata: node.metadata
+    }));
   }
 
   async getNeighbors(nodeId: string, maxDepth: number = 1): Promise<KnowledgeNode[]> {

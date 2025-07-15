@@ -29,7 +29,7 @@ describe('RAG简单测试', () => {
     mockVectorProvider = {
       initialize: vi.fn().mockResolvedValue(undefined),
       indexDocument: vi.fn().mockResolvedValue(undefined),
-      search: vi.fn().mockResolvedValue([]),
+      search: vi.fn().mockResolvedValue({ results: [] }),
       updateDocument: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -78,18 +78,23 @@ describe('RAG简单测试', () => {
       ]
     });
 
-    mockVectorProvider.search.mockResolvedValue([
-      {
-        id: 'test-file.ts',
-        similarity: 0.8,
-        metadata: { type: 'file', filePath: 'test-file.ts' }
-      }
-    ]);
+    mockVectorProvider.search.mockResolvedValue({
+      results: [
+        {
+          id: 'test-file.ts',
+          score: 0.8,
+          metadata: { type: 'file', filePath: 'test-file.ts' }
+        }
+      ]
+    });
 
     const result = await ragExtractor.extractContext(query);
     
     expect(result).toBeDefined();
-    expect(result.context).toBeDefined();
+    expect(result.code).toBeDefined();
+    expect(result.semantic).toBeDefined();
+    expect(result.conversation).toBeDefined();
+    expect(result.operational).toBeDefined();
     expect(mockGraphProvider.query).toHaveBeenCalled();
     expect(mockVectorProvider.search).toHaveBeenCalled();
   });
@@ -104,6 +109,53 @@ describe('RAG简单测试', () => {
     const result = await ragExtractor.extractContext(query);
     
     expect(result).toBeDefined();
-    expect(result.context).toBeDefined();
+    expect(result.code).toBeDefined();
+    expect(result.semantic).toBeDefined();
+    expect(result.conversation).toBeDefined();
+    expect(result.operational).toBeDefined();
+  });
+
+  it('应该能够更新文件内容', async () => {
+    const updateData = {
+      type: 'file_change' as const,
+      data: {
+        filePath: '/test/file.ts',
+        content: 'test content'
+      }
+    };
+
+    await ragExtractor.updateContext(updateData);
+
+    // 验证图数据库调用 - 使用更灵活的匹配
+    expect(mockGraphProvider.upsertNode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: '/test/file.ts',
+        name: 'file.ts',
+        type: 'file',
+        content: '[LANGUAGE:ts]\ntest content',
+        metadata: expect.objectContaining({
+          fileName: 'file.ts',
+          fileExtension: '.ts',
+          filePath: '/test/file.ts',
+          isMdFile: false,
+          isCodeFile: true,
+          contentType: 'typescript'
+        }),
+        relationships: []
+      })
+    );
+
+    // 验证向量数据库调用
+    expect(mockVectorProvider.indexDocument).toHaveBeenCalledWith(
+      '/test/file.ts',
+      '[LANGUAGE:ts]\ntest content',
+      expect.objectContaining({
+        type: 'file',
+        filePath: '/test/file.ts',
+        fileName: 'file.ts',
+        fileExtension: '.ts',
+        contentType: 'typescript'
+      })
+    );
   });
 });

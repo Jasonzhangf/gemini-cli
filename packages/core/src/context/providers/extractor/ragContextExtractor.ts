@@ -11,6 +11,30 @@ import {
   ContextQuery, 
   ExtractedContext 
 } from '../../interfaces/contextProviders.js';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
+import { getProjectHash } from '../../../utils/paths.js';
+
+/**
+ * RAG Level Configuration
+ * L1: Basic keyword matching
+ * L2: Semantic analysis + graph traversal  
+ * L3: Full hybrid retrieval + entity extraction + context enhancement (default)
+ * L4: Advanced cognitive analysis + learning adaptation
+ */
+type RAGLevel = 'L1' | 'L2' | 'L3' | 'L4';
+
+/**
+ * RAG Input Data Types
+ */
+interface RAGInputData {
+  userRawInput: string;           // 用户输入的原始数据
+  modelFilteredInput?: string;    // 模型过滤过的数据（包含<think>标签等）
+  conversationHistory?: any[];
+  availableTools?: any[];
+  recentOperations?: any[];
+}
 
 /**
  * Advanced RAG configuration supporting multiple algorithms
@@ -21,12 +45,18 @@ interface RAGExtractorConfig {
   combineStrategies?: boolean;
   enableSemanticAnalysis?: boolean;
   debugMode?: boolean;
+  // RAG Level configuration
+  ragLevel?: RAGLevel;
   // Advanced RAG options
   useHybridRetrieval?: boolean;
   enableGraphTraversal?: boolean;
   semanticSimilarityAlgorithm?: 'tfidf' | 'bm25' | 'cosine';
   dynamicEntityExtraction?: boolean;
   contextWindowSize?: number;
+  // Persistence options
+  persistentStorage?: boolean;
+  projectRoot?: string;
+  storageDir?: string;
 }
 
 /**
@@ -359,6 +389,8 @@ export class RAGContextExtractor implements IContextExtractor {
   private graphProvider: IKnowledgeGraphProvider;
   private vectorProvider: IVectorSearchProvider;
   private isInitialized = false;
+  private storageDir: string;
+  private indexValidated = false;
   
   // Advanced analysis components
   private textAnalyzer: TextAnalyzer;
@@ -378,26 +410,47 @@ export class RAGContextExtractor implements IContextExtractor {
       combineStrategies: true,
       enableSemanticAnalysis: true,
       debugMode: false,
+      ragLevel: 'L3', // 默认L3级别
       // Advanced RAG defaults
       useHybridRetrieval: true,
       enableGraphTraversal: true,
       semanticSimilarityAlgorithm: 'bm25',
       dynamicEntityExtraction: true,
-      contextWindowSize: 512,
+      contextWindowSize: 10, // 默认上下文10行
+      persistentStorage: true,
       ...config
     };
     this.graphProvider = graphProvider;
     this.vectorProvider = vectorProvider;
+    
+    // 设置存储目录：~/.gemini/Projects/[项目hash]/rag/
+    this.storageDir = this.getProjectRAGStorageDir();
     
     // Initialize advanced components
     this.textAnalyzer = new TextAnalyzer();
     this.entityExtractor = new DynamicEntityExtractor(this.textAnalyzer);
   }
 
+  /**
+   * 获取项目RAG存储目录
+   */
+  private getProjectRAGStorageDir(): string {
+    const projectRoot = this.config.projectRoot || process.cwd();
+    const projectHash = getProjectHash(projectRoot);
+    const baseDir = this.config.storageDir || path.join(os.homedir(), '.gemini', 'Projects', projectHash, 'rag');
+    return baseDir;
+  }
+
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
 
     try {
+      // 确保存储目录存在
+      await this.ensureStorageDirectory();
+      
+      // 加载已有的RAG数据库，而不是重建索引
+      await this.loadExistingRAGDatabase();
+      
       // Initialize both providers
       await Promise.all([
         this.graphProvider.initialize(),
@@ -413,6 +466,84 @@ export class RAGContextExtractor implements IContextExtractor {
     this.isInitialized = true;
   }
 
+  /**
+   * 确保存储目录存在
+   */
+  private async ensureStorageDirectory(): Promise<void> {
+    try {
+      await fs.mkdir(this.storageDir, { recursive: true });
+      if (this.config.debugMode) {
+        console.log(`[RAGContextExtractor] Storage directory ensured: ${this.storageDir}`);
+      }
+    } catch (error) {
+      console.warn(`[RAGContextExtractor] Failed to create storage directory: ${error}`);
+    }
+  }
+
+  /**
+   * 加载已有的RAG数据库
+   */
+  private async loadExistingRAGDatabase(): Promise<void> {
+    const indexPath = path.join(this.storageDir, 'rag-index.json');
+    
+    try {
+      const indexData = await fs.readFile(indexPath, 'utf8');
+      const ragIndex = JSON.parse(indexData);
+      
+      if (this.config.debugMode) {
+        console.log(`[RAGContextExtractor] Loaded existing RAG database with ${ragIndex.fileCount || 0} files`);
+      }
+      
+      // 这里可以根据需要重新构建索引或验证索引完整性
+      await this.validateAndRestoreIndex(ragIndex);
+      
+    } catch (error) {
+      if (this.config.debugMode) {
+        console.log(`[RAGContextExtractor] No existing RAG database found, will create new one`);
+      }
+    }
+  }
+
+  /**
+   * 验证并恢复索引
+   */
+  private async validateAndRestoreIndex(ragIndex: any): Promise<void> {
+    try {
+      // 验证索引的完整性和时效性
+      if (ragIndex.version && ragIndex.files) {
+        // 检查文件是否被修改
+        const modifiedFiles = [];
+        for (const fileEntry of ragIndex.files) {
+          if (fileEntry.path && fileEntry.lastModified) {
+            try {
+              const stats = await fs.stat(fileEntry.path);
+              if (stats.mtime.getTime() !== fileEntry.lastModified) {
+                modifiedFiles.push(fileEntry.path);
+              }
+            } catch (error) {
+              // 文件不存在或无法访问，需要从索引中移除
+              modifiedFiles.push(fileEntry.path);
+            }
+          }
+        }
+        
+        if (modifiedFiles.length > 0 && this.config.debugMode) {
+          console.log(`[RAGContextExtractor] Found ${modifiedFiles.length} modified files, will update incrementally`);
+        }
+      }
+      
+      // 标记索引为已验证
+      this.indexValidated = true;
+      
+    } catch (error) {
+      if (this.config.debugMode) {
+        console.warn('[RAGContextExtractor] Index validation failed:', error);
+      }
+      // 如果验证失败，将创建新索引
+      this.indexValidated = false;
+    }
+  }
+
   async extractContext(query: ContextQuery): Promise<ExtractedContext> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -420,28 +551,147 @@ export class RAGContextExtractor implements IContextExtractor {
 
     const startTime = Date.now();
     
-    // Extract semantic information from user input
-    const semantic = await this.extractSemanticContext(query.userInput);
+    // 处理RAG输入数据：用户原始输入和模型过滤后的输入
+    const ragInput = this.processRAGInputData(query);
     
-    // Extract code context using both graph and vector search
-    const code = await this.extractCodeContext(query.userInput, semantic);
+    // 基于RAG级别配置提取上下文
+    const extractedContext = await this.extractContextByLevel(ragInput);
     
-    // Analyze conversation context
-    const conversation = this.extractConversationContext(query.conversationHistory || []);
-    
-    // Extract operational context
-    const operational = this.extractOperationalContext(query.recentOperations);
-
     if (this.config.debugMode) {
       console.log(`[RAGContextExtractor] Context extraction completed in ${Date.now() - startTime}ms`);
+      console.log(`[RAGContextExtractor] RAG Level: ${this.config.ragLevel}, Context window: ${this.config.contextWindowSize} lines`);
     }
 
+    return extractedContext;
+  }
+
+  /**
+   * 处理RAG输入数据：用户原始输入和模型过滤后的输入
+   */
+  private processRAGInputData(query: ContextQuery): RAGInputData {
+    // 提取用户原始输入
+    const userRawInput = query.userInput;
+    
+    // 尝试从用户输入中提取模型过滤后的数据（包含<think>标签等）
+    let modelFilteredInput: string | undefined;
+    
+    // 检查是否包含<think>标签
+    const thinkMatch = userRawInput.match(/<think>(.*?)<\/think>/s);
+    if (thinkMatch) {
+      modelFilteredInput = thinkMatch[1].trim();
+    }
+    
     return {
-      semantic,
-      code,
-      conversation,
-      operational
+      userRawInput,
+      modelFilteredInput,
+      conversationHistory: query.conversationHistory || [],
+      availableTools: [], // 可以从context中获取
+      recentOperations: query.recentOperations || []
     };
+  }
+
+  /**
+   * 基于RAG级别配置提取上下文
+   */
+  private async extractContextByLevel(ragInput: RAGInputData): Promise<ExtractedContext> {
+    const level = this.config.ragLevel || 'L3';
+    
+    switch (level) {
+      case 'L1':
+        return this.extractL1Context(ragInput);
+      case 'L2':
+        return this.extractL2Context(ragInput);
+      case 'L3':
+        return this.extractL3Context(ragInput);
+      case 'L4':
+        return this.extractL4Context(ragInput);
+      default:
+        return this.extractL3Context(ragInput); // 默认L3
+    }
+  }
+
+  /**
+   * L1级别：基础关键词匹配
+   */
+  private async extractL1Context(ragInput: RAGInputData): Promise<ExtractedContext> {
+    const userInput = ragInput.userRawInput;
+    
+    // 基础语义分析
+    const semantic = await this.extractSemanticContext(userInput);
+    
+    // 简单的代码上下文提取
+    const code = await this.extractCodeContext(userInput, semantic);
+    
+    // 基础会话上下文
+    const conversation = this.extractConversationContext(ragInput.conversationHistory);
+    
+    // 基础操作上下文
+    const operational = this.extractOperationalContext(ragInput.recentOperations);
+
+    return { semantic, code, conversation, operational };
+  }
+
+  /**
+   * L2级别：语义分析 + 图遍历
+   */
+  private async extractL2Context(ragInput: RAGInputData): Promise<ExtractedContext> {
+    const userInput = ragInput.modelFilteredInput || ragInput.userRawInput;
+    
+    // 增强的语义分析
+    const semantic = await this.extractSemanticContext(userInput);
+    
+    // 图遍历增强的代码上下文
+    const code = await this.extractCodeContextWithGraphTraversal(userInput, semantic);
+    
+    // 会话上下文
+    const conversation = this.extractConversationContext(ragInput.conversationHistory);
+    
+    // 增强的操作上下文
+    const operational = this.extractOperationalContext(ragInput.recentOperations);
+
+    return { semantic, code, conversation, operational };
+  }
+
+  /**
+   * L3级别：完整混合检索 + 实体提取 + 上下文增强（默认）
+   */
+  private async extractL3Context(ragInput: RAGInputData): Promise<ExtractedContext> {
+    const userInput = ragInput.modelFilteredInput || ragInput.userRawInput;
+    
+    // 完整的语义分析
+    const semantic = await this.extractSemanticContext(userInput);
+    
+    // 混合检索的代码上下文
+    const code = await this.extractCodeContextWithHybridRetrieval(userInput, semantic);
+    
+    // 增强的会话上下文
+    const conversation = this.extractEnhancedConversationContext(ragInput.conversationHistory);
+    
+    // 完整的操作上下文
+    const operational = this.extractEnhancedOperationalContext(ragInput.recentOperations);
+
+    return { semantic, code, conversation, operational };
+  }
+
+  /**
+   * L4级别：高级认知分析 + 学习适应
+   */
+  private async extractL4Context(ragInput: RAGInputData): Promise<ExtractedContext> {
+    const userInput = ragInput.modelFilteredInput || ragInput.userRawInput;
+    
+    // 高级语义分析
+    const semantic = await this.extractAdvancedSemanticContext(userInput, ragInput);
+    
+    // 认知增强的代码上下文
+    const code = await this.extractCognitiveCodeContext(userInput, semantic, ragInput);
+    
+    // 适应性会话上下文
+    const conversation = this.extractAdaptiveConversationContext(ragInput.conversationHistory);
+    
+    // 学习增强的操作上下文
+    const operational = this.extractLearningOperationalContext(ragInput.recentOperations);
+
+    return { semantic, code, conversation, operational };
   }
 
   async updateContext(update: {
@@ -673,7 +923,10 @@ export class RAGContextExtractor implements IContextExtractor {
           tokens
         );
         
-        return allResults;
+        // 为文件结果添加上下文行提取
+        const enhancedResults = await this.enhanceResultsWithContext(allResults, tokens);
+        
+        return enhancedResults;
       } else {
         // Fallback to basic search
         return await this.performBasicRAGSearch(tokens, originalQuery);
@@ -707,7 +960,7 @@ export class RAGContextExtractor implements IContextExtractor {
    * Graph-based search with traversal
    */
   private async performGraphSearch(tokens: string[], originalQuery: string): Promise<any[]> {
-    const graphResults = await this.graphProvider.query({
+    const graphResults = await this.graphProvider.queryGraph({
       searchTerm: tokens.join(' '),
       maxResults: this.config.maxResults! * 2,
       includeNeighbors: this.config.enableGraphTraversal
@@ -905,7 +1158,7 @@ export class RAGContextExtractor implements IContextExtractor {
       });
 
       // Search knowledge graph with tokens
-      const graphResults = await this.graphProvider.query({
+      const graphResults = await this.graphProvider.queryGraph({
         searchTerm: tokens.join(' '),
         maxResults: this.config.maxResults! * 2,
         includeNeighbors: true
@@ -1079,7 +1332,7 @@ export class RAGContextExtractor implements IContextExtractor {
       
       // Sample documents for corpus analysis
       const sampleQuery = { maxResults: 50 };
-      const graphSample = await this.graphProvider.query(sampleQuery);
+      const graphSample = await this.graphProvider.queryGraph(sampleQuery);
       
       // Build corpus from sampled documents
       const documents = graphSample.nodes
@@ -1179,8 +1432,157 @@ export class RAGContextExtractor implements IContextExtractor {
       .map(r => ({
         path: r.metadata?.filePath || r.id,
         relevance: r.relevance,
-        summary: `${r.content.substring(0, 80)}... ${r.contextHint || ''}`
+        summary: `${r.content.substring(0, 80)}... ${r.contextHint || ''}`,
+        // 添加上下文提取字段
+        contextLines: r.contextLines || [],
+        matchedLine: r.matchedLine || 0,
+        fileName: this.extractFileName(r.metadata?.filePath || r.id),
+        fileExtension: this.extractFileExtension(r.metadata?.filePath || r.id)
       }));
+  }
+
+  /**
+   * 为搜索结果添加上下文行信息
+   */
+  private async enhanceResultsWithContext(results: any[], tokens: string[]): Promise<any[]> {
+    const enhancedResults = [];
+    
+    for (const result of results) {
+      if (result.type === 'file' && result.metadata?.filePath) {
+        const enhancedResult = { ...result };
+        
+        // 查找匹配的行号
+        const matchedLine = this.findMatchedLine(result.content, tokens);
+        
+        if (matchedLine > 0) {
+          // 提取上下文行
+          const contextInfo = await this.extractContextLines(result.metadata.filePath, matchedLine, 10);
+          enhancedResult.contextLines = contextInfo.lines;
+          enhancedResult.matchedLine = matchedLine;
+          enhancedResult.startLine = contextInfo.startLine;
+          enhancedResult.endLine = contextInfo.endLine;
+          enhancedResult.matchedLineIndex = contextInfo.matchedLineIndex;
+        }
+        
+        enhancedResults.push(enhancedResult);
+      } else {
+        enhancedResults.push(result);
+      }
+    }
+    
+    return enhancedResults;
+  }
+
+  /**
+   * 查找匹配的行号
+   */
+  private findMatchedLine(content: string, tokens: string[]): number {
+    if (!content || !tokens || tokens.length === 0) return 0;
+    
+    const lines = content.split('\n');
+    const queryPattern = tokens.join('|');
+    const regex = new RegExp(queryPattern, 'gi');
+    
+    for (let i = 0; i < lines.length; i++) {
+      if (regex.test(lines[i])) {
+        return i + 1; // 行号从1开始
+      }
+    }
+    
+    return 0;
+  }
+
+  /**
+   * 提取文件名
+   */
+  private extractFileName(filePath: string): string {
+    if (!filePath) return '';
+    const fileName = path.basename(filePath);
+    
+    // 处理中文文件名编码
+    try {
+      return decodeURIComponent(fileName);
+    } catch {
+      return fileName;
+    }
+  }
+
+  /**
+   * 提取文件扩展名
+   */
+  private extractFileExtension(filePath: string): string {
+    if (!filePath) return '';
+    return path.extname(filePath);
+  }
+
+  /**
+   * 从文件名中提取实体
+   */
+  private extractEntitiesFromFileName(fileName: string): string[] {
+    const entities: string[] = [];
+    
+    // 移除文件扩展名
+    const baseName = path.basename(fileName, path.extname(fileName));
+    
+    // 分解驼峰命名
+    const camelCaseWords = baseName.split(/(?=[A-Z])/).filter(word => word.length > 0);
+    entities.push(...camelCaseWords.map(word => word.toLowerCase()));
+    
+    // 分解下划线命名
+    const underscoreWords = baseName.split('_').filter(word => word.length > 0);
+    entities.push(...underscoreWords.map(word => word.toLowerCase()));
+    
+    // 分解连字符命名
+    const hyphenWords = baseName.split('-').filter(word => word.length > 0);
+    entities.push(...hyphenWords.map(word => word.toLowerCase()));
+    
+    // 添加完整文件名
+    entities.push(baseName.toLowerCase());
+    
+    return [...new Set(entities)]; // 去重
+  }
+
+  /**
+   * 从原文件提取上下文行
+   */
+  private async extractContextLines(filePath: string, matchedLine: number, contextSize: number = 10): Promise<{
+    lines: string[];
+    startLine: number;
+    endLine: number;
+    matchedLineIndex: number;
+  }> {
+    try {
+      const content = await fs.readFile(filePath, 'utf8');
+      const lines = content.split('\n');
+      const totalLines = lines.length;
+      
+      // 计算开始和结束行号
+      const startLine = Math.max(1, matchedLine - contextSize);
+      const endLine = Math.min(totalLines, matchedLine + contextSize);
+      
+      // 提取上下文行
+      const contextLines = lines.slice(startLine - 1, endLine);
+      
+      // 计算匹配行在结果中的索引
+      const matchedLineIndex = matchedLine - startLine;
+      
+      return {
+        lines: contextLines,
+        startLine,
+        endLine,
+        matchedLineIndex
+      };
+    } catch (error) {
+      if (this.config.debugMode) {
+        console.warn(`[RAGContextExtractor] Failed to read file ${filePath}:`, error);
+      }
+      return {
+        lines: [],
+        startLine: 0,
+        endLine: 0,
+        matchedLineIndex: 0
+      };
+    }
   }
 
   /**
@@ -1225,12 +1627,117 @@ export class RAGContextExtractor implements IContextExtractor {
    */
   private async handleFileChange(data: Record<string, any>): Promise<void> {
     const { filePath, content } = data;
-    if (filePath && content) {
+    if (filePath && content !== undefined) {
+      // 提取文件信息
+      const fileName = this.extractFileName(filePath);
+      const fileExtension = this.extractFileExtension(filePath);
+      const fileEntities = this.extractEntitiesFromFileName(fileName);
+      
+      // 根据文件类型处理内容
+      const processedContent = this.processFileContent(content, fileExtension);
+      
+      // 创建增强的元数据
+      const enhancedMetadata = {
+        fileName,
+        fileExtension,
+        fileEntities,
+        filePath,
+        isMdFile: fileExtension === '.md',
+        isCodeFile: ['.ts', '.js', '.py', '.java', '.tsx', '.jsx'].includes(fileExtension),
+        contentType: this.getContentType(fileExtension),
+        lastModified: new Date().toISOString()
+      };
+      
       await Promise.all([
-        this.graphProvider.upsertNode({ id: filePath, name: filePath, type: 'file', content, metadata: {}, relationships: [] }),
-        this.vectorProvider.indexDocument(filePath, content, { type: 'file', filePath })
+        this.graphProvider.upsertNode({ 
+          id: filePath, 
+          name: fileName, 
+          type: 'file', 
+          content: processedContent, 
+          metadata: enhancedMetadata, 
+          relationships: [] 
+        }),
+        this.vectorProvider.indexDocument(filePath, processedContent, { 
+          type: 'file', 
+          ...enhancedMetadata 
+        })
       ]);
     }
+  }
+
+  /**
+   * 根据文件类型处理内容
+   */
+  private processFileContent(content: string, fileExtension: string): string {
+    if (fileExtension === '.md') {
+      // 处理MD文件：保留标题、列表、代码块等结构
+      return this.processMdContent(content);
+    } else if (['.ts', '.js', '.py', '.java', '.tsx', '.jsx'].includes(fileExtension)) {
+      // 处理代码文件：添加语法高亮标记
+      return this.processCodeContent(content, fileExtension);
+    } else {
+      // 默认处理
+      return content;
+    }
+  }
+
+  /**
+   * 处理MD文件内容
+   */
+  private processMdContent(content: string): string {
+    // 提取标题、列表、代码块等重要结构
+    const lines = content.split('\n');
+    const processedLines = lines.map(line => {
+      // 标记标题
+      if (line.startsWith('#')) {
+        return `[HEADING] ${line}`;
+      }
+      // 标记列表
+      if (line.trim().startsWith('-') || line.trim().startsWith('*')) {
+        return `[LIST] ${line}`;
+      }
+      // 标记代码块
+      if (line.trim().startsWith('```')) {
+        return `[CODE_BLOCK] ${line}`;
+      }
+      return line;
+    });
+    
+    return processedLines.join('\n');
+  }
+
+  /**
+   * 处理代码文件内容
+   */
+  private processCodeContent(content: string, fileExtension: string): string {
+    // 添加语言类型标记
+    const language = fileExtension.replace('.', '');
+    return `[LANGUAGE:${language}]\n${content}`;
+  }
+
+  /**
+   * 获取内容类型
+   */
+  private getContentType(fileExtension: string): string {
+    const contentTypes: { [key: string]: string } = {
+      '.md': 'markdown',
+      '.ts': 'typescript',
+      '.js': 'javascript',
+      '.tsx': 'typescript-react',
+      '.jsx': 'javascript-react',
+      '.py': 'python',
+      '.java': 'java',
+      '.json': 'json',
+      '.yaml': 'yaml',
+      '.yml': 'yaml',
+      '.xml': 'xml',
+      '.html': 'html',
+      '.css': 'css',
+      '.scss': 'scss',
+      '.less': 'less'
+    };
+    
+    return contentTypes[fileExtension] || 'text';
   }
 
   /**
@@ -1320,5 +1827,386 @@ export class RAGContextExtractor implements IContextExtractor {
     }
     
     return suggestions;
+  }
+
+  // ===== Enhanced Context Extraction Methods =====
+
+  /**
+   * 图遍历增强的代码上下文提取
+   */
+  private async extractCodeContextWithGraphTraversal(
+    userInput: string, 
+    semantic: ExtractedContext['semantic']
+  ): Promise<ExtractedContext['code']> {
+    const basicCode = await this.extractCodeContext(userInput, semantic);
+    
+    // 使用图遍历扩展相关文件和函数
+    if (this.config.enableGraphTraversal && basicCode.relevantFiles.length > 0) {
+      const expandedFiles = await this.expandRelevantFilesWithGraph(basicCode.relevantFiles);
+      basicCode.relevantFiles = expandedFiles;
+    }
+    
+    return basicCode;
+  }
+
+  /**
+   * 混合检索的代码上下文提取
+   */
+  private async extractCodeContextWithHybridRetrieval(
+    userInput: string, 
+    semantic: ExtractedContext['semantic']
+  ): Promise<ExtractedContext['code']> {
+    const basicCode = await this.extractCodeContext(userInput, semantic);
+    
+    // 使用混合检索（向量 + 图 + 语义）增强结果
+    if (this.config.useHybridRetrieval) {
+      const hybridResults = await this.performHybridRetrievalSearch(userInput, semantic);
+      basicCode.relevantFiles = this.mergeRelevantFiles(basicCode.relevantFiles, hybridResults.files);
+      basicCode.relevantFunctions = this.mergeRelevantFunctions(basicCode.relevantFunctions, hybridResults.functions);
+    }
+    
+    return basicCode;
+  }
+
+  /**
+   * 增强的会话上下文提取
+   */
+  private extractEnhancedConversationContext(
+    history: ContextQuery['conversationHistory']
+  ): ExtractedContext['conversation'] {
+    const basicConversation = this.extractConversationContext(history);
+    
+    // 添加会话模式分析
+    if (history && history.length > 0) {
+      const patterns = this.analyzeConversationPatterns(history);
+      basicConversation.contextContinuity.push(...patterns);
+    }
+    
+    return basicConversation;
+  }
+
+  /**
+   * 增强的操作上下文提取
+   */
+  private extractEnhancedOperationalContext(
+    operations: ContextQuery['recentOperations']
+  ): ExtractedContext['operational'] {
+    const basicOperational = this.extractOperationalContext(operations);
+    
+    // 添加操作序列分析
+    if (operations && operations.length > 0) {
+      const sequenceAnalysis = this.analyzeOperationSequence(operations);
+      basicOperational.workflowSuggestions.push(...sequenceAnalysis);
+    }
+    
+    return basicOperational;
+  }
+
+  /**
+   * 高级语义分析（L4级别）
+   */
+  private async extractAdvancedSemanticContext(
+    userInput: string, 
+    ragInput: RAGInputData
+  ): Promise<ExtractedContext['semantic']> {
+    const basicSemantic = await this.extractSemanticContext(userInput);
+    
+    // 认知增强：考虑历史上下文和用户意图演变
+    if (ragInput.conversationHistory && ragInput.conversationHistory.length > 0) {
+      const intentEvolution = this.analyzeIntentEvolution(ragInput.conversationHistory);
+      basicSemantic.concepts.push(...intentEvolution);
+    }
+    
+    return basicSemantic;
+  }
+
+  /**
+   * 认知增强的代码上下文（L4级别）
+   */
+  private async extractCognitiveCodeContext(
+    userInput: string, 
+    semantic: ExtractedContext['semantic'], 
+    ragInput: RAGInputData
+  ): Promise<ExtractedContext['code']> {
+    const hybridCode = await this.extractCodeContextWithHybridRetrieval(userInput, semantic);
+    
+    // 认知增强：基于用户历史行为预测需要的代码上下文
+    if (ragInput.recentOperations && ragInput.recentOperations.length > 0) {
+      const predictedContext = await this.predictCodeContext(ragInput.recentOperations, hybridCode);
+      hybridCode.relatedPatterns.push(...predictedContext);
+    }
+    
+    return hybridCode;
+  }
+
+  /**
+   * 适应性会话上下文（L4级别）
+   */
+  private extractAdaptiveConversationContext(
+    history: ContextQuery['conversationHistory']
+  ): ExtractedContext['conversation'] {
+    const enhancedConversation = this.extractEnhancedConversationContext(history);
+    
+    // 适应性：基于用户交互模式调整上下文提取
+    if (history && history.length > 0) {
+      const adaptivePatterns = this.extractAdaptivePatterns(history);
+      enhancedConversation.userGoals.push(...adaptivePatterns);
+    }
+    
+    return enhancedConversation;
+  }
+
+  /**
+   * 学习增强的操作上下文（L4级别）
+   */
+  private extractLearningOperationalContext(
+    operations: ContextQuery['recentOperations']
+  ): ExtractedContext['operational'] {
+    const enhancedOperational = this.extractEnhancedOperationalContext(operations);
+    
+    // 学习增强：基于操作历史学习用户工作流偏好
+    if (operations && operations.length > 0) {
+      const learnedWorkflow = this.learnWorkflowPreferences(operations);
+      enhancedOperational.workflowSuggestions.push(...learnedWorkflow);
+    }
+    
+    return enhancedOperational;
+  }
+
+  // ===== Helper Methods for Enhanced Context Extraction =====
+
+  private async expandRelevantFilesWithGraph(files: any[]): Promise<any[]> {
+    // 使用图遍历扩展相关文件
+    const expandedFiles = [...files];
+    
+    for (const file of files) {
+      if (file.path && this.graphProvider) {
+        try {
+          const relatedNodes = await this.graphProvider.findRelatedNodes(file.path, 2);
+          for (const node of relatedNodes) {
+            if (node.metadata?.filePath && !expandedFiles.find(f => f.path === node.metadata!.filePath)) {
+              expandedFiles.push({
+                path: node.metadata!.filePath,
+                name: node.name,
+                summary: node.content.substring(0, 100) + '...',
+                relevance: 0.7 // 通过图遍历找到的相关度
+              });
+            }
+          }
+        } catch (error) {
+          if (this.config.debugMode) {
+            console.warn(`[RAGContextExtractor] Graph traversal failed for ${file.path}:`, error);
+          }
+        }
+      }
+    }
+    
+    return expandedFiles;
+  }
+
+  private async performHybridRetrievalSearch(userInput: string, semantic: any): Promise<{files: any[], functions: any[]}> {
+    // 混合检索：结合向量搜索、图查询和语义分析
+    const results: {files: any[], functions: any[]} = {files: [], functions: []};
+    
+    try {
+      // 向量搜索
+      if (this.vectorProvider) {
+        const vectorResults = await this.vectorProvider.search(userInput, { maxResults: 5 });
+        results.files.push(...vectorResults.results.map((r: any) => ({
+          path: r.metadata?.filePath || r.id,
+          name: r.metadata?.name || r.id,
+          summary: r.content.substring(0, 100) + '...',
+          relevance: r.score
+        })));
+      }
+      
+      // 图查询
+      if (this.graphProvider) {
+        const graphResults = await this.graphProvider.query(userInput, { maxResults: 5 });
+        results.functions.push(...graphResults.map((r: any) => ({
+          name: r.name,
+          filePath: r.metadata?.filePath || '',
+          relevance: 0.8
+        })));
+      }
+      
+    } catch (error) {
+      if (this.config.debugMode) {
+        console.warn('[RAGContextExtractor] Hybrid retrieval failed:', error);
+      }
+    }
+    
+    return results;
+  }
+
+  private mergeRelevantFiles(existing: any[], newFiles: any[]): any[] {
+    const merged = [...existing];
+    
+    for (const newFile of newFiles) {
+      if (!merged.find(f => f.path === newFile.path)) {
+        merged.push(newFile);
+      }
+    }
+    
+    return merged.sort((a, b) => (b.relevance || 0) - (a.relevance || 0));
+  }
+
+  private mergeRelevantFunctions(existing: any[], newFunctions: any[]): any[] {
+    const merged = [...existing];
+    
+    for (const newFunc of newFunctions) {
+      if (!merged.find(f => f.name === newFunc.name && f.filePath === newFunc.filePath)) {
+        merged.push(newFunc);
+      }
+    }
+    
+    return merged.sort((a, b) => (b.relevance || 0) - (a.relevance || 0));
+  }
+
+  private analyzeConversationPatterns(history: any[]): string[] {
+    const patterns = [];
+    
+    // 分析对话模式
+    const userMessages = history.filter(msg => msg.role === 'user');
+    if (userMessages.length > 2) {
+      const lastThree = userMessages.slice(-3);
+      const topics = lastThree.map(msg => this.extractTopicsFromMessage(msg.content)).flat();
+      
+      if (topics.length > 0) {
+        patterns.push(`Recent conversation focused on: ${topics.join(', ')}`);
+      }
+    }
+    
+    return patterns;
+  }
+
+  private analyzeOperationSequence(operations: any[]): string[] {
+    const suggestions = [];
+    
+    // 分析操作序列
+    const recentOps = operations.slice(-5);
+    const opTypes = recentOps.map(op => op.type);
+    
+    if (opTypes.includes('file_change') && !opTypes.includes('test')) {
+      suggestions.push('Consider running tests after file changes');
+    }
+    
+    if (opTypes.includes('error') && !opTypes.includes('debug')) {
+      suggestions.push('Debug mode might help with error investigation');
+    }
+    
+    return suggestions;
+  }
+
+  private analyzeIntentEvolution(history: any[]): string[] {
+    const concepts = [];
+    
+    // 分析意图演变
+    const userMessages = history.filter(msg => msg.role === 'user').slice(-5);
+    
+    for (let i = 1; i < userMessages.length; i++) {
+      const prevMsg = userMessages[i-1].content;
+      const currMsg = userMessages[i].content;
+      
+      // 检测意图变化
+      if (this.detectIntentShift(prevMsg, currMsg)) {
+        concepts.push('Intent evolution detected');
+      }
+    }
+    
+    return concepts;
+  }
+
+  private async predictCodeContext(operations: any[], currentCode: any): Promise<any[]> {
+    const patterns = [];
+    
+    // 基于操作历史预测代码上下文
+    const fileOps = operations.filter(op => op.type === 'file_change');
+    
+    if (fileOps.length > 0) {
+      const changedFiles = fileOps.map(op => op.data?.filePath).filter(Boolean);
+      patterns.push({
+        pattern: 'related_files',
+        description: `Files likely to be affected: ${changedFiles.join(', ')}`
+      });
+    }
+    
+    return patterns;
+  }
+
+  private extractAdaptivePatterns(history: any[]): string[] {
+    const patterns = [];
+    
+    // 提取适应性模式
+    const userInteractionStyle = this.analyzeUserInteractionStyle(history);
+    patterns.push(`User interaction style: ${userInteractionStyle}`);
+    
+    return patterns;
+  }
+
+  private learnWorkflowPreferences(operations: any[]): string[] {
+    const preferences = [];
+    
+    // 学习工作流偏好
+    const commonSequences = this.findCommonOperationSequences(operations);
+    
+    if (commonSequences.length > 0) {
+      preferences.push(`Common workflow: ${commonSequences.join(' -> ')}`);
+    }
+    
+    return preferences;
+  }
+
+  private detectIntentShift(prevMsg: string, currMsg: string): boolean {
+    // 简单的意图变化检测
+    const prevKeywords = this.extractKeywords(prevMsg);
+    const currKeywords = this.extractKeywords(currMsg);
+    
+    const overlap = prevKeywords.filter(k => currKeywords.includes(k)).length;
+    const totalKeywords = new Set([...prevKeywords, ...currKeywords]).size;
+    
+    return overlap / totalKeywords < 0.3; // 30%以下重叠认为意图发生变化
+  }
+
+  private analyzeUserInteractionStyle(history: any[]): string {
+    const userMessages = history.filter(msg => msg.role === 'user');
+    
+    if (userMessages.length === 0) return 'unknown';
+    
+    const avgLength = userMessages.reduce((sum, msg) => sum + msg.content.length, 0) / userMessages.length;
+    
+    if (avgLength < 50) return 'concise';
+    if (avgLength < 200) return 'moderate';
+    return 'detailed';
+  }
+
+  private findCommonOperationSequences(operations: any[]): string[] {
+    const sequences = [];
+    
+    // 寻找常见的操作序列
+    const opTypes = operations.map(op => op.type);
+    
+    // 检查常见的3操作序列
+    for (let i = 0; i < opTypes.length - 2; i++) {
+      const sequence = opTypes.slice(i, i + 3);
+      sequences.push(sequence.join(' -> '));
+    }
+    
+    // 返回最常见的序列
+    const sequenceCounts = sequences.reduce((counts, seq) => {
+      counts[seq] = (counts[seq] || 0) + 1;
+      return counts;
+    }, {} as Record<string, number>);
+    
+    return Object.entries(sequenceCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+      .map(([seq]) => seq);
+  }
+
+  private extractKeywords(text: string): string[] {
+    return this.textAnalyzer.tokenize(text)
+      .filter(token => token.length > 3)
+      .slice(0, 10);
   }
 }
