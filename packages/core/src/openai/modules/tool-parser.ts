@@ -47,6 +47,7 @@ export class ToolParser {
       };
     } catch (error) {
       console.warn(`[ToolParser] Failed to parse tool call ${toolName}:`, error);
+      console.warn(`[ToolParser] Args text:`, argsText);
       return null;
     }
   }
@@ -90,7 +91,6 @@ export class ToolParser {
       const args = JSON.parse(jsonMatch[0]);
       
       // Replace isolated content back into args
-      let contentIndex = 0;
       return this.replacePlaceholders(args, contents, { value: 0 });
     }
     
