@@ -1,0 +1,618 @@
+/**
+ * @license
+ * Copyright 2025 Jason Zhang
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { RAGContextExtractor } from '../ragContextExtractor.js';
+import fs from 'fs/promises';
+import path from 'path';
+
+/**
+ * RAG Graph查询原文件上下文提取测试套件
+ * 
+ * 测试目标：
+ * 1. 通过graph查询定位到原文件
+ * 2. 提取命中行的上下10行内容
+ * 3. 保持代码结构和格式
+ * 4. 处理边界情况（文件开头、结尾）
+ * 5. 多语言代码的上下文提取
+ */
+describe('RAG Graph查询原文件上下文提取测试', () => {
+  let ragExtractor: RAGContextExtractor;
+  let mockGraphProvider: any;
+  let mockVectorProvider: any;
+  let mockFileSystem: Map<string, string>;
+
+  beforeEach(() => {
+    // 创建模拟文件系统
+    mockFileSystem = new Map();
+
+    mockGraphProvider = {
+      upsertNode: vi.fn(),
+      query: vi.fn(),
+      addRelationship: vi.fn(),
+      getNode: vi.fn(),
+      updateNode: vi.fn(),
+    };
+
+    mockVectorProvider = {
+      indexDocument: vi.fn(),
+      search: vi.fn(),
+      updateDocument: vi.fn(),
+    };
+
+    ragExtractor = new RAGContextExtractor(
+      mockGraphProvider,
+      mockVectorProvider,
+      {
+        maxResults: 10,
+        relevanceThreshold: 0.1,
+        enableGraphTraversal: true,
+        enableSemanticAnalysis: true,
+        enableEntityExtraction: true,
+        algorithm: 'tfidf',
+        enableDynamicEntityExtraction: true,
+        enableConceptExtraction: true,
+        enableContextualRelevance: true,
+        semanticSimilarityThreshold: 0.3,
+        entityExtractionMode: 'adaptive',
+        useAdvancedFiltering: true,
+        enableHybridRanking: true,
+        maxEntityCount: 50,
+        maxConceptCount: 30,
+        contextWindow: 3,
+        enableRealTimeUpdate: true,
+      }
+    );
+
+    // Mock fs.readFile
+    vi.spyOn(fs, 'readFile').mockImplementation(async (filePath: string) => {
+      const content = mockFileSystem.get(filePath as string);
+      if (content === undefined) {
+        throw new Error(`File not found: ${filePath}`);
+      }
+      return content;
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    mockFileSystem.clear();
+  });
+
+  describe('基本上下文提取功能', () => {
+    it('应该能够提取命中行的上下10行内容', async () => {
+      const testFileContent = `// 这是一个测试文件
+import { Component } from 'react';
+import { UserService } from './UserService';
+
+/**
+ * 用户组件类
+ * 主要用于显示用户信息
+ */
+export class UserComponent extends Component {
+  private userService: UserService;
+
+  constructor(props: any) {
+    super(props);
+    this.userService = new UserService();
+  }
+
+  async loadUserData(userId: string) {
+    try {
+      const userData = await this.userService.getUserById(userId);
+      this.setState({ user: userData });
+    } catch (error) {
+      console.error('加载用户数据失败:', error);
+    }
+  }
+
+  render() {
+    return (
+      <div>
+        <h1>用户信息</h1>
+        <UserProfile user={this.state.user} />
+      </div>
+    );
+  }
+}
+
+export default UserComponent;`;
+
+      const filePath = '/project/src/UserComponent.tsx';
+      mockFileSystem.set(filePath, testFileContent);
+
+      // 模拟graph查询结果
+      mockGraphProvider.query.mockResolvedValue({
+        nodes: [{
+          id: filePath,
+          name: filePath,
+          type: 'file',
+          content: testFileContent,
+          metadata: { 
+            filePath,
+            matchedLine: 16, // loadUserData 函数所在行
+            matchedContent: 'async loadUserData(userId: string) {'
+          }
+        }]
+      });
+
+      const results = await ragExtractor.searchContext('loadUserData', '', 10);
+      
+      // 验证上下文提取
+      expect(results.context.code.relevantFiles).toBeDefined();
+      expect(results.context.code.relevantFiles.length).toBeGreaterThan(0);
+      
+      const relevantFile = results.context.code.relevantFiles[0];
+      expect(relevantFile.path).toBe(filePath);
+      expect(relevantFile.contextLines).toBeDefined();
+      expect(relevantFile.contextLines.length).toBeLessThanOrEqual(21); // 最多21行 (命中行 + 上下各10行)
+    });
+
+    it('应该正确处理文件开头的上下文提取', async () => {
+      const testFileContent = `// 文件开头注释
+import React from 'react';
+
+export function HeaderComponent() {
+  return <header>标题</header>;
+}
+
+function AnotherComponent() {
+  return <div>内容</div>;
+}`;
+
+      const filePath = '/project/src/Header.tsx';
+      mockFileSystem.set(filePath, testFileContent);
+
+      mockGraphProvider.query.mockResolvedValue({
+        nodes: [{
+          id: filePath,
+          name: filePath,
+          type: 'file',
+          content: testFileContent,
+          metadata: { 
+            filePath,
+            matchedLine: 2, // import 语句所在行
+            matchedContent: 'import React from \'react\';'
+          }
+        }]
+      });
+
+      const contextLines = await extractContextLines(testFileContent, 2, 10);
+      
+      // 验证不会超出文件开头
+      expect(contextLines.startLine).toBe(1);
+      expect(contextLines.lines.length).toBeLessThanOrEqual(13); // 从第1行到第13行
+    });
+
+    it('应该正确处理文件结尾的上下文提取', async () => {
+      const testFileContent = `function start() {
+  console.log('开始');
+}
+
+function middle() {
+  console.log('中间');
+}
+
+function end() {
+  console.log('结束');
+}`;
+
+      const filePath = '/project/src/functions.ts';
+      mockFileSystem.set(filePath, testFileContent);
+
+      mockGraphProvider.query.mockResolvedValue({
+        nodes: [{
+          id: filePath,
+          name: filePath,
+          type: 'file',
+          content: testFileContent,
+          metadata: { 
+            filePath,
+            matchedLine: 9, // end函数所在行
+            matchedContent: 'function end() {'
+          }
+        }]
+      });
+
+      const contextLines = await extractContextLines(testFileContent, 9, 10);
+      
+      // 验证不会超出文件结尾
+      const totalLines = testFileContent.split('\n').length;
+      expect(contextLines.endLine).toBe(totalLines);
+    });
+  });
+
+  describe('多语言代码上下文提取', () => {
+    it('应该正确提取TypeScript代码的上下文', async () => {
+      const testFileContent = `interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+class UserService {
+  private users: User[] = [];
+
+  async createUser(userData: Omit<User, 'id'>): Promise<User> {
+    const user: User = {
+      id: crypto.randomUUID(),
+      ...userData
+    };
+    this.users.push(user);
+    return user;
+  }
+
+  async getUserById(id: string): Promise<User | null> {
+    return this.users.find(user => user.id === id) || null;
+  }
+}`;
+
+      const filePath = '/project/src/UserService.ts';
+      mockFileSystem.set(filePath, testFileContent);
+
+      mockGraphProvider.query.mockResolvedValue({
+        nodes: [{
+          id: filePath,
+          name: filePath,
+          type: 'file',
+          content: testFileContent,
+          metadata: { 
+            filePath,
+            matchedLine: 10, // createUser 方法所在行
+            matchedContent: 'async createUser(userData: Omit<User, \'id\'>): Promise<User> {'
+          }
+        }]
+      });
+
+      const contextLines = await extractContextLines(testFileContent, 10, 10);
+      
+      // 验证包含接口定义和类定义
+      expect(contextLines.lines.some(line => line.includes('interface User'))).toBe(true);
+      expect(contextLines.lines.some(line => line.includes('class UserService'))).toBe(true);
+    });
+
+    it('应该正确提取Python代码的上下文', async () => {
+      const testFileContent = `#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import json
+import asyncio
+from typing import Dict, List, Optional
+
+class DataProcessor:
+    def __init__(self):
+        self.data_cache = {}
+    
+    async def process_data(self, data: Dict) -> Dict:
+        """处理数据的主要方法"""
+        if not data:
+            return {}
+        
+        processed = {}
+        for key, value in data.items():
+            if isinstance(value, str):
+                processed[key] = value.strip().lower()
+            elif isinstance(value, (int, float)):
+                processed[key] = value * 2
+        
+        return processed
+    
+    def cache_data(self, key: str, data: Dict) -> None:
+        """缓存数据"""
+        self.data_cache[key] = data`;
+
+      const filePath = '/project/src/processor.py';
+      mockFileSystem.set(filePath, testFileContent);
+
+      mockGraphProvider.query.mockResolvedValue({
+        nodes: [{
+          id: filePath,
+          name: filePath,
+          type: 'file',
+          content: testFileContent,
+          metadata: { 
+            filePath,
+            matchedLine: 12, // process_data 方法所在行
+            matchedContent: 'async def process_data(self, data: Dict) -> Dict:'
+          }
+        }]
+      });
+
+      const contextLines = await extractContextLines(testFileContent, 12, 10);
+      
+      // 验证包含导入语句和类定义
+      expect(contextLines.lines.some(line => line.includes('import json'))).toBe(true);
+      expect(contextLines.lines.some(line => line.includes('class DataProcessor'))).toBe(true);
+    });
+
+    it('应该正确提取Java代码的上下文', async () => {
+      const testFileContent = `package com.example.service;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * 用户服务类
+ */
+public class UserService {
+    private final UserRepository userRepository;
+    
+    public UserService(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+    
+    /**
+     * 创建新用户
+     * @param userData 用户数据
+     * @return 创建的用户
+     */
+    public User createUser(UserCreateRequest userData) {
+        User user = new User();
+        user.setId(UUID.randomUUID().toString());
+        user.setName(userData.getName());
+        user.setEmail(userData.getEmail());
+        
+        return userRepository.save(user);
+    }
+    
+    public Optional<User> getUserById(String id) {
+        return userRepository.findById(id);
+    }
+}`;
+
+      const filePath = '/project/src/main/java/com/example/service/UserService.java';
+      mockFileSystem.set(filePath, testFileContent);
+
+      mockGraphProvider.query.mockResolvedValue({
+        nodes: [{
+          id: filePath,
+          name: filePath,
+          type: 'file',
+          content: testFileContent,
+          metadata: { 
+            filePath,
+            matchedLine: 22, // createUser 方法所在行
+            matchedContent: 'public User createUser(UserCreateRequest userData) {'
+          }
+        }]
+      });
+
+      const contextLines = await extractContextLines(testFileContent, 22, 10);
+      
+      // 验证包含包声明和导入语句
+      expect(contextLines.lines.some(line => line.includes('package com.example.service'))).toBe(true);
+      expect(contextLines.lines.some(line => line.includes('import java.util.UUID'))).toBe(true);
+    });
+  });
+
+  describe('Markdown文件上下文提取', () => {
+    it('应该正确提取Markdown文档的上下文', async () => {
+      const testFileContent = `# 项目文档
+
+## 概述
+这是一个现代化的Web应用程序项目。
+
+## 特性
+- 支持多语言
+- 响应式设计
+- 高性能
+
+## 安装步骤
+
+### 1. 克隆仓库
+\`\`\`bash
+git clone https://github.com/example/project.git
+cd project
+\`\`\`
+
+### 2. 安装依赖
+\`\`\`bash
+npm install
+\`\`\`
+
+### 3. 启动开发服务器
+\`\`\`bash
+npm run dev
+\`\`\`
+
+## 配置说明
+
+### 环境变量
+创建 \`.env\` 文件并配置以下变量：
+
+\`\`\`
+DATABASE_URL=postgresql://localhost:5432/mydb
+API_KEY=your_api_key_here
+PORT=3000
+\`\`\`
+
+## API文档
+
+### 用户接口
+
+#### GET /api/users
+获取用户列表
+
+**响应示例：**
+\`\`\`json
+{
+  "users": [
+    {
+      "id": "1",
+      "name": "张三",
+      "email": "zhangsan@example.com"
+    }
+  ]
+}
+\`\`\`
+
+#### POST /api/users
+创建新用户
+
+**请求体：**
+\`\`\`json
+{
+  "name": "李四",
+  "email": "lisi@example.com"
+}
+\`\`\`
+
+## 部署
+
+### Docker部署
+\`\`\`bash
+docker build -t myapp .
+docker run -p 3000:3000 myapp
+\`\`\``;
+
+      const filePath = '/project/docs/README.md';
+      mockFileSystem.set(filePath, testFileContent);
+
+      mockGraphProvider.query.mockResolvedValue({
+        nodes: [{
+          id: filePath,
+          name: filePath,
+          type: 'file',
+          content: testFileContent,
+          metadata: { 
+            filePath,
+            matchedLine: 35, // GET /api/users 所在行
+            matchedContent: '#### GET /api/users'
+          }
+        }]
+      });
+
+      const contextLines = await extractContextLines(testFileContent, 35, 10);
+      
+      // 验证包含相关章节
+      expect(contextLines.lines.some(line => line.includes('## API文档'))).toBe(true);
+      expect(contextLines.lines.some(line => line.includes('### 用户接口'))).toBe(true);
+    });
+  });
+
+  describe('上下文提取性能测试', () => {
+    it('应该能够高效处理大文件的上下文提取', async () => {
+      // 创建大文件内容
+      const lines = [];
+      for (let i = 1; i <= 10000; i++) {
+        lines.push(`// 第${i}行：这是一个测试行，包含一些内容`);
+      }
+      const testFileContent = lines.join('\n');
+
+      const filePath = '/project/src/large-file.ts';
+      mockFileSystem.set(filePath, testFileContent);
+
+      const startTime = Date.now();
+      const contextLines = await extractContextLines(testFileContent, 5000, 10);
+      const endTime = Date.now();
+
+      // 验证处理时间合理
+      expect(endTime - startTime).toBeLessThan(1000); // 1秒内
+
+      // 验证提取的上下文正确
+      expect(contextLines.lines.length).toBe(21); // 中心行 + 上下各10行
+      expect(contextLines.matchedLineIndex).toBe(10); // 在结果中的索引
+    });
+
+    it('应该能够处理多个文件的并发上下文提取', async () => {
+      const testFiles = [];
+      for (let i = 1; i <= 100; i++) {
+        const content = `// 文件${i}内容\nfunction test${i}() {\n  return ${i};\n}`;
+        const filePath = `/project/src/file${i}.ts`;
+        mockFileSystem.set(filePath, content);
+        testFiles.push({ filePath, content, matchedLine: 2 });
+      }
+
+      const startTime = Date.now();
+      const promises = testFiles.map(file => 
+        extractContextLines(file.content, file.matchedLine, 10)
+      );
+      const results = await Promise.all(promises);
+      const endTime = Date.now();
+
+      // 验证并发处理时间合理
+      expect(endTime - startTime).toBeLessThan(2000); // 2秒内
+
+      // 验证所有结果都正确
+      expect(results.length).toBe(100);
+      results.forEach(result => {
+        expect(result.lines.length).toBeGreaterThan(0);
+      });
+    });
+  });
+
+  describe('错误处理', () => {
+    it('应该正确处理文件不存在的情况', async () => {
+      const nonExistentFile = '/project/src/nonexistent.ts';
+      
+      mockGraphProvider.query.mockResolvedValue({
+        nodes: [{
+          id: nonExistentFile,
+          name: nonExistentFile,
+          type: 'file',
+          content: '',
+          metadata: { 
+            filePath: nonExistentFile,
+            matchedLine: 1,
+            matchedContent: ''
+          }
+        }]
+      });
+
+      const results = await ragExtractor.searchContext('test', '', 10);
+      
+      // 应该优雅地处理错误
+      expect(results.context.code.relevantFiles).toBeDefined();
+    });
+
+    it('应该正确处理无效行号的情况', async () => {
+      const testFileContent = `line 1\nline 2\nline 3`;
+      const filePath = '/project/src/test.ts';
+      mockFileSystem.set(filePath, testFileContent);
+
+      // 测试负数行号
+      await expect(extractContextLines(testFileContent, -1, 10)).resolves.not.toThrow();
+      
+      // 测试超出范围的行号
+      await expect(extractContextLines(testFileContent, 100, 10)).resolves.not.toThrow();
+    });
+  });
+});
+
+/**
+ * 辅助函数：提取指定行周围的上下文
+ */
+async function extractContextLines(
+  content: string, 
+  matchedLine: number, 
+  contextSize: number = 10
+): Promise<{
+  lines: string[];
+  startLine: number;
+  endLine: number;
+  matchedLineIndex: number;
+}> {
+  const lines = content.split('\n');
+  const totalLines = lines.length;
+  
+  // 计算开始和结束行号
+  const startLine = Math.max(1, matchedLine - contextSize);
+  const endLine = Math.min(totalLines, matchedLine + contextSize);
+  
+  // 提取上下文行
+  const contextLines = lines.slice(startLine - 1, endLine);
+  
+  // 计算匹配行在结果中的索引
+  const matchedLineIndex = matchedLine - startLine;
+  
+  return {
+    lines: contextLines,
+    startLine,
+    endLine,
+    matchedLineIndex
+  };
+}
