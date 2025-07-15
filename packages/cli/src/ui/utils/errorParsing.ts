@@ -13,6 +13,8 @@ import {
   isGenericQuotaExceededError,
   isApiError,
   isStructuredError,
+  ApiError,
+  StructuredError,
 } from '@google/gemini-cli-core';
 
 // Free Tier message functions
@@ -107,8 +109,8 @@ export function parseAndFormatApiError(
   fallbackModel?: string,
 ): string {
   if (isStructuredError(error)) {
-    let text = `[API Error: ${error.message}]`;
-    if (error.status === 429) {
+    let text = `[API Error: ${(error as StructuredError).message}]`;
+    if ((error as StructuredError).status === 429) {
       text += getRateLimitMessage(
         authType,
         error,
@@ -132,18 +134,18 @@ export function parseAndFormatApiError(
     try {
       const parsedError = JSON.parse(jsonString) as unknown;
       if (isApiError(parsedError)) {
-        let finalMessage = parsedError.error.message;
+        let finalMessage = (parsedError as ApiError).error.message;
         try {
           // See if the message is a stringified JSON with another error
           const nestedError = JSON.parse(finalMessage) as unknown;
           if (isApiError(nestedError)) {
-            finalMessage = nestedError.error.message;
+            finalMessage = (nestedError as ApiError).error.message;
           }
         } catch (_e) {
           // It's not a nested JSON error, so we just use the message as is.
         }
-        let text = `[API Error: ${finalMessage} (Status: ${parsedError.error.status})]`;
-        if (parsedError.error.code === 429) {
+        let text = `[API Error: ${finalMessage} (Status: ${(parsedError as ApiError).error.status})]`;
+        if ((parsedError as ApiError).error.code === 429) {
           text += getRateLimitMessage(
             authType,
             parsedError,

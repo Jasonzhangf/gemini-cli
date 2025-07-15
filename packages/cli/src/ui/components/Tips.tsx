@@ -60,6 +60,13 @@ export const Tips: React.FC<TipsProps> = ({ config }) => {
         </Box>
       )}
 
+      {/* RAG System Status */}
+      <Box marginBottom={1}>
+        <Text color={Colors.AccentBlue}>
+          🚀 RAG system loading in background for enhanced context analysis
+        </Text>
+      </Box>
+
       <Text color={Colors.Foreground}>Tips for getting started:</Text>
       <Text color={Colors.Foreground}>
         1. Ask questions, edit files, or run commands.

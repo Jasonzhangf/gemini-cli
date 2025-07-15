@@ -55,69 +55,63 @@ echo ""
 echo "📦 安装依赖..."
 npm install
 
-# 3. 构建项目
-echo ""
-log_info "构建项目（跳过严格类型检查）..."
+# 2.5. 预构建依赖项 (关键步骤)
+log_info "生成构建信息文件..."
+node scripts/generate-git-commit-info.js
+log_info "预构建核心依赖 (packages/core)..."
+npm run build --workspace=packages/core
 
-# 首先尝试标准构建，如果失败则使用宽松模式
-if npm run build 2>/dev/null; then
-    log_success "标准构建成功"
+# 3. 类型检查
+echo ""
+log_info "运行类型检查..."
+if npm run typecheck 2>/dev/null; then
+    log_success "类型检查通过"
 else
-    log_warning "标准构建失败，尝试跳过类型检查..."
-    
-    # 使用备用构建方案
-    log_info "使用备用构建方案（忽略类型错误）..."
-    
-    # 方案1：尝试使用tsc强制构建
-    if command -v tsc >/dev/null 2>&1; then
-        log_info "构建core包（忽略错误）..."
-        cd packages/core
-        # 强制构建，忽略类型错误
-        npx tsc --build --force --skipLibCheck --noEmitOnError false || {
-            log_warning "TypeScript构建失败，尝试JavaScript构建..."
-            # 如果tsc失败，尝试直接复制.ts文件为.js文件
-            find src -name "*.ts" -not -name "*.test.ts" -not -name "*.d.ts" | while read file; do
-                jsfile="${file%.ts}.js"
-                mkdir -p "$(dirname "$jsfile")"
-                cp "$file" "$jsfile" 2>/dev/null || true
-            done
-        }
-        cd ../..
-        
-        log_info "构建cli包（忽略错误）..."
-        cd packages/cli
-        npx tsc --build --force --skipLibCheck --noEmitOnError false || {
-            log_warning "TypeScript构建失败，尝试JavaScript构建..."
-            find src -name "*.ts" -not -name "*.test.ts" -not -name "*.d.ts" | while read file; do
-                jsfile="${file%.ts}.js"
-                mkdir -p "$(dirname "$jsfile")"
-                cp "$file" "$jsfile" 2>/dev/null || true
-            done
-        }
-        cd ../..
-        
-        log_success "备用构建完成"
-    else
-        log_error "TypeScript编译器未找到"
-        log_info "尝试使用npm run build --force..."
-        npm run build --force 2>/dev/null || {
-            log_error "所有构建方案失败"
-            exit 1
-        }
-    fi
+    log_warning "类型检查有警告，但继续构建..."
 fi
 
-# 4. 取消链接旧版本
+# 4. 构建项目
+echo ""
+log_info "构建项目..."
+
+# 标准构建流程
+if npm run build; then
+    log_success "项目构建成功"
+else
+    log_error "项目构建失败"
+    exit 1
+fi
+
+# 确保CLI文件有执行权限
+if [ -f "packages/cli/dist/index.js" ]; then
+    chmod +x packages/cli/dist/index.js
+    log_success "CLI执行权限已设置"
+fi
+
+# 5. 创建bundle（可选）
+echo ""
+log_info "创建生产bundle..."
+if npm run bundle 2>/dev/null; then
+    log_success "Bundle创建成功"
+    if [ -f "bundle/gemini.js" ]; then
+        chmod +x bundle/gemini.js
+        log_success "Bundle执行权限已设置"
+    fi
+else
+    log_warning "Bundle创建失败，但不影响开发使用"
+fi
+
+# 6. 取消链接旧版本
 echo ""
 echo "🔗 更新全局链接..."
 cd packages/cli
 npm unlink --global 2>/dev/null || echo "   (没有旧链接)"
 
-# 5. 创建新链接
+# 7. 创建新链接
 echo "   创建新的全局链接..."
 npm link
 
-# 6. 验证安装
+# 8. 验证安装
 echo ""
 log_info "验证安装..."
 cd ../../
@@ -152,7 +146,7 @@ else
     log_info "RAG系统验证跳过（需要实际运行时检测）"
 fi
 
-# 7. 测试OpenAI模式
+# 9. 测试OpenAI模式
 echo ""
 echo "🧪 测试 OpenAI hijack 模式..."
 echo "   创建测试配置..."

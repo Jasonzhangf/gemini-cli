@@ -22,7 +22,7 @@ async function readHistoryFile(filePath: string): Promise<string[]> {
     const content = await fs.readFile(filePath, 'utf-8');
     return content.split('\n').filter(Boolean);
   } catch (error) {
-    if (isNodeError(error) && error.code === 'ENOENT') {
+    if (isNodeError(error) && (error as NodeJS.ErrnoException).code === 'ENOENT') {
       return [];
     }
     console.error('Error reading shell history:', error);

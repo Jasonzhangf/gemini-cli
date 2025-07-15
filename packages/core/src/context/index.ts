@@ -40,7 +40,7 @@ export async function getEnhancedSystemPromptIfAvailable(config: Config, userMes
     }
     
     const promptEnhancer = config.getPromptEnhancer();
-    let enhancedPrompt = await promptEnhancer.getEnhancedSystemPrompt(userMessage);
+    let enhancedPrompt = await promptEnhancer.getEnhancedSystemPrompt();
     
     // ContextAgent integration is now handled in hijack.ts for better timing
     // This avoids duplicate injection calls

@@ -71,7 +71,7 @@ export class LocalKnowledgeGraphProvider implements IKnowledgeGraphProvider {
       if (query.searchTerm && matches) {
         const searchLower = query.searchTerm.toLowerCase();
         matches = node.name.toLowerCase().includes(searchLower) ||
-                 (node.content && node.content.toLowerCase().includes(searchLower));
+                 !!(node.content && node.content.toLowerCase().includes(searchLower));
       }
 
       // Apply custom filters

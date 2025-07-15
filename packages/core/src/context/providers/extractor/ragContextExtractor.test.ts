@@ -179,14 +179,14 @@ describe('RAGContextExtractor', () => {
       expect(result.conversation.userGoals).toContain('创建一个用户管理模块');
 
       // Verify operational context
-      expect(result.operational.recentActions.some(action => action.includes('tool_call: Read user service file'))).toBe(true);
+      expect(result.operational.recentActions.some((action: any) => action.includes('tool_call: Read user service file'))).toBe(true);
 
       // Verify provider interactions with dynamic tokenization
       expect(mockVectorProvider.search).toHaveBeenCalled();
       expect(mockGraphProvider.query).toHaveBeenCalled();
       
       // Check that search was called with proper tokenized text
-      const vectorSearchCalls = mockVectorProvider.search.mock.calls;
+      const vectorSearchCalls = (mockVectorProvider.search as any).mock.calls;
       expect(vectorSearchCalls.length).toBeGreaterThan(0);
       if (vectorSearchCalls.length > 0) {
         const vectorSearchCall = vectorSearchCalls[0][0];
@@ -195,7 +195,7 @@ describe('RAGContextExtractor', () => {
         expect(vectorSearchCall.threshold).toBeGreaterThanOrEqual(0);
       }
       
-      const graphQueryCalls = mockGraphProvider.query.mock.calls;
+      const graphQueryCalls = (mockGraphProvider.query as any).mock.calls;
       expect(graphQueryCalls.length).toBeGreaterThan(0);
       if (graphQueryCalls.length > 0) {
         const graphQueryCall = graphQueryCalls[0][0];
@@ -289,7 +289,7 @@ describe('RAGContextExtractor', () => {
       const result = await extractor.extractContext(query);
       
       // Dynamic extraction should find technical entities
-      expect(result.semantic.entities.some(e => e.includes('React') || e.includes('TypeScript') || e.includes('API'))).toBe(true);
+      expect(result.semantic.entities.some((e: any) => e.includes('React') || e.includes('TypeScript') || e.includes('API'))).toBe(true);
       // Dynamic concept extraction from user input
       expect(result.semantic.concepts.length).toBeGreaterThan(0);
       expect(['refactoring', 'general']).toContain(result.semantic.intent);
@@ -332,8 +332,8 @@ describe('RAGContextExtractor', () => {
 
       const result = await extractor.extractContext(query);
 
-      expect(result.conversation.userGoals.some(goal => goal.includes('创建用户登录页面'))).toBe(true);
-      expect(result.conversation.userGoals.some(goal => goal.includes('添加表单验证功能'))).toBe(true);
+      expect(result.conversation.userGoals.some((goal: any) => goal.includes('创建用户登录页面'))).toBe(true);
+      expect(result.conversation.userGoals.some((goal: any) => goal.includes('添加表单验证功能'))).toBe(true);
     });
 
     it('should handle provider failures gracefully', async () => {
@@ -475,7 +475,7 @@ describe('RAGContextExtractor', () => {
       // Dynamic concept extraction should identify technical concepts
       expect(result.semantic.concepts.length).toBeGreaterThan(0);
       // At least some concepts should be technical terms
-      const hasArchitectureConcepts = result.semantic.concepts.some(c => 
+      const hasArchitectureConcepts = result.semantic.concepts.some((c: any) => 
         c.includes('architecture') || c.includes('authentication') || 
         c.includes('middleware') || c.includes('performance') || 
         c.includes('optimization')

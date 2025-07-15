@@ -554,6 +554,7 @@ const App = ({
 
   const { elapsedTime, currentLoadingPhrase } = useLoadingIndicator(
     streamingState,
+    config,
   );
   const showAutoAcceptIndicator = useAutoAcceptIndicator({
     config,

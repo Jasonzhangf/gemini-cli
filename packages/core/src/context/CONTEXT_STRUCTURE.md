@@ -190,7 +190,12 @@ interface TaskContext {
 ### 1. 基础任务创建（无模板）
 ```bash
 # 创建简单任务列表
-create_tasks for tasks ["分析代码", "修复bug", "测试验证"]
+[tool_call: create_tasks]
+[*#*#text_tool_call]
+分析代码
+修复bug
+测试验证
+[#*#*text_tool_call*#*#]
 ```
 
 ### 2. 使用工作流模板

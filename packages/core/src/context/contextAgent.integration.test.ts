@@ -70,3 +70,33 @@ describe('ContextAgent RAG Integration', () => {
     expect(contextManager.addDynamicContext).toHaveBeenCalled();
   });
 });
+
+describe('ContextAgent Entity Extraction Logic', () => {
+  let contextAgent: ContextAgent;
+  let mockConfig: Config;
+
+  beforeEach(() => {
+    mockConfig = {
+      getDebugMode: vi.fn().mockReturnValue(true),
+    } as any;
+    contextAgent = new ContextAgent({ config: mockConfig, projectDir: '/tmp', sessionId: 'test' });
+  });
+
+  it('should NOT extract entities from natural language mentions', () => {
+    const ragOutput = "The user is asking about the context agent and its core functions.";
+    const entities = (contextAgent as any).extractEntitiesFromRAGOutput(ragOutput);
+    expect(entities).toEqual([]);
+  });
+
+  it('should extract entities when specific keywords are used', () => {
+    const ragOutput = "The main class is MainClass, and it uses the function process_data.";
+    const entities = (contextAgent as any).extractEntitiesFromRAGOutput(ragOutput);
+    expect(entities).toEqual(['MainClass', 'process_data']);
+  });
+
+  it('should extract file paths when correctly formatted', () => {
+    const ragOutput = "Please check the file at 'src/utils/helpers.ts'.";
+    const entities = (contextAgent as any).extractEntitiesFromRAGOutput(ragOutput);
+    expect(entities).toEqual(['src/utils/helpers.ts']);
+  });
+});

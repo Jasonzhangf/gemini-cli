@@ -62,7 +62,10 @@ export class StreamAdapter {
     if (thinkingContent) {
       yield {
         type: GeminiEventType.Thought,
-        value: { summary: thinkingContent, isComplete: true }
+        value: { 
+          subject: 'Thinking', 
+          description: thinkingContent 
+        }
       };
     }
 

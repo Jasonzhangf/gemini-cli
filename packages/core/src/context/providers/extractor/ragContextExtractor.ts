@@ -165,11 +165,14 @@ class TextAnalyzer {
   /**
    * Update corpus statistics for improved analysis
    */
-  updateCorpusStatistics(documentTokens: string[][]): void {
-    this.corpusSize = documentTokens.length;
+  updateCorpusStatistics(documentTokens: (string | undefined)[]): void {
+    const validDocuments = documentTokens.filter((doc): doc is string => typeof doc === 'string');
+    this.corpusSize = validDocuments.length;
     this.documentFrequency.clear();
     
-    documentTokens.forEach(tokens => {
+    const tokenizedDocuments = validDocuments.map(doc => this.tokenize(doc));
+    
+    tokenizedDocuments.forEach(tokens => {
       const uniqueTokens = new Set(tokens);
       uniqueTokens.forEach(token => {
         this.documentFrequency.set(token, (this.documentFrequency.get(token) || 0) + 1);
@@ -427,7 +430,7 @@ export class RAGContextExtractor implements IContextExtractor {
     const conversation = this.extractConversationContext(query.conversationHistory || []);
     
     // Extract operational context
-    const operational = this.extractOperationalContext(query.recentOperations || []);
+    const operational = this.extractOperationalContext(query.recentOperations);
 
     if (this.config.debugMode) {
       console.log(`[RAGContextExtractor] Context extraction completed in ${Date.now() - startTime}ms`);
@@ -520,8 +523,8 @@ export class RAGContextExtractor implements IContextExtractor {
     return {
       intent,
       confidence,
-      entities: entities.slice(0, 10),
-      concepts: concepts.slice(0, 8)
+      entities: entities,
+      concepts: concepts,
     };
   }
 
@@ -549,10 +552,10 @@ export class RAGContextExtractor implements IContextExtractor {
 
       // Limit results based on relevance scores
       results.relevantFiles = results.relevantFiles
-        .sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
+        .sort((a: any, b: any) => (b.relevance || 0) - (a.relevance || 0))
         .slice(0, Math.ceil(this.config.maxResults! * 0.4));
       results.relevantFunctions = results.relevantFunctions
-        .sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
+        .sort((a: any, b: any) => (b.relevance || 0) - (a.relevance || 0))
         .slice(0, Math.ceil(this.config.maxResults! * 0.4));
       results.relatedPatterns = results.relatedPatterns
         .slice(0, Math.ceil(this.config.maxResults! * 0.2));
@@ -693,7 +696,7 @@ export class RAGContextExtractor implements IContextExtractor {
       threshold: this.config.threshold!
     });
     
-    return vectorResults.results.map(result => ({
+    return vectorResults.results.map((result: any) => ({
       ...result,
       searchType: 'vector',
       relevanceScore: result.score || 0
@@ -710,7 +713,7 @@ export class RAGContextExtractor implements IContextExtractor {
       includeNeighbors: this.config.enableGraphTraversal
     });
     
-    return graphResults.nodes.map(node => ({
+    return graphResults.nodes.map((node: any) => ({
       ...node,
       searchType: 'graph',
       relevanceScore: this.calculateGraphRelevance(node, tokens)
@@ -802,7 +805,7 @@ export class RAGContextExtractor implements IContextExtractor {
     let score = result.relevanceScore || 0;
     
     // Boost based on search type
-    const typeBoosts = {
+    const typeBoosts: Record<string, number> = {
       'vector': 1.0,
       'graph': 1.2,    // Slightly prefer graph results for structured data
       'semantic': 0.9   // Semantic results as supporting evidence
@@ -998,49 +1001,19 @@ export class RAGContextExtractor implements IContextExtractor {
         const contextOverlap = contentTokens.filter(token => 
           intentSignature.some(sig => sig.toLowerCase() === token.toLowerCase())
         ).length;
-        
-        return boost + (contextOverlap * 0.02);
+        if (contextOverlap > 0) {
+          return boost + (contextOverlap / contentTokens.length) * 0.2;
+        }
+        return boost;
       }, 0);
-      
-      score += contextBoost / ragResults.length;
+      score += contextBoost;
     }
     
-    return Math.min(1.0, Math.max(0, score));
+    return score;
   }
-
-  // Legacy method - moved to extractEntitiesFromRAGResults
-  private extractEntitiesFromRAG(ragResults: any[]): string[] {
-    return this.extractEntitiesFromRAGResults(ragResults);
-  }
-
-  // Legacy method - kept for backward compatibility but deprecated
-  private extractEntitiesFromText(text: string): string[] {
-    // Delegate to dynamic entity extractor
-    return this.entityExtractor.extractEntities(text);
-  }
-
-  // Legacy method - removed as it contained hardcoded patterns
-  // Dynamic entity extraction is now handled by DynamicEntityExtractor class
-
-  // Legacy method - moved to extractConceptsFromRAGResults
-  private extractConceptsFromRAG(ragResults: any[]): string[] {
-    return this.extractConceptsFromRAGResults(ragResults);
-  }
-
-  // Legacy method - kept for backward compatibility but deprecated
-  private extractConceptsFromText(text: string): string[] {
-    // Delegate to dynamic entity extractor
-    return this.entityExtractor.extractConcepts(text);
-  }
-
-  // Legacy method - removed as it contained hardcoded patterns
-  // Dynamic concept extraction is now handled by DynamicEntityExtractor class
-
-  // Legacy method - removed as it contained hardcoded patterns
-  // Domain concept extraction is now handled dynamically
-
+  
   /**
-   * Calculate semantic confidence using statistical methods
+   * Calculate semantic confidence score based on various factors
    */
   private calculateSemanticConfidence(
     userInput: string, 
@@ -1048,33 +1021,18 @@ export class RAGContextExtractor implements IContextExtractor {
     entities: string[], 
     concepts: string[]
   ): number {
-    if (ragResults.length === 0) {
-      return 0.3;
-    }
-    
-    // Handle simple/short inputs with lower confidence
-    if (userInput.length < 5) {
-      return 0.4;
-    }
-    
+    let confidence = 0.5;
     const inputTokens = this.textAnalyzer.tokenize(userInput);
-    let confidence = 0.4;
     
-    // Base confidence from result quality
+    // RAG result confidence
     if (ragResults.length > 0) {
-      const validScores = ragResults
-        .map(r => r.finalScore || r.relevanceScore || 0)
-        .filter(score => !isNaN(score) && isFinite(score));
-      
-      if (validScores.length > 0) {
-        const avgScore = validScores.reduce((sum, score) => sum + score, 0) / validScores.length;
-        confidence += Math.min(0.3, avgScore * 0.5);
-      }
+      const avgScore = ragResults.reduce((sum, r) => sum + (r.finalScore || 0), 0) / ragResults.length;
+      confidence += avgScore * 0.2;
     }
     
     // Entity extraction confidence
     if (entities.length > 0) {
-      const entityConfidence = Math.min(0.2, entities.length * 0.05);
+      const entityConfidence = Math.min(0.15, entities.length * 0.03);
       confidence += entityConfidence;
     }
     
@@ -1125,11 +1083,13 @@ export class RAGContextExtractor implements IContextExtractor {
       
       // Build corpus from sampled documents
       const documents = graphSample.nodes
-        .filter(node => node.content && node.content.length > 10)
-        .map(node => node.content);
+        .filter((node: any) => node.content && node.content.length > 10)
+        .map((node: any) => node.content);
       
-      this.documentCorpus = documents.map(doc => this.textAnalyzer.tokenize(doc));
-      this.textAnalyzer.updateCorpusStatistics(this.documentCorpus);
+      if (documents.length > 0) {
+        this.documentCorpus = documents.map((doc: string) => this.textAnalyzer.tokenize(doc!));
+        this.textAnalyzer.updateCorpusStatistics(documents);
+      }
       
       this.lastCorpusUpdate = now;
       
@@ -1229,11 +1189,11 @@ export class RAGContextExtractor implements IContextExtractor {
   private extractRelevantFunctions(ragResults: any[]): ExtractedContext['code']['relevantFunctions'] {
     return ragResults
       .filter(r => r.type === 'function')
-      .map(r => ({
+      .map((r: any) => ({
         name: r.name,
-        filePath: r.metadata?.filePath || '',
+        filePath: r.metadata?.filePath,
         relevance: r.relevance,
-        signature: r.metadata?.signature
+        summary: `${r.content.substring(0, 80)}... ${r.contextHint || ''}`
       }));
   }
 
@@ -1242,154 +1202,123 @@ export class RAGContextExtractor implements IContextExtractor {
    */
   private extractRelatedPatterns(ragResults: any[]): ExtractedContext['code']['relatedPatterns'] {
     return ragResults
-      .filter(r => r.type === 'concept' || r.type === 'pattern')
-      .map(r => ({
+      .filter((r: any) => r.type === 'pattern' || r.type === 'concept')
+      .map((r: any) => ({
         pattern: r.name,
-        description: r.content,
-        examples: r.metadata?.examples || []
+        relevance: r.relevance,
+        description: `${r.content.substring(0, 80)}... ${r.contextHint || ''}`,
+        examples: [],
       }));
   }
-
-  /**
-   * Extract name from content
-   */
+  
   private extractNameFromContent(content: string): string {
-    const words = content.split(' ').filter(w => w.length > 2);
-    return words[0] || 'Unknown';
+    // Basic heuristics to extract a name-like feature from content
+    const match = content.match(/(class|function|const|let|var)\s+([a-zA-Z_][a-zA-Z0-9_]*)/);
+    if (match) {
+      return match[2];
+    }
+    return content.split(/\s+/).slice(0, 3).join(' ');
   }
 
   /**
-   * Calculate graph relevance based on query tokens
+   * Handle file change events to update providers
+   */
+  private async handleFileChange(data: Record<string, any>): Promise<void> {
+    const { filePath, content } = data;
+    if (filePath && content) {
+      await Promise.all([
+        this.graphProvider.upsertNode({ id: filePath, name: filePath, type: 'file', content, metadata: {}, relationships: [] }),
+        this.vectorProvider.indexDocument(filePath, content, { type: 'file', filePath })
+      ]);
+    }
+  }
+
+  /**
+   * Handle tool execution events to update providers
+   */
+  private async handleToolExecution(data: Record<string, any>): Promise<void> {
+    const { toolName, parameters, result } = data;
+    const content = `Tool: ${toolName}, Params: ${JSON.stringify(parameters)}, Result: ${JSON.stringify(result)}`;
+    await this.graphProvider.upsertNode({
+      id: `tool_${Date.now()}`,
+      name: toolName,
+      type: 'concept',
+      content,
+      metadata: { parameters, result },
+      relationships: [],
+    });
+  }
+  
+  /**
+   * Handle new conversation turns to update providers
+   */
+  private async handleConversationTurn(data: Record<string, any>): Promise<void> {
+    const { role, content } = data;
+    const id = `turn_${Date.now()}`;
+    await Promise.all([
+      this.graphProvider.upsertNode({ id, name: `${role}_turn`, type: 'concept', content, metadata: {role}, relationships: [] }),
+      this.vectorProvider.indexDocument(id, content, { role } )
+    ]);
+  }
+
+  /**
+   * Calculate graph node relevance score
    */
   private calculateGraphRelevance(node: any, queryTokens: string[]): number {
-    let relevance = 0.5; // Base relevance
+    let score = 0;
+    const nodeTokens = this.textAnalyzer.tokenize(node.name + ' ' + (node.content || ''));
     
-    // Check name matches
-    const nameLower = node.name.toLowerCase();
-    for (const token of queryTokens) {
-      if (nameLower.includes(token.toLowerCase())) {
-        relevance += 0.3;
-      }
+    // Token overlap
+    const overlap = queryTokens.filter(token => nodeTokens.includes(token)).length;
+    score += overlap * 0.1;
+    
+    // Prefer specific types
+    if (['file', 'function', 'class'].includes(node.type)) {
+      score += 0.2;
     }
     
-    // Check content matches
-    const contentLower = (node.content || '').toLowerCase();
-    for (const token of queryTokens) {
-      if (contentLower.includes(token.toLowerCase())) {
-        relevance += 0.1;
-      }
-    }
-    
-    return Math.min(1.0, relevance);
+    return Math.min(1.0, score);
   }
-
-
+  
   private extractTopicsFromMessage(content: string): string[] {
-    if (!content || typeof content !== 'string') {
-      return [];
-    }
-    
-    const topics: string[] = [];
-    
-    // Extract technical terms
-    const techTerms = content.match(/\b(context|agent|manager|integrator|prompt|enhancer|debug|logger|tool|hijack|adapter|openai|gemini|cli|architecture|design|pattern|framework|library|component|module|service)\b/gi) || [];
-    topics.push(...techTerms);
-    
-    return [...new Set(topics)];
+    const tokens = this.textAnalyzer.tokenize(content);
+    return tokens.slice(0, 5); // Simple heuristic
   }
-
+  
   private extractGoalsFromMessage(content: string): string[] {
-    if (!content || typeof content !== 'string') {
-      return [];
-    }
-    
     const goals: string[] = [];
+    const keywords = ['i want to', 'can you', 'how do i', 'i need to'];
+    const lowerContent = content.toLowerCase();
     
-    // Look for action-oriented phrases and general goals
-    const actionPatterns = [
-      /实现(.+?)(?:[。，]|$)/g,
-      /创建(.+?)(?:[。，]|$)/g,
-      /开发(.+?)(?:[。，]|$)/g,
-      /修复(.+?)(?:[。，]|$)/g,
-      /分析(.+?)(?:[。，]|$)/g,
-      /优化(.+?)(?:[。，]|$)/g,
-      /需要(.+?)(?:[。，]|$)/g,
-      /添加(.+?)(?:[。，]|$)/g,
-      /了解(.+?)(?:[。，]|$)/g,
-      /想要(.+?)(?:[。，]|$)/g,
-      /希望(.+?)(?:[。，]|$)/g
-    ];
-    
-    for (const pattern of actionPatterns) {
-      const matches = content.match(pattern);
-      if (matches) {
-        goals.push(...matches.map(match => match.trim()));
+    for (const keyword of keywords) {
+      if (lowerContent.includes(keyword)) {
+        const goal = content.substring(lowerContent.indexOf(keyword)).split('.')[0];
+        goals.push(goal);
       }
     }
     
     return goals;
   }
-
-  private formatOperationDescription(operation: ContextQuery['recentOperations'][0]): string {
-    const timestamp = new Date(operation.timestamp).toLocaleTimeString('en-US', { hour12: true });
-    return `[${timestamp}] ${operation.type}: ${operation.description}`;
+  
+  private formatOperationDescription(operation: { type: string, description: string }): string {
+    return `${operation.type}: ${operation.description}`;
   }
-
+  
   private generateWorkflowSuggestions(operations: ContextQuery['recentOperations']): string[] {
+    if (!operations || operations.length === 0) {
+      return [];
+    }
+    const operationTypes = operations.map((op: any) => op.type);
     const suggestions: string[] = [];
     
-    // Analyze operation patterns
-    const operationTypes = operations.map(op => op.type);
-    const hasErrors = operationTypes.includes('error');
-    const hasFileChanges = operationTypes.includes('file_change');
-    const hasToolCalls = operationTypes.includes('tool_call');
-    
-    if (hasErrors) {
-      suggestions.push('Review error logs and debug information');
+    if (operationTypes.includes('error') && !operationTypes.includes('tool_call')) {
+      suggestions.push('Use a tool to debug the error');
     }
     
-    if (hasFileChanges) {
-      suggestions.push('Consider running tests after file changes');
-    }
-    
-    if (hasToolCalls) {
-      suggestions.push('Verify tool call results and handle any failures');
+    if (operationTypes.includes('file_change') && !operationTypes.includes('tool_call')) {
+      suggestions.push('Run tests after file change');
     }
     
     return suggestions;
-  }
-
-  private async handleFileChange(data: Record<string, any>): Promise<void> {
-    // Index changed file in vector search
-    if (data.filePath && data.content) {
-      await this.vectorProvider.indexDocument(data.filePath, data.content, {
-        type: 'file',
-        filePath: data.filePath,
-        lastModified: new Date().toISOString()
-      });
-    }
-  }
-
-  private async handleToolExecution(data: Record<string, any>): Promise<void> {
-    // Could update knowledge graph with tool execution results
-    // For now, just log the execution
-    if (this.config.debugMode) {
-      console.log(`[RAGContextExtractor] Tool execution: ${data.toolName}`);
-    }
-  }
-
-  private async handleConversationTurn(data: Record<string, any>): Promise<void> {
-    // Index conversation content for future reference
-    if (data.content) {
-      await this.vectorProvider.indexDocument(
-        `conversation_${Date.now()}`,
-        data.content,
-        {
-          type: 'conversation',
-          role: data.role,
-          timestamp: new Date().toISOString()
-        }
-      );
-    }
   }
 }

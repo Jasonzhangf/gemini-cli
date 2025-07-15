@@ -5,6 +5,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { type Config } from '@google/gemini-cli-core';
 
 export const WITTY_LOADING_PHRASES = [
   "I'm Feeling Lucky",
@@ -140,15 +141,87 @@ export const WITTY_LOADING_PHRASES = [
   'Have you tried turning it off and on again? (The loading screen, not me.)',
 ];
 
-export const PHRASE_CHANGE_INTERVAL_MS = 15000;
+export const PHRASE_CHANGE_INTERVAL_MS = 5000; // Reduced from 15s to 5s for more responsive status updates
+
+/**
+ * Generate current status description based on system state
+ */
+const generateStatusDescription = (config?: Config): string => {
+  if (!config) {
+    return 'Initializing system...';
+  }
+
+  try {
+    const contextManager = config.getContextManager();
+    const isInMaintenanceMode = contextManager?.isInMaintenanceMode();
+    
+    if (isInMaintenanceMode) {
+      const currentTask = contextManager?.getCurrentTask();
+      if (currentTask) {
+        const taskDescription = currentTask.description.length > 30 
+          ? currentTask.description.substring(0, 27) + '...' 
+          : currentTask.description;
+        
+        // Add status indicator based on task status
+        const statusIcon = currentTask.status === 'in_progress' ? '🔄' : '⏳';
+        return `${statusIcon} Task: ${taskDescription}`;
+      } else {
+        return '✅ All tasks completed - ready for new work';
+      }
+    }
+
+    // Check various system states for more specific status
+    const debugMode = config.getDebugMode();
+    
+    // Check RAG system status if available
+    let ragStatus: { initialized: boolean; initializing: boolean } | null = null;
+    try {
+      const contextAgent = config.getContextAgent();
+      if (contextAgent && typeof contextAgent.getRagStatus === 'function') {
+        ragStatus = contextAgent.getRagStatus();
+      }
+    } catch (error) {
+      // Ignore errors accessing contextAgent
+    }
+    
+    // Show RAG status if available
+    if (ragStatus) {
+      if (ragStatus.initializing) {
+        return '🔄 RAG system initializing in background...';
+      } else if (ragStatus.initialized) {
+        // RAG is ready, show normal processing messages
+      } else {
+        // RAG failed to initialize, still functional with fallback
+      }
+    }
+    
+    // Create rotating status messages that give insight into what's happening
+    const currentTime = Date.now();
+    const rotationIndex = Math.floor(currentTime / 3000) % 6; // Change every 3 seconds
+    
+    const statusMessages = [
+      '🧠 Analyzing context and patterns...',
+      '🔍 Processing your request...',
+      '⚡ Consulting knowledge systems...',
+      '🎯 Preparing intelligent response...',
+      '📊 Optimizing solution approach...',
+      debugMode ? '🐛 Debug mode: Enhanced logging active' : '✨ Generating response...',
+    ];
+    
+    return statusMessages[rotationIndex];
+  } catch (error) {
+    return '⚙️ Processing your request...';
+  }
+};
 
 /**
  * Custom hook to manage cycling through loading phrases.
  * @param isActive Whether the phrase cycling should be active.
  * @param isWaiting Whether to show a specific waiting phrase.
+ * @param config Optional config object for status-based messages.
  * @returns The current loading phrase.
  */
-export const usePhraseCycler = (isActive: boolean, isWaiting: boolean) => {
+export const usePhraseCycler = (isActive: boolean, isWaiting: boolean, config?: Config) => {
   const [currentLoadingPhrase, setCurrentLoadingPhrase] = useState(
     WITTY_LOADING_PHRASES[0],
   );
@@ -165,27 +238,41 @@ export const usePhraseCycler = (isActive: boolean, isWaiting: boolean) => {
       if (phraseIntervalRef.current) {
         clearInterval(phraseIntervalRef.current);
       }
-      // Select an initial random phrase
-      const initialRandomIndex = Math.floor(
-        Math.random() * WITTY_LOADING_PHRASES.length,
-      );
-      setCurrentLoadingPhrase(WITTY_LOADING_PHRASES[initialRandomIndex]);
+      
+      // Check if user wants status-based phrases
+      const useStatusBasedPhrases = config?.getAccessibility()?.useStatusBasedPhrases ?? true; // Default to status-based
+      
+      if (useStatusBasedPhrases) {
+        // Set initial status-based phrase
+        setCurrentLoadingPhrase(generateStatusDescription(config));
 
-      phraseIntervalRef.current = setInterval(() => {
-        // Select a new random phrase
-        const randomIndex = Math.floor(
+        phraseIntervalRef.current = setInterval(() => {
+          // Update with current status description
+          setCurrentLoadingPhrase(generateStatusDescription(config));
+        }, PHRASE_CHANGE_INTERVAL_MS);
+      } else {
+        // Use traditional witty phrases
+        const initialRandomIndex = Math.floor(
           Math.random() * WITTY_LOADING_PHRASES.length,
         );
-        setCurrentLoadingPhrase(WITTY_LOADING_PHRASES[randomIndex]);
-      }, PHRASE_CHANGE_INTERVAL_MS);
+        setCurrentLoadingPhrase(WITTY_LOADING_PHRASES[initialRandomIndex]);
+
+        phraseIntervalRef.current = setInterval(() => {
+          const randomIndex = Math.floor(
+            Math.random() * WITTY_LOADING_PHRASES.length,
+          );
+          setCurrentLoadingPhrase(WITTY_LOADING_PHRASES[randomIndex]);
+        }, 15000); // Keep original 15s interval for witty phrases
+      }
     } else {
       // Idle or other states, clear the phrase interval
-      // and reset to the first phrase for next active state.
+      // and reset to a default phrase for next active state.
       if (phraseIntervalRef.current) {
         clearInterval(phraseIntervalRef.current);
         phraseIntervalRef.current = null;
       }
-      setCurrentLoadingPhrase(WITTY_LOADING_PHRASES[0]);
+      const useStatusBasedPhrases = config?.getAccessibility()?.useStatusBasedPhrases ?? true;
+      setCurrentLoadingPhrase(useStatusBasedPhrases ? '💬 Ready to assist...' : WITTY_LOADING_PHRASES[0]);
     }
 
     return () => {
@@ -194,7 +281,7 @@ export const usePhraseCycler = (isActive: boolean, isWaiting: boolean) => {
         phraseIntervalRef.current = null;
       }
     };
-  }, [isActive, isWaiting]);
+  }, [isActive, isWaiting, config]);
 
   return currentLoadingPhrase;
 };

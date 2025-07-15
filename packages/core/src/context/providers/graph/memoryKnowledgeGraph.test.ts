@@ -205,7 +205,7 @@ describe('MemoryKnowledgeGraphProvider', () => {
       expect(result.nodes.length).toBeGreaterThan(0);
       expect(result.nodes.every(n => 
         n.name.toLowerCase().includes('user') || 
-        n.content.toLowerCase().includes('user')
+        (n.content && n.content.toLowerCase().includes('user'))
       )).toBe(true);
     });
 
@@ -248,8 +248,8 @@ describe('MemoryKnowledgeGraphProvider', () => {
       expect(result.nodes).toHaveLength(1);
       expect(result.nodes[0].type).toBe('function');
       expect(
-        result.nodes[0].name.toLowerCase().includes('user') ||
-        result.nodes[0].content.toLowerCase().includes('user')
+        result.nodes[0]?.name.toLowerCase().includes('user') ||
+        (result.nodes[0]?.content && result.nodes[0].content.toLowerCase().includes('user'))
       ).toBe(true);
     });
   });
@@ -376,7 +376,7 @@ describe('MemoryKnowledgeGraphProvider', () => {
           name: 'TestFunction',
           content: 'A test function',
           metadata: {},
-          relationships: [{ targetId: 'node-1', type: 'belongs_to' }]
+          relationships: [{ targetId: 'node-1', type: 'contains' }]
         }
       ];
 

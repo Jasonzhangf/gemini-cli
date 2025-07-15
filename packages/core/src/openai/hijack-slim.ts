@@ -39,7 +39,7 @@ export class OpenAIHijackAdapter {
     this.conversationManager = new ConversationManager();
     this.streamAdapter = new StreamAdapter();
     this.pathProcessor = new PathProcessor(coreConfig.getTargetDir());
-    this.debugLogger = new DebugLogger('openai-hijack', coreConfig.getDebugMode());
+    this.debugLogger = new DebugLogger('openai-hijack', coreConfig.getTargetDir(), coreConfig.getDebugMode());
   }
 
   async *sendMessageStream(
@@ -48,7 +48,9 @@ export class OpenAIHijackAdapter {
     promptId: string
   ): AsyncGenerator<ServerGeminiStreamEvent> {
     
-    this.debugLogger.debug('OpenAI hijack processing request');
+    if (this.debugLogger) {
+      console.log('[OpenAI Hijack] Processing request');
+    }
     
     try {
       // 1. 处理输入内容
@@ -73,10 +75,14 @@ export class OpenAIHijackAdapter {
         this.conversationManager.addMessage('assistant', assistantResponse);
       }
       
-      this.debugLogger.debug('OpenAI hijack completed successfully');
+      if (this.debugLogger) {
+        console.log('[OpenAI Hijack] Completed successfully');
+      }
       
     } catch (error) {
-      this.debugLogger.debug('OpenAI hijack failed:', error);
+      if (this.debugLogger) {
+        this.debugLogger.logError(`OpenAI hijack failed: ${error}`);
+      }
       throw error;
     }
   }

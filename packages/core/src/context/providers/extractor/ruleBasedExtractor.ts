@@ -141,6 +141,8 @@ export class RuleBasedContextExtractor implements IContextExtractor {
     this.rules.set(/\b(\w+\.\w+)\b/g, (match, context) => {
       return {
         semantic: {
+          intent: 'general',
+          confidence: 0.5,
           entities: [match],
           concepts: ['file']
         }
@@ -151,6 +153,8 @@ export class RuleBasedContextExtractor implements IContextExtractor {
     this.rules.set(/\b(function\s+\w+|const\s+\w+\s*=|class\s+\w+)\b/g, (match, context) => {
       return {
         semantic: {
+          intent: 'general',
+          confidence: 0.5,
           entities: [match],
           concepts: ['function', 'code']
         }
@@ -163,6 +167,7 @@ export class RuleBasedContextExtractor implements IContextExtractor {
         semantic: {
           intent: 'debugging',
           confidence: 0.8,
+          entities: [],
           concepts: ['error', 'debugging']
         }
       };
@@ -174,6 +179,7 @@ export class RuleBasedContextExtractor implements IContextExtractor {
         semantic: {
           intent: 'documentation',
           confidence: 0.7,
+          entities: [],
           concepts: ['documentation']
         }
       };
@@ -185,6 +191,7 @@ export class RuleBasedContextExtractor implements IContextExtractor {
         semantic: {
           intent: 'testing',
           confidence: 0.8,
+          entities: [],
           concepts: ['testing']
         }
       };
@@ -449,10 +456,13 @@ export class RuleBasedContextExtractor implements IContextExtractor {
   }
 
   private generateWorkflowSuggestions(operations: ContextQuery['recentOperations']): string[] {
+    if (!operations) {
+        return [];
+    }
     const suggestions: string[] = [];
     
     // Analyze operation patterns
-    const operationTypes = operations.map(op => op.type);
+    const operationTypes = operations.map((op: any) => op.type);
     const hasErrors = operationTypes.includes('error');
     const hasFileChanges = operationTypes.includes('file_change');
     const hasToolCalls = operationTypes.includes('tool_call');

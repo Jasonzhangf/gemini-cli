@@ -21,7 +21,13 @@ describe('DynamicContextGenerator', () => {
   let mockConfig: Config;
 
   beforeEach(() => {
-    mockConfig = new Config();
+    mockConfig = new Config({
+      sessionId: 'test-session',
+      targetDir: '/tmp/test',
+      debugMode: false,
+      cwd: '/tmp/test',
+      model: 'gemini-2.0-flash-exp'
+    });
     generator = new DynamicContextGenerator(mockConfig);
   });
 

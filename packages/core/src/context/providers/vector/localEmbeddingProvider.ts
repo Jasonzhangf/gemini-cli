@@ -82,7 +82,9 @@ export class LocalEmbeddingVectorProvider implements IVectorSearchProvider {
     // Manage cache size
     if (this.embeddingCache.size > this.config.cacheSize!) {
       const firstKey = this.embeddingCache.keys().next().value;
-      this.embeddingCache.delete(firstKey);
+      if (firstKey) {
+        this.embeddingCache.delete(firstKey);
+      }
     }
   }
 

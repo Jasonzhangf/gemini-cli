@@ -44,6 +44,7 @@ export class ContextAgent {
   private graphProvider: IKnowledgeGraphProvider | null = null;
   private vectorProvider: IVectorSearchProvider | null = null;
   private providerFactory: ContextProviderFactory;
+  private ragInitializing: boolean = false;
   
   // Semantic analysis components
   private semanticAnalysisService: SemanticAnalysisService | null = null;
@@ -139,6 +140,7 @@ export class ContextAgent {
    * Initialize RAG system components
    */
   private async initializeRAGSystem(): Promise<void> {
+    this.ragInitializing = true;
     try {
       if (this.config.getDebugMode()) {
         console.log('[ContextAgent] Initializing RAG system...');
@@ -194,6 +196,8 @@ export class ContextAgent {
       this.contextExtractor = null;
       this.graphProvider = null;
       this.vectorProvider = null;
+    } finally {
+      this.ragInitializing = false;
     }
   }
 
@@ -1180,6 +1184,17 @@ export class ContextAgent {
     sections.push(`*分析耗时: ${semanticResult.analysisTime}ms*`);
     
     return sections.join('\n');
+  }
+
+  /**
+   * Get the status of the RAG system.
+   * @returns An object with the initialized and initializing status.
+   */
+  public getRagStatus(): { initialized: boolean; initializing: boolean } {
+    return {
+      initialized: !!this.contextExtractor,
+      initializing: this.ragInitializing,
+    };
   }
 
   /**

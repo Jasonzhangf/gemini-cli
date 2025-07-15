@@ -8,8 +8,9 @@ import { StreamingState } from '../types.js';
 import { useTimer } from './useTimer.js';
 import { usePhraseCycler } from './usePhraseCycler.js';
 import { useState, useEffect, useRef } from 'react'; // Added useRef
+import { type Config } from '@google/gemini-cli-core';
 
-export const useLoadingIndicator = (streamingState: StreamingState) => {
+export const useLoadingIndicator = (streamingState: StreamingState, config?: Config) => {
   const [timerResetKey, setTimerResetKey] = useState(0);
   const isTimerActive = streamingState === StreamingState.Responding;
 
@@ -20,6 +21,7 @@ export const useLoadingIndicator = (streamingState: StreamingState) => {
   const currentLoadingPhrase = usePhraseCycler(
     isPhraseCyclingActive,
     isWaiting,
+    config,
   );
 
   const [retainedElapsedTime, setRetainedElapsedTime] = useState(0);

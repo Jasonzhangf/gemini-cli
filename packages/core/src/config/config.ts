@@ -83,6 +83,7 @@ export interface AnalysisSettings {
 
 export interface AccessibilitySettings {
   disableLoadingPhrases?: boolean;
+  useStatusBasedPhrases?: boolean;
 }
 
 export interface BugCommandSettings {
