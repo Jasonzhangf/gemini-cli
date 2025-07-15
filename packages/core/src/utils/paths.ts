@@ -150,6 +150,53 @@ export function getProjectHash(projectRoot: string): string {
 }
 
 /**
+ * Generates a project folder name from absolute path by replacing / with -
+ * Removes drive letters on Windows and handles special characters
+ * @param projectRoot The absolute path to the project's root directory.
+ * @returns A safe folder name based on the absolute path.
+ */
+export function getProjectFolderName(projectRoot: string): string {
+  // Normalize path separators to forward slashes
+  let normalizedPath = projectRoot.replace(/\\/g, '/');
+  
+  // Remove drive letter on Windows (C:/ becomes /)
+  if (process.platform === 'win32') {
+    normalizedPath = normalizedPath.replace(/^[A-Z]:/i, '');
+  }
+  
+  // Remove leading slash
+  if (normalizedPath.startsWith('/')) {
+    normalizedPath = normalizedPath.substring(1);
+  }
+  
+  // Remove trailing slashes
+  normalizedPath = normalizedPath.replace(/\/+$/g, '');
+  
+  // Replace / with -
+  let folderName = normalizedPath.replace(/\//g, '-');
+  
+  // Replace other unsafe characters
+  folderName = folderName
+    .replace(/[<>:"|?*]/g, '_')  // Windows unsafe chars
+    .replace(/\s+/g, '_')        // Spaces to underscores
+    .replace(/\.+/g, '.')        // Multiple dots to single dot
+    .replace(/^-+|-+$/g, '')     // Remove leading/trailing dashes
+    .replace(/-+/g, '-');        // Multiple dashes to single dash
+  
+  // Ensure it's not empty and not too long
+  if (!folderName || folderName === '.') {
+    folderName = 'root';
+  }
+  
+  // Limit length to 100 characters
+  if (folderName.length > 100) {
+    folderName = folderName.substring(0, 100);
+  }
+  
+  return folderName;
+}
+
+/**
  * Generates a unique temporary directory path for a project.
  * @param projectRoot The absolute path to the project's root directory.
  * @returns The path to the project's temporary directory.

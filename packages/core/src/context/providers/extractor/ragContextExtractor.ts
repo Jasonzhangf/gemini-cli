@@ -14,7 +14,8 @@ import {
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { getProjectHash } from '../../../utils/paths.js';
+import { getProjectHash, getProjectFolderName } from '../../../utils/paths.js';
+import { RAGIncrementalIndexer, RAGIndexTrigger, FileChangeType } from './ragIncrementalIndexer.js';
 
 /**
  * RAG Level Configuration
@@ -398,6 +399,10 @@ export class RAGContextExtractor implements IContextExtractor {
   private documentCorpus: string[][] = [];
   private lastCorpusUpdate: number = 0;
   private readonly CORPUS_UPDATE_INTERVAL = 600000; // 10 minutes
+  
+  // Incremental indexing
+  private incrementalIndexer: RAGIncrementalIndexer;
+  private isIndexingEnabled = true;
 
   constructor(
     config: RAGExtractorConfig = {},
@@ -429,15 +434,33 @@ export class RAGContextExtractor implements IContextExtractor {
     // Initialize advanced components
     this.textAnalyzer = new TextAnalyzer();
     this.entityExtractor = new DynamicEntityExtractor(this.textAnalyzer);
+    
+    // Initialize incremental indexer
+    this.incrementalIndexer = new RAGIncrementalIndexer(
+      this.graphProvider,
+      this.vectorProvider,
+      {
+        watchDirectories: [this.config.projectRoot || process.cwd()],
+        supportedExtensions: ['.md', '.txt', '.json', '.yaml', '.yml', '.xml', '.ts', '.js', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.h'],
+        debounceTime: 1000,
+        maxBatchSize: 50,
+        enableFileWatcher: this.isIndexingEnabled,
+        debugMode: this.config.debugMode || false
+      }
+    );
+    
+    // Setup incremental indexing event handlers
+    this.setupIncrementalIndexingHandlers();
   }
 
   /**
    * 获取项目RAG存储目录
+   * 使用绝对路径转换为文件夹名称（/换成-）而不是使用UUID
    */
   private getProjectRAGStorageDir(): string {
     const projectRoot = this.config.projectRoot || process.cwd();
-    const projectHash = getProjectHash(projectRoot);
-    const baseDir = this.config.storageDir || path.join(os.homedir(), '.gemini', 'Projects', projectHash, 'rag');
+    const projectFolderName = getProjectFolderName(projectRoot);
+    const baseDir = this.config.storageDir || path.join(os.homedir(), '.gemini', 'Projects', projectFolderName, 'rag');
     return baseDir;
   }
 
@@ -456,6 +479,11 @@ export class RAGContextExtractor implements IContextExtractor {
         this.graphProvider.initialize(),
         this.vectorProvider.initialize()
       ]);
+      
+      // Initialize incremental indexer
+      if (this.isIndexingEnabled) {
+        await this.incrementalIndexer.initialize();
+      }
     } catch (error) {
       if (this.config.debugMode) {
         console.warn('[RAGContextExtractor] Provider initialization failed:', error);
@@ -698,17 +726,43 @@ export class RAGContextExtractor implements IContextExtractor {
     type: 'file_change' | 'tool_execution' | 'conversation_turn';
     data: Record<string, any>;
   }): Promise<void> {
-    // Update providers with new information
-    switch (update.type) {
-      case 'file_change':
-        await this.handleFileChange(update.data);
-        break;
-      case 'tool_execution':
-        await this.handleToolExecution(update.data);
-        break;
-      case 'conversation_turn':
-        await this.handleConversationTurn(update.data);
-        break;
+    try {
+      // 处理文件变化并触发增量索引
+      if (update.type === 'file_change') {
+        const { filePath, content, oldPath } = update.data;
+        
+        if (oldPath && oldPath !== filePath) {
+          // 处理文件重命名
+          await this.handleFileNameChange(filePath, 'renamed', oldPath);
+        } else if (content !== undefined) {
+          // 处理文件内容变化
+          await this.handleFileContentChange(filePath, 'modified');
+        } else {
+          // 处理文件名变化
+          await this.handleFileNameChange(filePath, 'modified');
+        }
+      }
+      
+      // Update providers with new information
+      switch (update.type) {
+        case 'file_change':
+          await this.handleFileChange(update.data);
+          break;
+        case 'tool_execution':
+          await this.handleToolExecution(update.data);
+          break;
+        case 'conversation_turn':
+          await this.handleConversationTurn(update.data);
+          break;
+      }
+      
+      // 更新语料库统计
+      await this.updateCorpusStatisticsAsync();
+      
+    } catch (error) {
+      if (this.config.debugMode) {
+        console.error('[RAGContextExtractor] updateContext failed:', error);
+      }
     }
   }
 
@@ -731,6 +785,10 @@ export class RAGContextExtractor implements IContextExtractor {
   }
 
   async dispose(): Promise<void> {
+    if (this.incrementalIndexer) {
+      await this.incrementalIndexer.dispose();
+    }
+    
     await Promise.all([
       this.graphProvider.dispose(),
       this.vectorProvider.dispose()
@@ -2209,4 +2267,183 @@ export class RAGContextExtractor implements IContextExtractor {
       .filter(token => token.length > 3)
       .slice(0, 10);
   }
+  
+  /**
+   * 异步更新语料库统计
+   */
+  private async updateCorpusStatisticsAsync(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastCorpusUpdate < this.CORPUS_UPDATE_INTERVAL) {
+      return; // 距离上次更新时间太短，跳过
+    }
+
+    try {
+      // 获取示例文档用于语料库分析
+      const sampleQuery = { maxResults: 50 };
+      const graphSample = await this.graphProvider.queryGraph(sampleQuery);
+      
+      // 从示例文档构建语料库
+      const documents = graphSample.nodes
+        .filter((node: any) => node.content && node.content.length > 10)
+        .map((node: any) => node.content);
+      
+      if (documents.length > 0) {
+        this.documentCorpus = documents.map((doc: string) => this.textAnalyzer.tokenize(doc!));
+        this.textAnalyzer.updateCorpusStatistics(documents);
+      }
+      
+      this.lastCorpusUpdate = now;
+      
+      if (this.config.debugMode) {
+        console.log(`[RAGContextExtractor] 语料库统计已更新，文档数: ${documents.length}`);
+      }
+    } catch (error) {
+      if (this.config.debugMode) {
+        console.warn('[RAGContextExtractor] 更新语料库统计失败:', error);
+      }
+    }
+  }
+
+  // =====================================
+  // Incremental Indexing Methods
+  // =====================================
+  
+  /**
+   * 设置增量索引事件处理器
+   */
+  private setupIncrementalIndexingHandlers(): void {
+    if (!this.incrementalIndexer) return;
+    
+    // 监听索引开始事件
+    this.incrementalIndexer.on('indexing_started', (event) => {
+      if (this.config.debugMode) {
+        console.log(`[RAGContextExtractor] 索引开始: ${event.trigger} - ${event.filePath || 'multiple files'}`);
+      }
+    });
+    
+    // 监听索引完成事件
+    this.incrementalIndexer.on('indexing_completed', (event) => {
+      if (this.config.debugMode) {
+        console.log(`[RAGContextExtractor] 索引完成: ${event.trigger} - ${event.filePath || 'multiple files'}`);
+      }
+    });
+    
+    // 监听索引失败事件
+    this.incrementalIndexer.on('indexing_failed', (event) => {
+      if (this.config.debugMode) {
+        console.error(`[RAGContextExtractor] 索引失败: ${event.trigger} - ${event.filePath || 'multiple files'}`, event.error);
+      }
+    });
+    
+    // 监听进度事件
+    this.incrementalIndexer.on('progress', (event) => {
+      if (this.config.debugMode) {
+        console.log(`[RAGContextExtractor] 索引进度: ${event.processed}/${event.total}`);
+      }
+    });
+  }
+  
+  /**
+   * 处理/init命令，触发完整RAG重建
+   */
+  async handleInitCommand(): Promise<void> {
+    if (!this.incrementalIndexer) {
+      throw new Error('增量索引器未初始化');
+    }
+    
+    const projectRoot = this.config.projectRoot || process.cwd();
+    await this.incrementalIndexer.handleInitCommand(projectRoot);
+  }
+  
+  /**
+   * 处理Graph变化触发的索引更新
+   */
+  async handleGraphChange(changeType: 'node_added' | 'node_updated' | 'node_removed', nodeId: string, nodeData?: any): Promise<void> {
+    if (!this.incrementalIndexer) return;
+    
+    await this.incrementalIndexer.handleGraphChange(changeType, nodeId, nodeData);
+  }
+  
+  /**
+   * 处理文件名变化
+   */
+  async handleFileNameChange(filePath: string, changeType: FileChangeType, oldPath?: string): Promise<void> {
+    if (!this.incrementalIndexer) return;
+    
+    await this.incrementalIndexer.handleFileNameChange(filePath, changeType, oldPath);
+  }
+  
+  /**
+   * 处理文件内容变化
+   */
+  async handleFileContentChange(filePath: string, changeType: FileChangeType): Promise<void> {
+    if (!this.incrementalIndexer) return;
+    
+    await this.incrementalIndexer.handleFileContentChange(filePath, changeType);
+  }
+  
+  /**
+   * 手动触发索引更新
+   */
+  async triggerManualIndex(filePath: string, changeType: FileChangeType = 'modified'): Promise<void> {
+    if (!this.incrementalIndexer) return;
+    
+    await this.incrementalIndexer.triggerManualIndex(filePath, changeType);
+  }
+  
+  /**
+   * 获取索引状态
+   */
+  getIndexingStatus(): {
+    isIndexing: boolean;
+    queueSize: number;
+    lastIndexTime: Record<string, number>;
+    watchedDirectories: string[];
+    isEnabled: boolean;
+  } {
+    if (!this.incrementalIndexer) {
+      return {
+        isIndexing: false,
+        queueSize: 0,
+        lastIndexTime: {},
+        watchedDirectories: [],
+        isEnabled: false
+      };
+    }
+    
+    return {
+      ...this.incrementalIndexer.getIndexingStatus(),
+      isEnabled: this.isIndexingEnabled
+    };
+  }
+  
+  /**
+   * 启用或禁用增量索引
+   */
+  setIndexingEnabled(enabled: boolean): void {
+    this.isIndexingEnabled = enabled;
+    
+    if (this.config.debugMode) {
+      console.log(`[RAGContextExtractor] 增量索引${enabled ? '启用' : '禁用'}`);
+    }
+  }
+  
+  /**
+   * 添加监控目录
+   */
+  async addWatchDirectory(directory: string): Promise<void> {
+    if (!this.incrementalIndexer) return;
+    
+    await this.incrementalIndexer.addWatchDirectory(directory);
+  }
+  
+  /**
+   * 移除监控目录
+   */
+  removeWatchDirectory(directory: string): void {
+    if (!this.incrementalIndexer) return;
+    
+    this.incrementalIndexer.removeWatchDirectory(directory);
+  }
+  
 }
