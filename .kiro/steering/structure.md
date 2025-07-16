@@ -216,3 +216,7 @@ Task Creation → Task Breakdown → Status Tracking → Progress Monitoring →
 
 ## License & Headers
 All source files must include Google's Apache 2.0 license header (enforced by ESLint).
+source copyright under Jason Zhang
+
+## Virtual Environment
+Running locally under virtual environment ./venv

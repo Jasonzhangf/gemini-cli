@@ -127,6 +127,9 @@ export class ContextAgent {
         const stats = this.knowledgeGraph.getStatistics();
         console.log(`[ContextAgent] Initialization complete in ${duration}ms`);
         console.log(`[ContextAgent] Graph statistics:`, stats);
+        if (stats.placeholderNodes > 0) {
+          console.log(`[ContextAgent] Created ${stats.placeholderNodes} placeholder nodes for external references`);
+        }
       }
 
     } catch (error) {

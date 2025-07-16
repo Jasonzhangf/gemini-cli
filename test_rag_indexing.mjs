@@ -55,6 +55,10 @@ async function testRAGIndexing() {
           type: "file" 
         });
         
+        // 检查是否成功添加
+        const stats = await vectorProvider.getIndexStats();
+        console.log(`📈 索引统计: ${stats.documentCount} 文档, ${stats.vectorDimensions} 维度`);
+        
         indexedCount++;
         console.log(`📄 已索引: ${filePath} (${content.length} 字符)`);
       } catch (err) {

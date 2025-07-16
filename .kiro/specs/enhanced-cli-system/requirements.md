@@ -36,7 +36,7 @@ This document outlines the requirements for an enhanced command-line CLI system 
    当在Gemini和OpenAI模式之间切换时，系统应保持会话连续性和上下文
    **实现状态：** `ConversationHistoryManager` 维护会话连续性
 
-### Requirement 2: Enhanced Task Management System / 需求2：增强任务管理系统 ✅ **已完成 COMPLETED**
+### Requirement 2: Enhanced Task Management System / 需求2：增强任务管理系统 🔄 **需要验证 NEEDS VERIFICATION**
 
 **User Story:** As a user, I want an intelligent task management system that can organize and execute complex workflows, so that I can automate multi-step processes efficiently.
 
@@ -68,7 +68,7 @@ This document outlines the requirements for an enhanced command-line CLI system 
    当存在多个任务时，系统应优化优先级和执行调度
    **实现状态：** 任务维护模式和当前任务管理系统
 
-### Requirement 3: Context-Aware Analysis and Management / 需求3：上下文感知分析和管理 ✅ **已完成 COMPLETED**
+### Requirement 3: Context-Aware Analysis and Management / 需求3：上下文感知分析和管理 🔄 **需要验证 NEEDS VERIFICATION**
 
 **User Story:** As a developer, I want the system to understand and maintain context across interactions, so that it can provide more relevant and accurate responses.
 
@@ -224,7 +224,7 @@ This document outlines the requirements for an enhanced command-line CLI system 
    当处理多种请求类型时，系统应将它们路由到适当的处理程序
    **实现状态：** 模块化架构支持多种请求类型路由
 
-### Requirement 8: Context Agent Real-time Analysis / 需求8：上下文代理实时分析 ✅ **已完成 COMPLETED**
+### Requirement 8: Context Agent Real-time Analysis / 需求8：上下文代理实时分析 🔄 **需要验证 NEEDS VERIFICATION**
 
 **User Story:** As a developer, I want real-time analysis of interactions to build comprehensive context understanding, so that the system can provide increasingly intelligent assistance.
 
@@ -425,12 +425,7 @@ OPENAI_TEMPERATURE=0.7
 OPENAI_MAX_TOKENS=4096
 OPENAI_TIMEOUT=30000
 
-# Azure OpenAI Configuration / Azure OpenAI配置
-AZURE_API_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
-AZURE_ACTUAL_MODEL=gpt-4
-AZURE_API_KEY=${AZURE_OPENAI_API_KEY}
-AZURE_PROVIDER=AzureOpenAI
-AZURE_API_VERSION=2024-02-15-preview
+
 
 # LM Studio Configuration / LM Studio配置
 LMSTUDIO_API_ENDPOINT=http://localhost:1234/v1
@@ -533,8 +528,6 @@ GLOBAL_ENABLE_TELEMETRY=false
 
 **Supported Providers / 支持的提供者:**
 - `OPENAI` - Official OpenAI API
-- `AZURE` - Azure OpenAI Service
-- `ANTHROPIC` - Anthropic Claude API
 - `LMSTUDIO` - Local LM Studio instance
 - `AIPROXY` - AI Studio Proxy for Gemini
 - `OLLAMA` - Local Ollama instance
@@ -588,7 +581,149 @@ GLOBAL_ENABLE_TELEMETRY=false
 }
 ```
 
-### Requirement 11: Project-Isolated Context Storage Structure / 需求11：项目隔离的上下文存储结构 🔄 **需要完善 NEEDS ENHANCEMENT**
+### Requirement 11: Server Support and TTY Virtualization / 需求11：服务器支持和TTY虚拟化 ❌ **未实现 NOT IMPLEMENTED**
+
+**User Story:** As a developer, I want the system to support server mode with TTY input/output virtualization, so that I can use the CLI both locally and remotely through different interfaces while maintaining consistent functionality.
+
+**用户故事：** 作为开发者，我希望系统支持服务器模式和TTY输入/输出虚拟化，以便通过不同接口在本地和远程使用CLI，同时保持一致的功能。
+
+#### Acceptance Criteria / 验收标准
+
+1. ❌ WHEN server mode is enabled THEN the system SHALL virtualize TTY input and output
+   当启用服务器模式时，系统应虚拟化TTY输入和输出
+   **实现状态：** 需要实现TTY虚拟化层
+
+2. ❌ WHEN receiving local gemini CLI input THEN the system SHALL process it through the virtualized TTY layer
+   当接收本地gemini CLI输入时，系统应通过虚拟化TTY层处理
+   **实现状态：** 需要实现本地CLI集成
+
+3. ❌ WHEN receiving remote web input THEN the system SHALL convert it to virtualized TTY input
+   当接收远程网页输入时，系统应将其转换为虚拟化TTY输入
+   **实现状态：** 需要实现网页到TTY转换
+
+4. ❌ WHEN generating output THEN the system SHALL provide both TTY and web-formatted responses
+   当生成输出时，系统应提供TTY和网页格式的响应
+   **实现状态：** 需要实现双格式输出
+
+5. ❌ WHEN in server mode THEN the system SHALL maintain session state across different input sources
+   当处于服务器模式时，系统应在不同输入源之间维护会话状态
+   **实现状态：** 需要实现跨源会话管理
+
+### Requirement 12: Remote Mobile Web Interface / 需求12：远程手机网页界面 ❌ **未实现 NOT IMPLEMENTED**
+
+**User Story:** As a mobile user, I want to access the CLI system through a mobile-optimized web interface that provides seamless remote usage with local interface functionality, so that I can work efficiently from anywhere.
+
+**用户故事：** 作为移动用户，我希望通过移动优化的网页界面访问CLI系统，提供具有本地界面功能的无缝远程使用体验，以便随时随地高效工作。
+
+#### Acceptance Criteria / 验收标准
+
+1. ❌ WHEN accessing via mobile web THEN the system SHALL provide a mobile-optimized interface layout
+   当通过移动网页访问时，系统应提供移动优化的界面布局
+   **实现状态：** 需要实现移动响应式界面
+
+2. ❌ WHEN using mobile interface THEN it SHALL simulate all local CLI functionality
+   当使用移动界面时，应模拟所有本地CLI功能
+   **实现状态：** 需要实现功能对等性
+
+3. ❌ WHEN displaying output on mobile THEN the system SHALL adapt formatting for mobile screens
+   当在移动设备上显示输出时，系统应调整格式以适应移动屏幕
+   **实现状态：** 需要实现移动格式化
+
+4. ❌ WHEN using touch input THEN the system SHALL provide appropriate mobile interaction patterns
+   当使用触摸输入时，系统应提供适当的移动交互模式
+   **实现状态：** 需要实现触摸友好的交互
+
+5. ❌ WHEN switching between devices THEN the system SHALL maintain session continuity
+   当在设备间切换时，系统应保持会话连续性
+   **实现状态：** 需要实现跨设备会话同步
+
+### Requirement 13: Project Directory Migration and Remote Confirmation / 需求13：项目目录迁移和远程确认 ❌ **未实现 NOT IMPLEMENTED**
+
+**User Story:** As a remote user, I want the system to support project working directory migration with remote confirmation, so that I can safely establish and switch project contexts without accidentally creating files in wrong locations.
+
+**用户故事：** 作为远程用户，我希望系统支持项目工作目录迁移和远程确认，以便安全地建立和切换项目上下文，而不会意外在错误位置创建文件。
+
+#### Acceptance Criteria / 验收标准
+
+1. ❌ WHEN project directory migration is requested THEN the system SHALL NOT immediately create project files
+   当请求项目目录迁移时，系统不应立即创建项目文件
+   **实现状态：** 需要实现延迟文件创建机制
+
+2. ❌ WHEN working directory changes THEN the system SHALL request remote user confirmation
+   当工作目录更改时，系统应请求远程用户确认
+   **实现状态：** 需要实现远程确认机制
+
+3. ❌ WHEN user confirms directory establishment THEN the system SHALL create project directory structure
+   当用户确认目录建立时，系统应创建项目目录结构
+   **实现状态：** 需要实现确认后的目录创建
+
+4. ❌ WHEN directory migration fails THEN the system SHALL revert to previous working directory
+   当目录迁移失败时，系统应回退到之前的工作目录
+   **实现状态：** 需要实现目录迁移回退
+
+5. ❌ WHEN multiple projects are accessed THEN the system SHALL maintain separate context isolation
+   当访问多个项目时，系统应维护独立的上下文隔离
+   **实现状态：** 需要实现多项目上下文管理
+
+#### Remote Confirmation Flow / 远程确认流程
+
+```
+目录迁移请求 → 暂停文件操作 → 显示目录信息 → 等待用户确认 → 确认后创建目录 → 切换工作上下文
+Directory Migration Request → Pause File Operations → Show Directory Info → Wait for Confirmation → Create Directory → Switch Context
+```
+
+**Confirmation Interface / 确认界面:**
+- Display target directory path and permissions
+- Show existing files and potential conflicts
+- Provide clear accept/reject options
+- Include safety warnings for destructive operations
+- 显示目标目录路径和权限
+- 显示现有文件和潜在冲突
+- 提供清晰的接受/拒绝选项
+- 包含破坏性操作的安全警告
+
+### Requirement 14: Bidirectional TTY Virtualization / 需求14：双向TTY虚拟化 ❌ **未实现 NOT IMPLEMENTED**
+
+**User Story:** As a system architect, I want bidirectional TTY virtualization that handles both input and output streams, so that remote interfaces can seamlessly interact with the CLI system as if they were local terminals.
+
+**用户故事：** 作为系统架构师，我希望有双向TTY虚拟化来处理输入和输出流，以便远程界面能够无缝地与CLI系统交互，就像本地终端一样。
+
+#### Acceptance Criteria / 验收标准
+
+1. ❌ WHEN virtualizing TTY input THEN the system SHALL convert web input to terminal-compatible format
+   当虚拟化TTY输入时，系统应将网页输入转换为终端兼容格式
+   **实现状态：** 需要实现输入格式转换
+
+2. ❌ WHEN virtualizing TTY output THEN the system SHALL provide both raw terminal and formatted web output
+   当虚拟化TTY输出时，系统应提供原始终端和格式化网页输出
+   **实现状态：** 需要实现双格式输出生成
+
+3. ❌ WHEN handling terminal control sequences THEN the system SHALL translate them for web display
+   当处理终端控制序列时，系统应将其转换为网页显示
+   **实现状态：** 需要实现控制序列转换
+
+4. ❌ WHEN processing interactive prompts THEN the system SHALL maintain prompt state across interfaces
+   当处理交互式提示时，系统应在不同界面间维护提示状态
+   **实现状态：** 需要实现跨界面提示管理
+
+5. ❌ WHEN streaming output THEN the system SHALL support real-time bidirectional communication
+   当流式输出时，系统应支持实时双向通信
+   **实现状态：** 需要实现实时通信协议
+
+#### TTY Virtualization Architecture / TTY虚拟化架构
+
+```
+本地CLI ←→ TTY虚拟化层 ←→ 网页界面
+Local CLI ←→ TTY Virtualization Layer ←→ Web Interface
+
+输入流: 网页输入 → 输入转换器 → 虚拟TTY → CLI处理器
+Input Flow: Web Input → Input Converter → Virtual TTY → CLI Processor
+
+输出流: CLI输出 → 输出转换器 → 格式化器 → 网页显示
+Output Flow: CLI Output → Output Converter → Formatter → Web Display
+```
+
+### Requirement 15: Project-Isolated Context Storage Structure / 需求15：项目隔离的上下文存储结构 🔄 **需要完善 NEEDS ENHANCEMENT**
 
 **User Story:** As a developer working on multiple projects, I want each project's context data (RAG, knowledge graphs, tasks) to be stored in clearly organized, project-isolated directories under ~/.gemini, so that I can maintain clean separation between different projects and easily manage project-specific context.
 

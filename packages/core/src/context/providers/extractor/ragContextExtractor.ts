@@ -16,6 +16,7 @@ import path from 'path';
 import os from 'os';
 import { getProjectHash, getProjectFolderName } from '../../../utils/paths.js';
 import { RAGIncrementalIndexer, RAGIndexTrigger, FileChangeType } from './ragIncrementalIndexer.js';
+import { ProjectStorageManager } from '../../../config/projectStorageManager.js';
 
 /**
  * RAG Level Configuration
@@ -461,9 +462,13 @@ export class RAGContextExtractor implements IContextExtractor {
    */
   private getProjectRAGStorageDir(): string {
     const projectRoot = this.config.projectRoot || process.cwd();
-    const projectFolderName = getProjectFolderName(projectRoot);
-    const baseDir = this.config.storageDir || path.join(os.homedir(), '.gemini', 'Projects', projectFolderName, 'rag');
-    return baseDir;
+    
+    if (this.config.storageDir) {
+      return this.config.storageDir;
+    }
+    
+    const storageManager = new ProjectStorageManager(projectRoot);
+    return storageManager.getRAGProviderPath('lightrag');
   }
 
   async initialize(): Promise<void> {

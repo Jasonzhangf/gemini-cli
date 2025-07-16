@@ -14,6 +14,7 @@ import {
   GraphQueryResult 
 } from '../../interfaces/contextProviders.js';
 import { getProjectFolderName } from '../../../utils/paths.js';
+import { ProjectStorageManager } from '../../../config/projectStorageManager.js';
 
 interface LocalGraphConfig {
   persistToDisk?: boolean;
@@ -48,8 +49,8 @@ export class LocalKnowledgeGraphProvider implements IKnowledgeGraphProvider {
       this.storageDir = config.storageDir;
     } else {
       const projectRoot = this.config.projectRoot!;
-      const projectFolderName = getProjectFolderName(projectRoot);
-      this.storageDir = path.join(os.homedir(), '.gemini', 'Projects', projectFolderName, 'knowledge-graph');
+      const storageManager = new ProjectStorageManager(projectRoot);
+      this.storageDir = storageManager.getKnowledgeGraphProviderPath('graphology');
     }
   }
 

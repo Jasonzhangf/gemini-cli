@@ -8,6 +8,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { DirectedGraph } from 'graphology';
 import { CodeNode, CodeRelation } from './staticAnalyzer.js';
+import { ProjectStorageManager } from '../config/projectStorageManager.js';
 
 export interface GraphMetadata {
   projectDir: string;
@@ -32,10 +33,13 @@ export class KnowledgeGraph {
   private graph: DirectedGraph;
   private projectDir: string;
   private graphPath: string;
+  private storageManager: ProjectStorageManager;
 
   constructor(projectDir: string) {
     this.projectDir = path.resolve(projectDir);
-    this.graphPath = path.join(this.projectDir, '.gemini', 'context_graph.json');
+    this.storageManager = new ProjectStorageManager(projectDir);
+    const structure = this.storageManager.getStorageStructure();
+    this.graphPath = path.join(structure.knowledgeGraphStorage, 'graphology', 'context_graph.json');
     this.graph = new DirectedGraph({
       allowSelfLoops: false,
       multi: false
@@ -46,9 +50,12 @@ export class KnowledgeGraph {
    * Initialize the knowledge graph
    */
   async initialize(): Promise<void> {
-    // Ensure .gemini directory exists
-    const geminiDir = path.dirname(this.graphPath);
-    await fs.mkdir(geminiDir, { recursive: true });
+    // Initialize storage structure
+    await this.storageManager.initializeStorage();
+    
+    // Ensure graph storage directory exists
+    const graphDir = path.dirname(this.graphPath);
+    await fs.mkdir(graphDir, { recursive: true });
 
     // Try to load existing graph
     await this.loadGraph();
@@ -77,8 +84,17 @@ export class KnowledgeGraph {
     for (const relation of relations) {
       // Ensure both nodes exist before adding edge
       if (!this.graph.hasNode(relation.from)) {
-        console.warn(`[KnowledgeGraph] Source node not found: ${relation.from}`);
-        continue;
+        // Create a placeholder node for missing source
+        this.graph.addNode(relation.from, {
+          type: 'external',
+          data: {
+            id: relation.from,
+            type: 'external',
+            name: relation.from,
+            isExternal: true,
+            isPlaceholder: true
+          }
+        });
       }
       
       if (relation.type === 'IMPORTS') {
@@ -96,8 +112,17 @@ export class KnowledgeGraph {
           });
         }
       } else if (!this.graph.hasNode(relation.to)) {
-        console.warn(`[KnowledgeGraph] Target node not found: ${relation.to}`);
-        continue;
+        // Create a placeholder node for external references
+        this.graph.addNode(relation.to, {
+          type: 'external',
+          data: {
+            id: relation.to,
+            type: 'external',
+            name: relation.to,
+            isExternal: true,
+            isPlaceholder: true
+          }
+        });
       }
 
       // Add edge if it doesn't exist
@@ -363,6 +388,8 @@ export class KnowledgeGraph {
     functionNodes: number;
     classNodes: number;
     moduleNodes: number;
+    externalNodes: number;
+    placeholderNodes: number;
     importRelations: number;
     callRelations: number;
     containsRelations: number;
@@ -377,6 +404,8 @@ export class KnowledgeGraph {
       functionNodes: 0,
       classNodes: 0,
       moduleNodes: 0,
+      externalNodes: 0,
+      placeholderNodes: 0,
       importRelations: 0,
       callRelations: 0,
       containsRelations: 0,
@@ -388,12 +417,19 @@ export class KnowledgeGraph {
     // Count node types
     this.graph.forEachNode((nodeId: string, attributes: any) => {
       const nodeType = attributes.data?.type || attributes.type;
+      const isPlaceholder = attributes.data?.isPlaceholder || false;
+      
+      if (isPlaceholder) {
+        stats.placeholderNodes++;
+      }
+      
       switch (nodeType) {
         case 'file': stats.fileNodes++; break;
         case 'function': 
         case 'method': stats.functionNodes++; break;
         case 'class': stats.classNodes++; break;
         case 'module': stats.moduleNodes++; break;
+        case 'external': stats.externalNodes++; break;
       }
     });
 
