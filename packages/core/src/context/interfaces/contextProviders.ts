@@ -296,7 +296,7 @@ export interface IContextProviderFactory {
   /**
    * Create a knowledge graph provider
    */
-  createGraphProvider(config: ContextProviderConfig['graphProvider']): IKnowledgeGraphProvider;
+  createGraphProvider(config: ContextProviderConfig['graphProvider'], projectRoot?: string): IKnowledgeGraphProvider;
 
   /**
    * Create a vector search provider

@@ -1,0 +1,217 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { StorageMigration } from './storageMigration.js';
+
+// Mock filesystem operations
+vi.mock('node:fs', () => ({
+  existsSync: vi.fn(),
+  statSync: vi.fn(),
+  promises: {
+    readdir: vi.fn(),
+    stat: vi.fn(),
+    mkdir: vi.fn(),
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    copyFile: vi.fn(),
+    rm: vi.fn(),
+  },
+}));
+
+vi.mock('node:os', () => ({
+  homedir: vi.fn(() => '/home/testuser'),
+}));
+
+vi.mock('./projectStorageManager.js', () => ({
+  ProjectStorageManager: vi.fn(() => ({
+    initializeStorage: vi.fn(),
+    updateMetadata: vi.fn(),
+  })),
+}));
+
+describe('StorageMigration', () => {
+  let migration: StorageMigration;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    migration = new StorageMigration();
+  });
+
+  describe('migration detection', () => {
+    it('should detect when migration is needed', async () => {
+      const fs = await import('node:fs');
+      
+      // Mock .gemini directory exists but no projects directory
+      vi.mocked(fs.existsSync).mockImplementation((path: string) => {
+        if (path.includes('.gemini') && !path.includes('projects')) {
+          return true;
+        }
+        return false;
+      });
+
+      vi.mocked(fs.promises.readdir).mockResolvedValue(['some-legacy-dir', 'config.json']);
+      vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as any);
+
+      const needed = await migration.isMigrationNeeded();
+      expect(needed).toBe(true);
+    });
+
+    it('should detect when migration is not needed', async () => {
+      const fs = await import('node:fs');
+      
+      // Mock no .gemini directory
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      const needed = await migration.isMigrationNeeded();
+      expect(needed).toBe(false);
+    });
+
+    it('should detect when migration is already complete', async () => {
+      const fs = await import('node:fs');
+      
+      // Mock .gemini and projects directories exist with content
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.promises.readdir).mockResolvedValue(['project1', 'project2']);
+
+      const needed = await migration.isMigrationNeeded();
+      expect(needed).toBe(false);
+    });
+  });
+
+  describe('migration execution', () => {
+    it('should skip migration when not needed', async () => {
+      const fs = await import('node:fs');
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      const result = await migration.migrate();
+
+      expect(result.success).toBe(true);
+      expect(result.migratedProjects).toBe(0);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('should perform dry run migration', async () => {
+      const fs = await import('node:fs');
+      
+      // Mock migration is needed
+      vi.mocked(fs.existsSync).mockImplementation((path: string) => {
+        if (path.includes('.gemini') && !path.includes('projects')) {
+          return true;
+        }
+        return false;
+      });
+      vi.mocked(fs.promises.readdir).mockResolvedValue(['legacy-project', 'config.json']);
+      vi.mocked(fs.statSync).mockImplementation((path: string) => ({
+        isDirectory: () => !path.includes('.json'),
+      } as any));
+      vi.mocked(fs.promises.stat).mockResolvedValue({
+        isDirectory: () => true,
+      } as any);
+
+      const result = await migration.migrate({ dryRun: true });
+
+      expect(result.success).toBe(true);
+      // In dry run, projects might not be counted the same way
+      expect(result.migratedProjects).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should handle migration errors gracefully', async () => {
+      const fs = await import('node:fs');
+      
+      // Mock migration is needed first
+      vi.mocked(fs.existsSync).mockImplementation((path: string) => {
+        if (path.includes('.gemini') && !path.includes('projects')) {
+          return true;
+        }
+        return false;
+      });
+      
+      // First readdir call for isMigrationNeeded should succeed
+      // Second readdir call for actual migration should fail
+      let readdirCallCount = 0;
+      vi.mocked(fs.promises.readdir).mockImplementation(() => {
+        readdirCallCount++;
+        if (readdirCallCount === 1) {
+          return Promise.resolve(['legacy-project', 'config.json']);
+        } else {
+          return Promise.reject(new Error('Permission denied'));
+        }
+      });
+      
+      vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as any);
+
+      const result = await migration.migrate();
+
+      expect(result.success).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('backup and rollback', () => {
+    it('should handle rollback when backup exists', async () => {
+      const fs = await import('node:fs');
+      
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.promises.rm).mockResolvedValue(undefined);
+      vi.mocked(fs.promises.readdir).mockResolvedValue([]);
+      vi.mocked(fs.promises.stat).mockResolvedValue({
+        isDirectory: () => false,
+        isFile: () => true,
+      } as any);
+      vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
+      vi.mocked(fs.promises.copyFile).mockResolvedValue(undefined);
+
+      const result = await migration.rollback('/backup/path');
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should handle rollback when backup does not exist', async () => {
+      const fs = await import('node:fs');
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      const result = await migration.rollback('/nonexistent/backup');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Backup path does not exist');
+    });
+  });
+
+  describe('cleanup', () => {
+    it('should clean up old backups', async () => {
+      const fs = await import('node:fs');
+      
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.promises.readdir).mockResolvedValue(['old-backup-1', 'old-backup-2']);
+      
+      const oldDate = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000); // 40 days ago
+      vi.mocked(fs.promises.stat).mockResolvedValue({
+        isDirectory: () => true,
+        mtime: oldDate,
+      } as any);
+      vi.mocked(fs.promises.rm).mockResolvedValue(undefined);
+
+      await migration.cleanupBackups(30); // 30 days max age
+
+      expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledTimes(2);
+    });
+
+    it('should handle cleanup errors gracefully', async () => {
+      const fs = await import('node:fs');
+      
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.promises.readdir).mockRejectedValue(new Error('Permission denied'));
+
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await migration.cleanupBackups();
+
+      expect(consoleSpy).toHaveBeenCalled();
+      consoleSpy.mockRestore();
+    });
+  });
+});

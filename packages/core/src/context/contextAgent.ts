@@ -166,7 +166,7 @@ export class ContextAgent {
       }
 
       // Create providers
-      this.graphProvider = this.providerFactory.createGraphProvider(providerConfig.graphProvider);
+      this.graphProvider = this.providerFactory.createGraphProvider(providerConfig.graphProvider, this.projectDir);
       this.vectorProvider = this.providerFactory.createVectorProvider(providerConfig.vectorProvider);
       this.contextExtractor = this.providerFactory.createContextExtractor(
         providerConfig.extractorProvider,

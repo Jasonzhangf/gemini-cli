@@ -148,7 +148,7 @@ describe('ContextProviderFactory', () => {
       const provider = factory.createGraphProvider({
         type: 'local',
         config: { persistToDisk: true }
-      });
+      }, '/test/project');
 
       expect(provider).toBeDefined();
       expect(provider.constructor.name).toBe('LocalKnowledgeGraphProvider');

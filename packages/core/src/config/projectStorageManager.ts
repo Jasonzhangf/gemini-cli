@@ -134,10 +134,12 @@ export class ProjectStorageManager {
         this.cachedMetadata = JSON.parse(metadataContent);
         
         // Update last accessed time
-        this.cachedMetadata.lastAccessed = new Date().toISOString();
-        await this.saveMetadata(this.cachedMetadata);
+        if (this.cachedMetadata) {
+          this.cachedMetadata.lastAccessed = new Date().toISOString();
+          await this.saveMetadata(this.cachedMetadata);
+        }
         
-        return this.cachedMetadata;
+        return this.cachedMetadata!;
       }
     } catch (error) {
       console.warn('[ProjectStorageManager] Failed to load metadata:', error);

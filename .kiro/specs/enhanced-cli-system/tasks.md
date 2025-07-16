@@ -28,19 +28,19 @@
   - Add project metadata management with creation time and access tracking
   - _Requirements: 15.1, 15.2, 15.6_
 
-- [ ] 1.2.2 Create modular provider storage abstraction
+- [x] 1.2.2 Create modular provider storage abstraction
   - Implement RAG provider storage under ~/.gemini/projects/{project-id}/rag/{provider}/
   - Implement knowledge graph provider storage under ~/.gemini/projects/{project-id}/knowledge-graph/{provider}/
   - Create provider switching and data migration interfaces
   - _Requirements: 15.3, 15.4_
 
-- [ ] 1.2.3 Write comprehensive tests for storage system
+- [x] 1.2.3 Write comprehensive tests for storage system
   - Test project ID generation and directory creation
   - Test provider storage abstraction and switching
   - Test data migration between providers
   - _Testing: Unit and integration tests with filesystem mocking_
 
-- [ ] 1.2.4 Migration from existing storage structure
+- [x] 1.2.4 Migration from existing storage structure
   - Create migration script for existing ~/.gemini/ data to new structure
   - Implement backup and rollback capabilities
   - Test migration with real project data

@@ -86,14 +86,20 @@ export class ContextProviderFactory implements IContextProviderFactory {
   /**
    * Create knowledge graph provider
    */
-  createGraphProvider(config: ContextProviderConfig['graphProvider']): IKnowledgeGraphProvider {
+  createGraphProvider(config: ContextProviderConfig['graphProvider'], projectRoot?: string): IKnowledgeGraphProvider {
     const ProviderClass = this.graphProviders.get(config.type);
     
     if (!ProviderClass) {
       throw new Error(`Unknown graph provider type: ${config.type}`);
     }
 
-    return new ProviderClass(config.config);
+    // Add project root to local graph provider config
+    const enhancedConfig = config.type === 'local' ? {
+      ...config.config,
+      projectRoot: projectRoot || process.cwd()
+    } : config.config;
+
+    return new ProviderClass(enhancedConfig);
   }
 
   /**

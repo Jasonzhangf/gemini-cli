@@ -6,18 +6,21 @@
 
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import { 
   IKnowledgeGraphProvider, 
   KnowledgeNode, 
   GraphQuery, 
   GraphQueryResult 
 } from '../../interfaces/contextProviders.js';
+import { getProjectFolderName } from '../../../utils/paths.js';
 
 interface LocalGraphConfig {
   persistToDisk?: boolean;
   maxNodes?: number;
   compressionEnabled?: boolean;
   storageDir?: string;
+  projectRoot?: string;
 }
 
 /**
@@ -36,10 +39,18 @@ export class LocalKnowledgeGraphProvider implements IKnowledgeGraphProvider {
       persistToDisk: true,
       maxNodes: 10000,
       compressionEnabled: false,
-      storageDir: './.gemini/knowledge-graph',
+      projectRoot: process.cwd(),
       ...config
     };
-    this.storageDir = this.config.storageDir!;
+    
+    // 使用项目特定的存储路径，与 RAG 系统保持一致
+    if (config.storageDir) {
+      this.storageDir = config.storageDir;
+    } else {
+      const projectRoot = this.config.projectRoot!;
+      const projectFolderName = getProjectFolderName(projectRoot);
+      this.storageDir = path.join(os.homedir(), '.gemini', 'Projects', projectFolderName, 'knowledge-graph');
+    }
   }
 
   async initialize(): Promise<void> {

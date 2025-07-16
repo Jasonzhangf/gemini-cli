@@ -260,8 +260,9 @@ describe('ProjectStorageManager', () => {
 
   describe('storage status and statistics', () => {
     it('should check if storage is initialized', () => {
-      vi.mocked(fs.existsSync).mockImplementation((filePath: string) => {
-        return filePath.includes(expectedStorageRoot);
+      vi.mocked(fs.existsSync).mockImplementation((filePath: any) => {
+        const path = String(filePath);
+        return path.includes(expectedStorageRoot);
       });
 
       const isInitialized = storageManager.isStorageInitialized();
@@ -305,8 +306,9 @@ describe('ProjectStorageManager', () => {
   describe('error handling', () => {
     it('should handle filesystem errors in storage stats', async () => {
       // Mock existsSync to return true for storage root but cause error in getDirectorySize
-      vi.mocked(fs.existsSync).mockImplementation((filePath: string) => {
-        return filePath.includes(expectedStorageRoot);
+      vi.mocked(fs.existsSync).mockImplementation((filePath: any) => {
+        const path = String(filePath);
+        return path.includes(expectedStorageRoot);
       });
       
       // Mock readdir to fail, which will be called by getDirectorySize

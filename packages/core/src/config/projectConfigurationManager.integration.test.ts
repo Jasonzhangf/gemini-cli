@@ -32,7 +32,7 @@ describe('ProjectConfigurationManager Integration Tests', () => {
     
     // Mock os.homedir to return our temp global directory
     const originalHomedir = os.homedir;
-    os.homedir = () => tempGlobalDir;
+    (os as any).homedir = () => tempGlobalDir;
     
     // Store original for cleanup
     (configManager as any).originalHomedir = originalHomedir;
@@ -41,7 +41,7 @@ describe('ProjectConfigurationManager Integration Tests', () => {
   afterEach(() => {
     // Restore original homedir
     if ((configManager as any).originalHomedir) {
-      os.homedir = (configManager as any).originalHomedir;
+      (os as any).homedir = (configManager as any).originalHomedir;
     }
     
     // Clean up temporary directories
