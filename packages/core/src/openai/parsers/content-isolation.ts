@@ -5,6 +5,8 @@
  */
 
 import { ToolCall, ContentIsolationMarkers } from '../types/interfaces.js';
+import { memoryProfiler } from '../utils/memory-profiler.js';
+import { memoryOptimizer, processInChunks, withStringPool, createStreamingJSONParser } from '../utils/memory-optimizer.js';
 
 /**
  * 内容隔离解析器 - 专门处理复杂文本参数
@@ -29,6 +31,20 @@ export class ContentIsolationParser {
    * 解析内容隔离格式的工具调用
    */
   parse(content: string, processedPositions: Set<number>): ToolCall[] {
+    const operationId = `content_isolation_${Date.now()}`;
+    
+    // 对于大内容块，使用流式处理
+    if (content.length > 8000) {
+      return this.parseWithStreaming(content, processedPositions);
+    }
+    
+    return this.parseRegular(content, processedPositions);
+  }
+
+  /**
+   * 常规解析方法
+   */
+  private parseRegular(content: string, processedPositions: Set<number>): ToolCall[] {
     const toolCalls: ToolCall[] = [];
     const patterns = this.getContentIsolationPatterns();
 
@@ -48,6 +64,53 @@ export class ContentIsolationParser {
     }
 
     return toolCalls;
+  }
+
+  /**
+   * 流式解析方法（用于大内容块）
+   */
+  private parseWithStreaming(content: string, processedPositions: Set<number>): ToolCall[] {
+    const toolCalls: ToolCall[] = [];
+    const chunkSize = 4000; // 4KB chunks
+    const overlap = 500; // 500 chars overlap to avoid splitting markers
+    
+    // 使用字符串池优化内存
+    return withStringPool((pool) => {
+      const markerPattern = this.markers.CONTENT_MARKER_PATTERN;
+      const processedCallIds = new Set<string>();
+      
+      // 分块处理
+      for (let i = 0; i < content.length; i += chunkSize - overlap) {
+        const chunk = content.substring(i, i + chunkSize);
+        const chunkOffset = i;
+        
+        // 重置正则表达式
+        markerPattern.lastIndex = 0;
+        
+        let match;
+        while ((match = markerPattern.exec(chunk)) !== null) {
+          const absoluteIndex = chunkOffset + match.index;
+          
+          if (processedPositions.has(absoluteIndex)) {
+            continue;
+          }
+
+          const toolCall = this.parseMatch(match);
+          if (toolCall && !processedCallIds.has(toolCall.callId)) {
+            toolCalls.push(toolCall);
+            processedPositions.add(absoluteIndex);
+            processedCallIds.add(toolCall.callId);
+          }
+        }
+        
+        // 如果已经处理完所有内容，提前退出
+        if (i + chunkSize >= content.length) {
+          break;
+        }
+      }
+      
+      return toolCalls;
+    });
   }
 
   /**

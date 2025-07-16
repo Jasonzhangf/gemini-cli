@@ -16,6 +16,8 @@ import { ConversationHistoryManager, MessageProcessor } from './conversation/ind
 import { DebugLoggerAdapter, ToolCallTracker } from './debug/index.js';
 import { ContextInjector, ToolGuidanceGenerator } from './context/index.js';
 import { ResponseHandler } from './streaming/response-handler.js';
+import { memoryProfiler, enableMemoryProfiling } from './utils/memory-profiler.js';
+import { memoryOptimizer, processInChunks, withStringPool } from './utils/memory-optimizer.js';
 
 /**
  * OpenAI Hijack适配器 - 重构版
@@ -64,6 +66,12 @@ export class OpenAIHijackAdapterRefactored {
       apiKey: config.apiKey,
       baseURL: config.baseURL || 'https://api.openai.com/v1',
     });
+
+    // 初始化内存分析（如果启用）
+    if (this.debugMode || process.env.MEMORY_PROFILING === 'true') {
+      enableMemoryProfiling();
+      memoryProfiler.snapshot('hijack_refactored_constructor', this.sessionId);
+    }
 
     // 初始化模块化组件
     this.toolCallParser = new ToolCallParser(
@@ -122,19 +130,26 @@ export class OpenAIHijackAdapterRefactored {
     signal: AbortSignal,
     prompt_id: string
   ): AsyncGenerator<ServerGeminiStreamEvent, any> {
-    // 重置工具调用追踪
-    this.toolTracker.reset();
+    const operationId = `${prompt_id}_${Date.now()}`;
+    memoryProfiler.startOperation(operationId, 'sendMessageStream');
+    
+    try {
+      // 重置工具调用追踪
+      this.toolTracker.reset();
 
-    // 判断请求类型
-    if (this.messageProcessor.isToolResponse(request)) {
-      yield* this.handleToolResponse(request, signal, prompt_id);
-    } else {
-      yield* this.handleUserMessage(request, signal, prompt_id);
+      // 判断请求类型
+      if (this.messageProcessor.isToolResponse(request)) {
+        yield* this.handleToolResponse(request, signal, prompt_id);
+      } else {
+        yield* this.handleUserMessage(request, signal, prompt_id);
+      }
+
+      return {
+        pendingToolCalls: [],
+      };
+    } finally {
+      memoryProfiler.endOperation(operationId, 'sendMessageStream');
     }
-
-    return {
-      pendingToolCalls: [],
-    };
   }
 
   /**
@@ -145,8 +160,12 @@ export class OpenAIHijackAdapterRefactored {
     signal: AbortSignal,
     prompt_id: string
   ): AsyncGenerator<ServerGeminiStreamEvent, any> {
-    // 清理处理记录
-    this.toolCallParser.clearProcessedCalls();
+    const operationId = `user_message_${prompt_id}_${Date.now()}`;
+    memoryProfiler.startOperation(operationId, 'handleUserMessage');
+    
+    try {
+      // 清理处理记录
+      this.toolCallParser.clearProcessedCalls();
 
     // 开始新的调试轮次
     const turnId = this.debugLogger.generateTurnId();
@@ -167,14 +186,17 @@ export class OpenAIHijackAdapterRefactored {
     // 构建消息
     const messages = await this.buildMessages(userMessage);
 
-    // 记录上下文信息
-    await this.logContextDetails();
+      // 记录上下文信息
+      await this.logContextDetails();
 
-    // 处理模型响应
-    yield* this.responseHandler.handleModelResponse(messages, prompt_id, true);
+      // 处理模型响应
+      yield* this.responseHandler.handleModelResponse(messages, prompt_id, true);
 
-    // 完成轮次
-    await this.debugLogger.finalizeTurn();
+      // 完成轮次
+      await this.debugLogger.finalizeTurn();
+    } finally {
+      memoryProfiler.endOperation(operationId, 'handleUserMessage');
+    }
   }
 
   /**
@@ -185,6 +207,10 @@ export class OpenAIHijackAdapterRefactored {
     signal: AbortSignal,
     prompt_id: string
   ): AsyncGenerator<ServerGeminiStreamEvent, any> {
+    const operationId = `tool_response_${prompt_id}_${Date.now()}`;
+    memoryProfiler.startOperation(operationId, 'handleToolResponse');
+    
+    try {
     const turnId = this.debugLogger.generateTurnId();
     const toolResults = this.messageProcessor.extractToolResultsFromRequest(request);
 
@@ -205,30 +231,38 @@ export class OpenAIHijackAdapterRefactored {
     // 构建消息
     const messages = await this.buildMessages(toolResultMessage);
 
-    // 处理模型响应
-    yield* this.responseHandler.handleModelResponse(messages, prompt_id, true);
+      // 处理模型响应
+      yield* this.responseHandler.handleModelResponse(messages, prompt_id, true);
 
-    // 完成轮次
-    await this.debugLogger.finalizeTurn();
+      // 完成轮次
+      await this.debugLogger.finalizeTurn();
+    } finally {
+      memoryProfiler.endOperation(operationId, 'handleToolResponse');
+    }
   }
 
   /**
    * 构建消息
    */
   private async buildMessages(userMessage: string): Promise<any[]> {
-    const conversationHistory = this.conversationHistory.getHistory();
-    
-    // 获取增强的系统提示
-    const systemPrompt = await this.contextInjector.getEnhancedSystemPrompt(userMessage);
+    return await memoryProfiler.profileFunction(
+      'buildMessages',
+      async () => {
+        const conversationHistory = this.conversationHistory.getHistory();
+        
+        // 获取增强的系统提示
+        const systemPrompt = await this.contextInjector.getEnhancedSystemPrompt(userMessage);
     
     // 添加工具指导
     const toolGuidance = this.toolGuidanceGenerator.generate();
     const fullSystemPrompt = systemPrompt + '\n\n' + '●'.repeat(120) + '\n\n' + toolGuidance;
 
-    return [
-      { role: 'system', content: fullSystemPrompt },
-      ...conversationHistory
-    ];
+        return [
+          { role: 'system', content: fullSystemPrompt },
+          ...conversationHistory
+        ];
+      }
+    );
   }
 
   /**

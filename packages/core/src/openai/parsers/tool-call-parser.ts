@@ -9,6 +9,8 @@ import { ToolCall, PathArgsMap } from '../types/interfaces.js';
 import { ContentIsolationParser } from './content-isolation.js';
 import { JsonToolCallParser } from './json-parser.js';
 import { DescriptiveToolCallParser } from './descriptive-parser.js';
+import { memoryProfiler } from '../utils/memory-profiler.js';
+import { memoryOptimizer, processInChunks, withStringPool } from '../utils/memory-optimizer.js';
 
 /**
  * 统一工具调用解析器
@@ -65,6 +67,20 @@ export class ToolCallParser {
    * 解析文本中的工具调用
    */
   parseToolCalls(content: string): ToolCall[] {
+    const operationId = `parse_${Date.now()}`;
+    
+    // 对于大内容，使用分块处理
+    if (content.length > 5000) {
+      return this.parseToolCallsInChunks(content);
+    }
+    
+    return this.parseToolCallsRegular(content);
+  }
+
+  /**
+   * 常规解析（小内容）
+   */
+  private parseToolCallsRegular(content: string): ToolCall[] {
     const processedPositions = new Set<number>();
     const toolCalls: ToolCall[] = [];
 
@@ -98,16 +114,57 @@ export class ToolCallParser {
   }
 
   /**
+   * 分块解析（大内容）
+   */
+  private parseToolCallsInChunks(content: string): ToolCall[] {
+    const chunkSize = 2000; // 2KB chunks
+    const overlap = 200; // 200 chars overlap to avoid splitting tool calls
+    const chunks: string[] = [];
+    
+    // 创建重叠的块
+    for (let i = 0; i < content.length; i += chunkSize - overlap) {
+      const chunk = content.substring(i, i + chunkSize);
+      chunks.push(chunk);
+      
+      if (i + chunkSize >= content.length) {
+        break;
+      }
+    }
+
+    // 使用字符串池优化内存使用
+    return withStringPool((pool) => {
+      const allToolCalls: ToolCall[] = [];
+      const processedCallIds = new Set<string>();
+      
+      for (const chunk of chunks) {
+        const chunkCalls = this.parseToolCallsRegular(chunk);
+        
+        // 去重 - 避免重叠区域的重复调用
+        for (const call of chunkCalls) {
+          if (!processedCallIds.has(call.callId)) {
+            processedCallIds.add(call.callId);
+            allToolCalls.push(call);
+          }
+        }
+      }
+      
+      return allToolCalls;
+    });
+  }
+
+  /**
    * 转换路径参数为绝对路径
    */
   private transformPathArguments(toolName: string, args: any): any {
-    const CWD = process.cwd();
-    const newArgs = JSON.parse(JSON.stringify(args));
     const pathParams = this.pathArgsMap[toolName];
 
     if (!pathParams) {
       return args;
     }
+
+    const CWD = process.cwd();
+    // 使用浅拷贝优化内存使用
+    const newArgs = this.shallowCloneWithPathParams(args, pathParams);
 
     // run_shell_command的directory参数必须是相对路径
     if (toolName === 'run_shell_command') {
@@ -127,6 +184,31 @@ export class ToolCallParser {
         } else if (typeof newArgs[param] === 'string' && !path.isAbsolute(newArgs[param])) {
           newArgs[param] = path.resolve(CWD, newArgs[param]);
         }
+      }
+    }
+
+    return newArgs;
+  }
+
+  /**
+   * 浅拷贝对象，只复制路径参数相关的属性
+   */
+  private shallowCloneWithPathParams(args: any, pathParams: string[]): any {
+    // 如果没有路径参数，直接返回原对象
+    if (!pathParams || pathParams.length === 0) {
+      return args;
+    }
+
+    // 创建新对象，只复制需要修改的属性
+    const newArgs = { ...args };
+    
+    for (const param of pathParams) {
+      if (newArgs[param]) {
+        if (Array.isArray(newArgs[param])) {
+          // 只有当数组包含路径时才复制
+          newArgs[param] = [...newArgs[param]];
+        }
+        // 字符串参数会在后续处理中被修改
       }
     }
 

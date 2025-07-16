@@ -11,6 +11,8 @@ import { ToolCallParser } from '../parsers/tool-call-parser.js';
 import { ContextInjector } from '../context/context-injector.js';
 import { DebugLoggerAdapter } from '../debug/logger-adapter.js';
 import { ToolCallTracker } from '../debug/tool-tracker.js';
+import { memoryProfiler } from '../utils/memory-profiler.js';
+import { memoryOptimizer, processInChunks, createStreamingJSONParser } from '../utils/memory-optimizer.js';
 
 /**
  * 响应处理器
@@ -51,47 +53,196 @@ export class ResponseHandler {
     prompt_id: string,
     includeGuidance: boolean = true
   ): AsyncGenerator<ServerGeminiStreamEvent, any> {
-    let toolCalls: ToolCall[] = [];
+    const operationId = `response_${prompt_id}_${Date.now()}`;
+    memoryProfiler.startOperation(operationId, 'handleModelResponse');
     
     try {
-      // 调用OpenAI API
+      // 检查是否使用流式处理（大响应优化）
+      const useStreaming = this.shouldUseStreaming(messages);
+      
+      if (useStreaming) {
+        yield* this.handleStreamingResponse(messages, prompt_id, includeGuidance);
+      } else {
+        yield* this.handleRegularResponse(messages, prompt_id, includeGuidance);
+      }
+      
+    } catch (error) {
+      yield* this.handleError(error);
+    } finally {
+      memoryProfiler.endOperation(operationId, 'handleModelResponse');
+    }
+  }
+
+  /**
+   * 处理常规响应
+   */
+  private async *handleRegularResponse(
+    messages: any[],
+    prompt_id: string,
+    includeGuidance: boolean = true
+  ): AsyncGenerator<ServerGeminiStreamEvent, any> {
+    let toolCalls: ToolCall[] = [];
+    
+    // 调用OpenAI API
+    const response = await this.openai.chat.completions.create({
+      model: this.config.model,
+      messages,
+      stream: false,
+      temperature: this.config.temperature || 0.7,
+      max_tokens: this.config.maxTokens || 4096,
+    });
+
+    const fullResponse = response.choices[0]?.message?.content || '';
+    
+    if (this.debugMode) {
+      console.log('[ResponseHandler] Received response:', fullResponse.length, 'characters');
+    }
+
+    // 记录完整请求和响应
+    await this.logRequestResponse(messages, fullResponse);
+
+    // 清理响应（移除<think>标签）
+    const cleanedResponse = this.cleanResponse(fullResponse);
+    
+    // 解析工具调用
+    toolCalls = this.parseToolCalls(cleanedResponse);
+    
+    // 处理工具调用
+    if (toolCalls.length > 0) {
+      yield* this.handleToolCalls(toolCalls, prompt_id);
+    }
+    
+    // 处理文本响应
+    yield* this.handleTextResponse(cleanedResponse, fullResponse, toolCalls);
+    
+    // 更新上下文
+    await this.updateContext(cleanedResponse, toolCalls);
+  }
+
+  /**
+   * 处理流式响应（大响应优化）
+   */
+  private async *handleStreamingResponse(
+    messages: any[],
+    prompt_id: string,
+    includeGuidance: boolean = true
+  ): AsyncGenerator<ServerGeminiStreamEvent, any> {
+    let toolCalls: ToolCall[] = [];
+    let accumulatedContent = '';
+    const chunkSize = 1024; // 1KB chunks for processing
+    
+    try {
+      // 调用OpenAI API with streaming
       const response = await this.openai.chat.completions.create({
         model: this.config.model,
         messages,
-        stream: false,
+        stream: true,
         temperature: this.config.temperature || 0.7,
         max_tokens: this.config.maxTokens || 4096,
       });
 
-      const fullResponse = response.choices[0]?.message?.content || '';
-      
-      if (this.debugMode) {
-        console.log('[ResponseHandler] Received response:', fullResponse.length, 'characters');
+      // 创建流式JSON解析器
+      const jsonParser = createStreamingJSONParser<any>(
+        (obj) => {
+          if (this.debugMode) {
+            console.log('[ResponseHandler] Parsed streaming JSON object:', Object.keys(obj));
+          }
+        },
+        (error) => {
+          if (this.debugMode) {
+            console.warn('[ResponseHandler] Streaming JSON parse error:', error.message);
+          }
+        }
+      );
+
+      // 处理流式响应
+      for await (const chunk of response) {
+        const content = chunk.choices[0]?.delta?.content;
+        
+        if (content) {
+          accumulatedContent += content;
+          
+          // 定期检查内存使用并处理已接收的内容
+          if (accumulatedContent.length > chunkSize) {
+            yield* this.processContentChunk(accumulatedContent, toolCalls, prompt_id);
+            
+            // 保留可能的不完整工具调用
+            accumulatedContent = this.preserveIncompleteToolCalls(accumulatedContent);
+          }
+        }
+      }
+
+      // 处理剩余内容
+      if (accumulatedContent) {
+        yield* this.processContentChunk(accumulatedContent, toolCalls, prompt_id);
       }
 
       // 记录完整请求和响应
-      await this.logRequestResponse(messages, fullResponse);
+      await this.logRequestResponse(messages, accumulatedContent);
 
-      // 清理响应（移除<think>标签）
-      const cleanedResponse = this.cleanResponse(fullResponse);
-      
-      // 解析工具调用
-      toolCalls = this.parseToolCalls(cleanedResponse);
-      
-      // 处理工具调用
-      if (toolCalls.length > 0) {
-        yield* this.handleToolCalls(toolCalls, prompt_id);
-      }
-      
-      // 处理文本响应
-      yield* this.handleTextResponse(cleanedResponse, fullResponse, toolCalls);
-      
       // 更新上下文
-      await this.updateContext(cleanedResponse, toolCalls);
+      await this.updateContext(accumulatedContent, toolCalls);
       
     } catch (error) {
       yield* this.handleError(error);
     }
+  }
+
+  /**
+   * 处理内容块
+   */
+  private async *processContentChunk(
+    content: string,
+    toolCalls: ToolCall[],
+    prompt_id: string
+  ): AsyncGenerator<ServerGeminiStreamEvent, any> {
+    // 清理响应
+    const cleanedContent = this.cleanResponse(content);
+    
+    // 解析新的工具调用
+    const newToolCalls = this.parseToolCalls(cleanedContent);
+    
+    // 添加新的工具调用
+    for (const toolCall of newToolCalls) {
+      const exists = toolCalls.find(tc => tc.callId === toolCall.callId);
+      if (!exists) {
+        toolCalls.push(toolCall);
+      }
+    }
+    
+    // 处理工具调用
+    if (newToolCalls.length > 0) {
+      yield* this.handleToolCalls(newToolCalls, prompt_id);
+    }
+    
+    // 处理文本响应
+    yield* this.handleTextResponse(cleanedContent, content, newToolCalls);
+  }
+
+  /**
+   * 保留不完整的工具调用
+   */
+  private preserveIncompleteToolCalls(content: string): string {
+    // 查找可能的不完整工具调用
+    const jsonPattern = /\{[^}]*$/;
+    const match = content.match(jsonPattern);
+    
+    if (match) {
+      return match[0];
+    }
+    
+    return '';
+  }
+
+  /**
+   * 判断是否应该使用流式处理
+   */
+  private shouldUseStreaming(messages: any[]): boolean {
+    // 基于消息总长度判断
+    const totalLength = messages.reduce((sum, msg) => sum + (msg.content?.length || 0), 0);
+    
+    // 如果消息总长度超过10KB，使用流式处理
+    return totalLength > 10 * 1024;
   }
 
   /**

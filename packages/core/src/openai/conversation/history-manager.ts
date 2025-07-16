@@ -13,6 +13,8 @@ import {
   ContextHistorySeparationResult,
   MessageType 
 } from './context-history-separator.js';
+import { memoryProfiler } from '../utils/memory-profiler.js';
+import { memoryOptimizer, processInChunks, withStringPool } from '../utils/memory-optimizer.js';
 
 /**
  * 对话历史管理器
@@ -29,9 +31,16 @@ export class ConversationHistoryManager {
     toolResults: ExtendedConversationMessage[];
     internalProcessing: ExtendedConversationMessage[];
   };
+  
+  // Memory optimization properties
+  private readonly memoryThreshold: number; // bytes
+  private readonly chunkSize: number; // messages per chunk
+  private isMemoryOptimized: boolean = false;
 
-  constructor(maxHistoryLength: number = 20) {
+  constructor(maxHistoryLength: number = 20, memoryThreshold: number = 10 * 1024 * 1024) {
     this.maxHistoryLength = maxHistoryLength;
+    this.memoryThreshold = memoryThreshold; // 10MB default
+    this.chunkSize = Math.max(5, Math.floor(maxHistoryLength / 4)); // 1/4 of max history
     this.contextSeparator = new ContextHistorySeparator();
     this.separatedData = {
       contextData: [],
@@ -68,26 +77,37 @@ export class ConversationHistoryManager {
    * 使用上下文分离器添加消息
    */
   private addMessageWithSeparation(message: ConversationMessage): void {
-    const result = this.contextSeparator.separateContextFromHistory([message]);
+    const operationId = `add_message_${Date.now()}`;
     
-    // 添加纯对话内容到对话历史
-    if (result.conversationHistory.length > 0) {
-      this.conversationHistory.push(...result.conversationHistory);
-    }
-    
-    // 存储分离的数据
-    this.separatedData.contextData.push(...result.contextData);
-    this.separatedData.toolCalls.push(...result.toolCalls);
-    this.separatedData.toolResults.push(...result.toolResults);
-    this.separatedData.internalProcessing.push(...result.internalProcessing);
-    
-    // 验证分离结果
-    const validation = this.contextSeparator.validateSeparation(result);
-    if (!validation.isValid) {
-      console.warn('Context separation validation failed:', validation.errors);
-    }
-    
-    this.trimHistory();
+    memoryProfiler.profileFunction(
+      'addMessageWithSeparation',
+      () => {
+        const result = this.contextSeparator.separateContextFromHistory([message]);
+        
+        // 添加纯对话内容到对话历史
+        if (result.conversationHistory.length > 0) {
+          this.conversationHistory.push(...result.conversationHistory);
+        }
+        
+        // 存储分离的数据
+        this.separatedData.contextData.push(...result.contextData);
+        this.separatedData.toolCalls.push(...result.toolCalls);
+        this.separatedData.toolResults.push(...result.toolResults);
+        this.separatedData.internalProcessing.push(...result.internalProcessing);
+        
+        // 验证分离结果
+        const validation = this.contextSeparator.validateSeparation(result);
+        if (!validation.isValid) {
+          console.warn('Context separation validation failed:', validation.errors);
+        }
+        
+        // 检查内存使用并优化
+        this.checkMemoryUsageAndOptimize();
+        
+        this.trimHistory();
+      },
+      { operationId }
+    );
   }
 
   /**
@@ -353,6 +373,242 @@ export class ConversationHistoryManager {
     
     // 按时间戳排序
     return log.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
+
+  /**
+   * 检查内存使用并优化
+   */
+  private checkMemoryUsageAndOptimize(): void {
+    const memoryUsage = process.memoryUsage();
+    
+    if (memoryUsage.heapUsed > this.memoryThreshold) {
+      this.optimizeMemoryUsage();
+    }
+    
+    // 检查是否需要启用内存优化模式
+    if (!this.isMemoryOptimized && memoryUsage.heapUsed > this.memoryThreshold * 0.7) {
+      this.enableMemoryOptimization();
+    }
+  }
+
+  /**
+   * 启用内存优化模式
+   */
+  private enableMemoryOptimization(): void {
+    if (this.isMemoryOptimized) return;
+    
+    this.isMemoryOptimized = true;
+    
+    // 压缩存储的分离数据
+    this.compressSeparatedData();
+    
+    // 更积极的历史修剪
+    this.trimHistoryAggressive();
+    
+    console.log('[ConversationHistoryManager] Memory optimization enabled');
+  }
+
+  /**
+   * 优化内存使用
+   */
+  private optimizeMemoryUsage(): void {
+    // 1. 清理过期的分离数据
+    this.cleanupSeparatedData();
+    
+    // 2. 压缩对话历史
+    this.compressConversationHistory();
+    
+    // 3. 强制垃圾回收（如果可用）
+    if (global.gc) {
+      global.gc();
+    }
+    
+    console.log('[ConversationHistoryManager] Memory usage optimized');
+  }
+
+  /**
+   * 清理分离数据
+   */
+  private cleanupSeparatedData(): void {
+    const maxSeparatedDataSize = 1000; // 最大分离数据条目数
+    
+    // 清理过期的上下文数据
+    if (this.separatedData.contextData.length > maxSeparatedDataSize) {
+      this.separatedData.contextData = this.separatedData.contextData.slice(-maxSeparatedDataSize);
+    }
+    
+    // 清理过期的工具调用数据
+    if (this.separatedData.toolCalls.length > maxSeparatedDataSize) {
+      this.separatedData.toolCalls = this.separatedData.toolCalls.slice(-maxSeparatedDataSize);
+    }
+    
+    // 清理过期的工具结果数据
+    if (this.separatedData.toolResults.length > maxSeparatedDataSize) {
+      this.separatedData.toolResults = this.separatedData.toolResults.slice(-maxSeparatedDataSize);
+    }
+    
+    // 清理过期的内部处理数据
+    if (this.separatedData.internalProcessing.length > maxSeparatedDataSize) {
+      this.separatedData.internalProcessing = this.separatedData.internalProcessing.slice(-maxSeparatedDataSize);
+    }
+  }
+
+  /**
+   * 压缩分离数据
+   */
+  private compressSeparatedData(): void {
+    // 使用字符串池优化内存
+    withStringPool((pool) => {
+      // 压缩重复的消息内容
+      const compressedContextData = this.compressMessages(this.separatedData.contextData);
+      const compressedToolCalls = this.compressMessages(this.separatedData.toolCalls);
+      const compressedToolResults = this.compressMessages(this.separatedData.toolResults);
+      const compressedInternalProcessing = this.compressMessages(this.separatedData.internalProcessing);
+      
+      this.separatedData.contextData = compressedContextData;
+      this.separatedData.toolCalls = compressedToolCalls;
+      this.separatedData.toolResults = compressedToolResults;
+      this.separatedData.internalProcessing = compressedInternalProcessing;
+    });
+  }
+
+  /**
+   * 压缩消息数组
+   */
+  private compressMessages(messages: ExtendedConversationMessage[]): ExtendedConversationMessage[] {
+    const compressed: ExtendedConversationMessage[] = [];
+    const seenContents = new Map<string, number>();
+    
+    for (const message of messages) {
+      const contentHash = this.hashContent(message.content);
+      
+      if (seenContents.has(contentHash)) {
+        // 引用已存在的内容
+        const existingIndex = seenContents.get(contentHash)!;
+        compressed.push({
+          ...message,
+          content: `[REF:${existingIndex}]`
+        });
+      } else {
+        seenContents.set(contentHash, compressed.length);
+        compressed.push(message);
+      }
+    }
+    
+    return compressed;
+  }
+
+  /**
+   * 压缩对话历史
+   */
+  private compressConversationHistory(): void {
+    if (this.conversationHistory.length <= this.chunkSize) return;
+    
+    // 分块处理对话历史
+    const chunks = this.createHistoryChunks();
+    
+    // 保留最近的块，压缩旧的块
+    if (chunks.length > 2) {
+      const recentChunks = chunks.slice(-2);
+      const oldChunks = chunks.slice(0, -2);
+      
+      // 压缩旧块
+      const compressedOldChunks = oldChunks.map(chunk => this.compressHistoryChunk(chunk));
+      
+      // 重新组装历史
+      this.conversationHistory = [...compressedOldChunks.flat(), ...recentChunks.flat()];
+    }
+  }
+
+  /**
+   * 创建历史块
+   */
+  private createHistoryChunks(): ConversationMessage[][] {
+    const chunks: ConversationMessage[][] = [];
+    
+    for (let i = 0; i < this.conversationHistory.length; i += this.chunkSize) {
+      chunks.push(this.conversationHistory.slice(i, i + this.chunkSize));
+    }
+    
+    return chunks;
+  }
+
+  /**
+   * 压缩历史块
+   */
+  private compressHistoryChunk(chunk: ConversationMessage[]): ConversationMessage[] {
+    // 简单压缩：只保留摘要
+    const summary = this.createChunkSummary(chunk);
+    return [{ role: 'system', content: `[COMPRESSED: ${summary}]` }];
+  }
+
+  /**
+   * 创建块摘要
+   */
+  private createChunkSummary(chunk: ConversationMessage[]): string {
+    const userMessages = chunk.filter(m => m.role === 'user').length;
+    const assistantMessages = chunk.filter(m => m.role === 'assistant').length;
+    const totalChars = chunk.reduce((sum, m) => sum + m.content.length, 0);
+    
+    return `${userMessages}U/${assistantMessages}A/${totalChars}chars`;
+  }
+
+  /**
+   * 更积极的历史修剪
+   */
+  private trimHistoryAggressive(): void {
+    const targetSize = Math.floor(this.maxHistoryLength * 0.7); // 70% of max
+    
+    if (this.conversationHistory.length > targetSize) {
+      const systemMessages = this.conversationHistory.filter(msg => msg.role === 'system');
+      const otherMessages = this.conversationHistory.filter(msg => msg.role !== 'system');
+      
+      const trimmedOtherMessages = otherMessages.slice(-(targetSize - systemMessages.length));
+      this.conversationHistory = [...systemMessages, ...trimmedOtherMessages];
+    }
+  }
+
+  /**
+   * 创建内容哈希
+   */
+  private hashContent(content: string): string {
+    let hash = 0;
+    for (let i = 0; i < content.length; i++) {
+      const char = content.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash.toString(16);
+  }
+
+  /**
+   * 获取内存使用统计
+   */
+  getMemoryStats(): {
+    isOptimized: boolean;
+    conversationHistorySize: number;
+    separatedDataSize: number;
+    totalMessages: number;
+    estimatedMemoryUsage: number;
+  } {
+    const conversationHistorySize = this.conversationHistory.reduce((sum, msg) => sum + msg.content.length, 0);
+    const separatedDataSize = 
+      this.separatedData.contextData.reduce((sum, msg) => sum + msg.content.length, 0) +
+      this.separatedData.toolCalls.reduce((sum, msg) => sum + msg.content.length, 0) +
+      this.separatedData.toolResults.reduce((sum, msg) => sum + msg.content.length, 0) +
+      this.separatedData.internalProcessing.reduce((sum, msg) => sum + msg.content.length, 0);
+    
+    return {
+      isOptimized: this.isMemoryOptimized,
+      conversationHistorySize,
+      separatedDataSize,
+      totalMessages: this.conversationHistory.length + 
+                    this.separatedData.contextData.length +
+                    this.separatedData.toolCalls.length +
+                    this.separatedData.toolResults.length +
+                    this.separatedData.internalProcessing.length,
+      estimatedMemoryUsage: (conversationHistorySize + separatedDataSize) * 2 // Rough estimate
+    };
   }
 
   /**

@@ -42,7 +42,7 @@ export class KnowledgeGraph {
     this.graphPath = path.join(structure.knowledgeGraphStorage, 'graphology', 'context_graph.json');
     this.graph = new DirectedGraph({
       allowSelfLoops: false,
-      multi: false
+      multi: true  // 允许多边以支持不同类型的关系
     });
   }
 
@@ -127,7 +127,7 @@ export class KnowledgeGraph {
 
       // Add edge if it doesn't exist
       const edgeKey = `${relation.from}-${relation.type}-${relation.to}`;
-      if (!this.graph.hasDirectedEdge(relation.from, relation.to)) {
+      if (!this.graph.hasEdge(edgeKey)) {
         try {
           this.graph.addDirectedEdgeWithKey(edgeKey, relation.from, relation.to, {
             type: relation.type,
@@ -138,9 +138,7 @@ export class KnowledgeGraph {
         }
       } else {
         // Update existing edge data if edge exists with this key
-        if (this.graph.hasEdge(edgeKey)) {
-          this.graph.setEdgeAttribute(edgeKey, 'data', relation);
-        }
+        this.graph.setEdgeAttribute(edgeKey, 'data', relation);
       }
     }
 
