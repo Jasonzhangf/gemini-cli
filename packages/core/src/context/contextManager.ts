@@ -372,6 +372,14 @@ export class ContextManager {
     await this.loadGlobalMemories();
     await this.loadProjectMemories();
     
+    // 清空StandardContextIntegrator的静态上下文缓存，以便下次获取时重新加载
+    if (this.standardContextIntegrator) {
+      this.standardContextIntegrator.invalidateStaticContextCache();
+      if (this.debugMode) {
+        console.log('[ContextManager] Invalidated static context cache');
+      }
+    }
+    
     if (this.debugMode) {
       console.log('[ContextManager] Refreshed memories in context');
     }

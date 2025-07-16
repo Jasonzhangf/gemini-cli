@@ -156,11 +156,31 @@ if [ ! -f ~/.gemini/.env ]; then
     mkdir -p ~/.gemini
     cat > ~/.gemini/.env << EOF
 # OpenAI Hijack Configuration - v$SCRIPT_VERSION
+# Default: LMStudio (localhost:1234)
 OPENAI_API_KEY=not-needed
 OPENAI_BASE_URL=http://localhost:1234/v1
 OPENAI_MODEL=local-model-v$SCRIPT_VERSION
 OPENAI_TEMPERATURE=0.7
 OPENAI_MAX_TOKENS=4096
+
+# SiliconFlow Qwen/Qwen3-8B Configuration
+# Uncomment lines below to use SiliconFlow instead of LMStudio
+# OPENAI_API_KEY=your-siliconflow-key
+# OPENAI_BASE_URL=https://api.siliconflow.cn/v1
+# OPENAI_MODEL=Qwen/Qwen3-8B
+# OPENAI_TEMPERATURE=0.7
+# OPENAI_MAX_TOKENS=4096
+
+# Alternative providers:
+# For OpenAI:
+# OPENAI_BASE_URL=https://api.openai.com/v1
+# OPENAI_API_KEY=your-openai-key
+# OPENAI_MODEL=gpt-4o-mini
+
+# For Anthropic (via OpenAI-compatible proxy):
+# OPENAI_BASE_URL=https://api.anthropic.com/v1
+# OPENAI_API_KEY=your-anthropic-key
+# OPENAI_MODEL=claude-3-sonnet-20240229
 EOF
     echo "   ✅ 配置文件已创建: ~/.gemini/.env"
 else
@@ -190,6 +210,12 @@ echo "   gemini --openai --yolo"
 echo ""
 echo "📁 配置文件位置: ~/.gemini/.env"
 echo "🔧 默认配置: LMStudio (localhost:1234)"
+echo ""
+echo "🤖 支持的模型提供商:"
+echo "   • LMStudio (默认) - 本地模型"
+echo "   • SiliconFlow - Qwen/Qwen3-8B 等云端模型"
+echo "   • OpenAI - GPT-4o-mini 等"
+echo "   • Anthropic - Claude-3 等"
 echo ""
 echo "🎯 主要功能:"
 echo "   ✅ 完全绕过Google认证"

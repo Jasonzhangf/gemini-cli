@@ -178,16 +178,75 @@ export class ToolCallParser {
     for (const param of pathParams) {
       if (newArgs[param]) {
         if (Array.isArray(newArgs[param])) {
-          newArgs[param] = newArgs[param].map((p: any) =>
-            typeof p === 'string' && !path.isAbsolute(p) ? path.resolve(CWD, p) : p
-          );
-        } else if (typeof newArgs[param] === 'string' && !path.isAbsolute(newArgs[param])) {
-          newArgs[param] = path.resolve(CWD, newArgs[param]);
+          newArgs[param] = newArgs[param].map((p: any) => {
+            if (typeof p === 'string') {
+              return this.resolveToAbsolutePath(p, CWD);
+            }
+            return p;
+          });
+        } else if (typeof newArgs[param] === 'string') {
+          newArgs[param] = this.resolveToAbsolutePath(newArgs[param], CWD);
         }
       }
     }
 
     return newArgs;
+  }
+
+  /**
+   * 智能路径解析：处理各种路径格式
+   */
+  private resolveToAbsolutePath(inputPath: string, cwd: string): string {
+    const originalPath = inputPath;
+    
+    // 如果已经是完整的绝对路径（包含用户目录等），直接返回
+    if (path.isAbsolute(inputPath) && (inputPath.startsWith('/Users/') || inputPath.startsWith('/home/'))) {
+      if (this.debugMode) {
+        console.log(`[ToolCallParser] Path already absolute: ${originalPath} -> ${inputPath}`);
+      }
+      return inputPath;
+    }
+    
+    // 如果是以/开头但不是完整路径（如 /Documents/github/gemini-cli）
+    // 这通常是模型输出的相对路径，需要基于当前工作目录解析
+    if (inputPath.startsWith('/') && !inputPath.startsWith('/Users/') && !inputPath.startsWith('/home/')) {
+      // 检查是否是相对于用户主目录的路径部分
+      // 如果当前工作目录是 /Users/fanzhang/Documents/github/gemini-cli
+      // 而输入路径是 /Documents/github/gemini-cli
+      // 那么应该解析为 /Users/fanzhang/Documents/github/gemini-cli
+      
+      // 尝试找到用户主目录的路径
+      const userHome = process.env.HOME || process.env.USERPROFILE || '';
+      if (userHome && cwd.startsWith(userHome)) {
+        const possiblePath = path.join(userHome, inputPath.substring(1)); // 去掉开头的/，拼接到用户主目录
+        if (this.debugMode) {
+          console.log(`[ToolCallParser] Incomplete absolute path resolved via userHome: ${originalPath} -> ${possiblePath}`);
+        }
+        return possiblePath;
+      }
+      
+      // 如果找不到用户主目录，则基于当前工作目录解析
+      const fallbackPath = path.resolve(cwd, inputPath.substring(1));
+      if (this.debugMode) {
+        console.log(`[ToolCallParser] Incomplete absolute path resolved via cwd: ${originalPath} -> ${fallbackPath}`);
+      }
+      return fallbackPath;
+    }
+    
+    // 处理相对路径
+    if (!path.isAbsolute(inputPath)) {
+      const resolvedPath = path.resolve(cwd, inputPath);
+      if (this.debugMode) {
+        console.log(`[ToolCallParser] Relative path resolved: ${originalPath} -> ${resolvedPath}`);
+      }
+      return resolvedPath;
+    }
+    
+    // 对于其他绝对路径，直接返回
+    if (this.debugMode) {
+      console.log(`[ToolCallParser] Path unchanged: ${originalPath} -> ${inputPath}`);
+    }
+    return inputPath;
   }
 
   /**

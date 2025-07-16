@@ -14,10 +14,16 @@ export function useGitBranchName(cwd: string): string | undefined {
   const [branchName, setBranchName] = useState<string | undefined>(undefined);
 
   const fetchBranchName = useCallback(
-    () =>
+    () => {
+      // Add proper error handling and validation
+      if (!cwd || typeof cwd !== 'string') {
+        setBranchName(undefined);
+        return;
+      }
+      
       exec(
         'git rev-parse --abbrev-ref HEAD',
-        { cwd },
+        { cwd, timeout: 5000 }, // Add timeout to prevent hanging
         (error, stdout, _stderr) => {
           if (error) {
             setBranchName(undefined);
@@ -29,7 +35,7 @@ export function useGitBranchName(cwd: string): string | undefined {
           } else {
             exec(
               'git rev-parse --short HEAD',
-              { cwd },
+              { cwd, timeout: 5000 }, // Add timeout to prevent hanging
               (error, stdout, _stderr) => {
                 if (error) {
                   setBranchName(undefined);
@@ -40,11 +46,17 @@ export function useGitBranchName(cwd: string): string | undefined {
             );
           }
         },
-      ),
+      );
+    },
     [cwd, setBranchName],
   );
 
   useEffect(() => {
+    // Add validation before proceeding
+    if (!cwd || typeof cwd !== 'string') {
+      return;
+    }
+
     fetchBranchName(); // Initial fetch
 
     const gitLogsHeadPath = path.join(cwd, '.git', 'logs', 'HEAD');
@@ -52,8 +64,12 @@ export function useGitBranchName(cwd: string): string | undefined {
 
     const setupWatcher = async () => {
       try {
+        // Check if .git directory exists first
+        await fsPromises.access(path.join(cwd, '.git'), fs.constants.F_OK);
+        
         // Check if .git/logs/HEAD exists, as it might not in a new repo or orphaned head
         await fsPromises.access(gitLogsHeadPath, fs.constants.F_OK);
+        
         watcher = fs.watch(gitLogsHeadPath, (eventType: string) => {
           // Changes to .git/logs/HEAD (appends) indicate HEAD has likely changed
           if (eventType === 'change' || eventType === 'rename') {
@@ -71,7 +87,13 @@ export function useGitBranchName(cwd: string): string | undefined {
     setupWatcher();
 
     return () => {
-      watcher?.close();
+      if (watcher) {
+        try {
+          watcher.close();
+        } catch (error) {
+          // Silently ignore close errors
+        }
+      }
     };
   }, [cwd, fetchBranchName]);
 

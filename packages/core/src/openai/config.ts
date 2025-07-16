@@ -30,11 +30,15 @@ export function loadOpenAIConfig(): OpenAIHijackEnvConfig {
   const configDir = path.join(os.homedir(), '.gemini');
   const envFile = path.join(configDir, '.env');
   
+  // Read provider from environment first
+  let provider = process.env.OPENAI_PROVIDER || 'SILICONFLOW';
+  
+  // Initialize default configuration based on provider
   const config: OpenAIHijackEnvConfig = {
-    // Default LMStudio configuration
-    apiKey: 'not-needed',
-    baseURL: 'http://localhost:1234/v1',
-    model: 'local-model',
+    // Default SiliconFlow configuration
+    apiKey: process.env.SILICONFLOW_API_KEY || 'sk-default',
+    baseURL: process.env.SILICONFLOW_BASE_URL || 'https://api.siliconflow.cn/v1',
+    model: process.env.SILICONFLOW_MODEL || 'Qwen/Qwen3-8B',
     temperature: 0.7,
     maxTokens: 4096,
   };
@@ -53,6 +57,27 @@ export function loadOpenAIConfig(): OpenAIHijackEnvConfig {
             const cleanValue = value.trim().replace(/^["']|["']$/g, ''); // Remove quotes
             
             switch (cleanKey) {
+              // Provider selection
+              case 'OPENAI_PROVIDER':
+                provider = cleanValue;
+                break;
+              // SiliconFlow configuration
+              case 'SILICONFLOW_API_KEY':
+                if (provider === 'SILICONFLOW') {
+                  config.apiKey = cleanValue;
+                }
+                break;
+              case 'SILICONFLOW_BASE_URL':
+                if (provider === 'SILICONFLOW') {
+                  config.baseURL = cleanValue;
+                }
+                break;
+              case 'SILICONFLOW_MODEL':
+                if (provider === 'SILICONFLOW') {
+                  config.model = cleanValue;
+                }
+                break;
+              // Legacy OpenAI configuration (for backward compatibility)
               case 'OPENAI_API_KEY':
                 config.apiKey = cleanValue;
                 break;
@@ -74,62 +99,28 @@ export function loadOpenAIConfig(): OpenAIHijackEnvConfig {
       }
       
       console.log('[OpenAI Config] Loaded configuration from ~/.gemini/.env');
+      console.log('[OpenAI Config] Provider:', provider);
       console.log('[OpenAI Config] Base URL:', config.baseURL);
       console.log('[OpenAI Config] Model:', config.model);
     } else {
-      console.log('[OpenAI Config] No ~/.gemini/.env found, using default LMStudio configuration');
+      console.log('[OpenAI Config] No ~/.gemini/.env found, using default SiliconFlow configuration');
     }
   } catch (error) {
     console.warn('[OpenAI Config] Error reading ~/.gemini/.env:', error);
-    console.log('[OpenAI Config] Using default LMStudio configuration');
+    console.log('[OpenAI Config] Using default SiliconFlow configuration');
   }
+
+  // Log final configuration
+  console.log('[OpenAI Config] Final provider:', provider);
+  console.log('[OpenAI Config] Final config:', {
+    baseURL: config.baseURL,
+    model: config.model,
+    temperature: config.temperature,
+    maxTokens: config.maxTokens
+  });
 
   // Cache the config before returning
   configCache = config;
   return config;
 }
 
-/**
- * Create default ~/.gemini/.env configuration for LMStudio
- */
-export function createDefaultEnvConfig(): void {
-  const configDir = path.join(os.homedir(), '.gemini');
-  const envFile = path.join(configDir, '.env');
-  
-  try {
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(configDir)) {
-      fs.mkdirSync(configDir, { recursive: true });
-    }
-    
-    // Don't overwrite existing config
-    if (fs.existsSync(envFile)) {
-      return;
-    }
-    
-    const defaultConfig = `# OpenAI Hijack Configuration for Gemini CLI
-# This configuration is used when --openai flag is enabled
-
-# LMStudio default configuration (recommended for local testing)
-OPENAI_API_KEY=not-needed
-OPENAI_BASE_URL=http://localhost:1234/v1
-OPENAI_MODEL=local-model
-OPENAI_TEMPERATURE=0.7
-OPENAI_MAX_TOKENS=4096
-
-# Alternative providers:
-# For AIProxy:
-# OPENAI_BASE_URL=https://api.aiproxy.io/v1
-# OPENAI_API_KEY=your-aiproxy-key
-
-# For OpenAI-compatible services:
-# OPENAI_BASE_URL=https://your-provider.com/v1
-# OPENAI_API_KEY=your-api-key
-`;
-
-    fs.writeFileSync(envFile, defaultConfig, 'utf-8');
-    console.log('[OpenAI Config] Created default configuration at ~/.gemini/.env');
-  } catch (error) {
-    console.warn('[OpenAI Config] Error creating default .env:', error);
-  }
-}

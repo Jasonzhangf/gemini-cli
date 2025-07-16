@@ -65,6 +65,13 @@ export class StandardContextIntegrator {
   private contextDiscovery: ContextDiscoveryService;
   private templateService: WorkflowTemplateService;
   private projectDir: string;
+  
+  // 缓存静态上下文以避免重复加载内存
+  private cachedStaticContext: StaticContext | null = null;
+  private staticContextCacheValid: boolean = false;
+  
+  // 跟踪是否已经为当前会话记录了debug信息
+  private debugRecordedForSession: boolean = false;
 
   constructor(config: Config, projectDir: string = process.cwd()) {
     this.config = config;
@@ -122,6 +129,11 @@ export class StandardContextIntegrator {
    * 收集静态上下文
    */
   private async getStaticContext(includeProjectDiscovery: boolean = false): Promise<StaticContext> {
+    // 如果不需要项目发现且缓存有效，直接返回缓存
+    if (!includeProjectDiscovery && this.staticContextCacheValid && this.cachedStaticContext) {
+      return this.cachedStaticContext;
+    }
+    
     const context: StaticContext = {};
     
     // 获取现有静态规则和记忆
@@ -158,7 +170,28 @@ export class StandardContextIntegrator {
       }
     }
 
+    // 如果不需要项目发现，缓存结果
+    if (!includeProjectDiscovery) {
+      this.cachedStaticContext = context;
+      this.staticContextCacheValid = true;
+    }
+
     return context;
+  }
+
+  /**
+   * 清空静态上下文缓存（当内存更新时调用）
+   */
+  public invalidateStaticContextCache(): void {
+    this.staticContextCacheValid = false;
+    this.cachedStaticContext = null;
+  }
+
+  /**
+   * 重置debug记录状态（用于测试或手动重置）
+   */
+  public resetDebugRecording(): void {
+    this.debugRecordedForSession = false;
   }
 
   /**
@@ -374,11 +407,16 @@ export class StandardContextIntegrator {
 
     const formattedContext = sections.join('\n\n' + '▀'.repeat(120) + '\n\n');
 
-    // Save memory context in debug mode only when explicitly requested
-    if (saveDebug && this.config?.getDebugMode()) {
+    // Save memory context in debug mode only once per session
+    if (saveDebug && this.config?.getDebugMode() && !this.debugRecordedForSession) {
       this.saveDebugMemoryContext(context).catch(error => {
         console.error('[StandardContextIntegrator] Failed to save debug memory context:', error);
       });
+      this.debugRecordedForSession = true;
+      
+      if (this.config.getDebugMode()) {
+        console.log('[StandardContextIntegrator] Debug memory context recorded for session (one-time)');
+      }
     }
 
     return formattedContext;

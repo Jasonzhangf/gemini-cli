@@ -56,6 +56,8 @@ import {
 import { useSessionStats } from '../contexts/SessionContext.js';
 import { logUserQuery, logContext, logModelResponse, logToolCall } from '../../utils/debug.js';
 
+// Helper function removed - RAG processing disabled for debugging
+
 export function mergePartListUnions(list: PartListUnion[]): PartListUnion {
   const resultParts: PartListUnion = [];
   for (const item of list) {
@@ -239,6 +241,9 @@ export const useGeminiStream = (
           logUserQuery(config.getSessionId(), trimmedQuery);
         }
 
+        // Point 1: RAG processing disabled for debugging
+        // TODO: Re-enable RAG processing after fixing conversation flow
+
         // Handle UI-only commands first
         const slashCommandResult = await handleSlashCommand(trimmedQuery);
 
@@ -292,6 +297,9 @@ export const useGeminiStream = (
         if (config.getDebugMode()) {
           logUserQuery(config.getSessionId(), query);
         }
+        
+        // Point 3: RAG processing disabled for debugging
+        // TODO: Re-enable RAG processing after fixing conversation flow
       }
 
       if (localQueryToSendToGemini === null) {
@@ -609,6 +617,9 @@ export const useGeminiStream = (
           if (config.getDebugMode() && pendingHistoryItemRef.current.type === 'gemini') {
             logModelResponse(config.getSessionId(), pendingHistoryItemRef.current.text);
           }
+          
+          // Point 2: RAG processing disabled for debugging
+          // TODO: Re-enable RAG processing after fixing conversation flow
           
           addItem(pendingHistoryItemRef.current, userMessageTimestamp);
           setPendingHistoryItem(null);

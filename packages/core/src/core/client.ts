@@ -39,8 +39,9 @@ import {
 } from './contentGenerator.js';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { DEFAULT_GEMINI_FLASH_MODEL } from '../config/models.js';
-import { OpenAIHijackAdapter, OpenAIHijackConfig } from '../openai/hijack.js';
-import { loadOpenAIConfig, createDefaultEnvConfig } from '../openai/config.js';
+import { OpenAIHijackAdapterRefactored } from '../openai/hijack-refactored.js';
+import { OpenAIHijackConfig } from '../openai/types/interfaces.js';
+import { loadOpenAIConfig } from '../openai/config.js';
 
 function isThinkingSupported(model: string) {
   if (model.startsWith('gemini-2.5')) return true;
@@ -83,7 +84,7 @@ export function findIndexAfterFraction(
 export class GeminiClient {
   private chat?: GeminiChat;
   private contentGenerator?: ContentGenerator;
-  private hijackAdapter?: OpenAIHijackAdapter;
+  private hijackAdapter?: OpenAIHijackAdapterRefactored;
   private embeddingModel: string;
   private generateContentConfig: GenerateContentConfig = {
     temperature: 0,
@@ -117,9 +118,6 @@ export class GeminiClient {
     
     // Check if OpenAI hijack mode is enabled
     if (this.config.getOpenAIMode()) {
-      // Create default config if needed
-      createDefaultEnvConfig();
-      
       // Load OpenAI configuration from ~/.gemini/.env
       const envConfig = loadOpenAIConfig();
       
@@ -137,7 +135,7 @@ export class GeminiClient {
       const toolDeclarations = toolRegistry.getFunctionDeclarations();
       
       try {
-        this.hijackAdapter = new OpenAIHijackAdapter(openaiConfig, toolDeclarations, this.config);
+        this.hijackAdapter = new OpenAIHijackAdapterRefactored(openaiConfig, toolDeclarations, this.config);
         
         if (this.config.getDebugMode()) {
           console.log('[Gemini Client] OpenAI hijack adapter successfully created');
@@ -242,8 +240,7 @@ export class GeminiClient {
 
   getCurrentModel(): string {
     if (this.config.getOpenAIMode() && this.hijackAdapter) {
-            // return this.hijackAdapter.getCurrentModel();
-      return this.config.getModel();
+      return this.hijackAdapter.getCurrentModel();
     }
     return this.config.getModel();
   }
@@ -436,7 +433,7 @@ export class GeminiClient {
         console.log('[Gemini Client] Hijacking request to OpenAI adapter');
       }
       
-            // yield* this.hijackAdapter.sendMessageStream(request, signal, prompt_id);
+      yield* this.hijackAdapter.sendMessageStream(request, signal, prompt_id);
       return new Turn(this.getChat(), prompt_id);
     }
 

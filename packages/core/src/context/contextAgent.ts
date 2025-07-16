@@ -190,8 +190,10 @@ export class ContextAgent {
         this.contextExtractor.initialize()
       ]);
 
-      // Index existing knowledge graph data into RAG system
-      await this.indexKnowledgeGraphData();
+      // Index existing knowledge graph data into RAG system in background
+      this.indexKnowledgeGraphData().catch(error => {
+        console.warn('[ContextAgent] Background indexing failed:', error);
+      });
 
       if (this.config.getDebugMode()) {
         console.log('[ContextAgent] RAG system initialized successfully');
@@ -220,27 +222,37 @@ export class ContextAgent {
       const graph = this.knowledgeGraph.getRawGraph();
       let indexedCount = 0;
 
-      // Index all nodes from knowledge graph
-      graph.forEachNode(async (nodeId: string, attributes: any) => {
-        const nodeData = attributes.data;
-        if (nodeData && nodeData.name) {
-          // Index as document in vector store
-          const content = this.extractNodeContentForRAG(nodeData);
-          if (content.trim()) {
-            await new Promise(resolve => setTimeout(resolve, 50)); // Add a 50ms delay
-            this.vectorProvider!.indexDocument(nodeId, content, {
-              type: nodeData.type || 'concept',
-              filePath: nodeData.filePath || nodeData.path,
-              lineStart: nodeData.startLine,
-              lineEnd: nodeData.endLine,
-              language: nodeData.language
-            });
+      // Collect all nodes first
+      const nodes: Array<{ nodeId: string; attributes: any }> = [];
+      graph.forEachNode((nodeId: string, attributes: any) => {
+        nodes.push({ nodeId, attributes });
+      });
 
-            // Add to graph provider
-            this.graphProvider!.upsertNode({
-              id: nodeId,
-              type: nodeData.type || 'concept',
-              name: nodeData.name,
+      // Process nodes in batches to avoid blocking
+      const batchSize = 10;
+      for (let i = 0; i < nodes.length; i += batchSize) {
+        const batch = nodes.slice(i, i + batchSize);
+        
+        // Process batch in parallel
+        await Promise.all(batch.map(async ({ nodeId, attributes }) => {
+          const nodeData = attributes.data;
+          if (nodeData && nodeData.name) {
+            // Index as document in vector store
+            const content = this.extractNodeContentForRAG(nodeData);
+            if (content.trim()) {
+              await this.vectorProvider!.indexDocument(nodeId, content, {
+                type: nodeData.type || 'concept',
+                filePath: nodeData.filePath || nodeData.path,
+                lineStart: nodeData.startLine,
+                lineEnd: nodeData.endLine,
+                language: nodeData.language
+              });
+
+              // Add to graph provider
+              await this.graphProvider!.upsertNode({
+                id: nodeId,
+                type: nodeData.type || 'concept',
+                name: nodeData.name,
               content,
               metadata: {
                 filePath: nodeData.filePath || nodeData.path,
@@ -251,13 +263,24 @@ export class ContextAgent {
               relationships: []
             });
 
-            indexedCount++;
+              indexedCount++;
+            }
           }
+        }));
+
+        // Add small delay between batches to prevent blocking
+        if (i + batchSize < nodes.length) {
+          await new Promise(resolve => setTimeout(resolve, 10));
         }
+      }
+
+      // Index relationships asynchronously
+      const edges: Array<{ edgeId: string; attributes: any; source: string; target: string }> = [];
+      graph.forEachEdge((edgeId: string, attributes: any, source: string, target: string) => {
+        edges.push({ edgeId, attributes, source, target });
       });
 
-      // Index relationships
-      graph.forEachEdge((edgeId: string, attributes: any, source: string, target: string) => {
+      for (const { edgeId, attributes, source, target } of edges) {
         const edgeData = attributes.data;
         if (edgeData && this.graphProvider) {
           // Add relationships between nodes
@@ -265,7 +288,7 @@ export class ContextAgent {
           const targetNode = graph.getNodeAttributes(target)?.data;
           
           if (sourceNode && targetNode) {
-            this.graphProvider.upsertNode({
+            await this.graphProvider.upsertNode({
               id: source,
               type: sourceNode.type || 'concept',
               name: sourceNode.name,
@@ -281,7 +304,7 @@ export class ContextAgent {
             });
           }
         }
-      });
+      }
 
       if (this.config.getDebugMode()) {
         console.log(`[ContextAgent] Indexed ${indexedCount} nodes into RAG system`);
