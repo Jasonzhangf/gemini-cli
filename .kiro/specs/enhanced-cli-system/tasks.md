@@ -15,14 +15,14 @@
   - Test configuration merging and override behavior
   - _Testing: Unit tests with 90%+ coverage_
 
-- [ ] 1.1.3 Integration testing and Git commit
+- [x] 1.1.3 Integration testing and Git commit
   - Create integration tests for configuration system
   - Test with existing codebase integration
   - **Git Commit**: `feat: implement hierarchical configuration system`
   - _Requirements: 10.4, 10.5_
 
 ### 1.2 Project Storage Structure
-- [ ] 1.2.1 Implement project identification system
+- [x] 1.2.1 Implement project identification system
   - Create project ID generation based on absolute paths (using existing getProjectFolderName)
   - Implement standardized directory structure under ~/.gemini/projects/{project-id}/
   - Add project metadata management with creation time and access tracking
