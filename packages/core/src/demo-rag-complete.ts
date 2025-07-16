@@ -93,7 +93,7 @@ async function demoCompleteRAG() {
       console.log('2. 模型回复 → 过滤思考 → 对非思考内容RAG查找 → 提取上下文10行 → 拼接');
       console.log('3. 支持MD文件编码和文件名编码');
       console.log('4. 默认L3级别RAG处理');
-      console.log('5. 持久化存储在 ~/.gemini/Projects/[hash]/rag/');
+      console.log('5. 持久化存储在 ~/.gemini/projects/[project-id]/rag/');
       console.log('6. 重要：思考内容不进行RAG处理，只处理非思考内容');
     } else {
       console.log('\n⚠️  部分功能可能需要调整');

@@ -177,8 +177,11 @@ const generateStatusDescription = (config?: Config): string => {
     let ragStatus: { initialized: boolean; initializing: boolean } | null = null;
     try {
       const contextAgent = config.getContextAgent();
-      if (contextAgent && typeof contextAgent.getRagStatus === 'function') {
-        ragStatus = contextAgent.getRagStatus();
+      if (contextAgent) {
+        ragStatus = {
+          initialized: (contextAgent as any).initialized,
+          initializing: (contextAgent as any).ragInitializing,
+        };
       }
     } catch (error) {
       // Ignore errors accessing contextAgent

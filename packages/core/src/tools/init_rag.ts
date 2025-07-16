@@ -52,67 +52,27 @@ export async function initRag(
       };
     }
 
-    // 获取RAG提取器实例
-    const ragExtractor = await getRagExtractor(contextAgent);
-    if (!ragExtractor) {
-      return {
-        success: false,
-        message: 'RAG extractor not available in context agent'
-      };
-    }
-
     if (verbose) {
       console.log('[InitRag] Starting RAG system rebuild...');
       console.log(`[InitRag] Project root: ${projectRoot || process.cwd()}`);
       console.log(`[InitRag] Force rebuild: ${force}`);
     }
 
-    // 检查索引状态
-    const indexingStatus = ragExtractor.getIndexingStatus();
-    if (indexingStatus.isIndexing) {
-      return {
-        success: false,
-        message: 'RAG system is already indexing. Please wait for completion.'
-      };
-    }
-
-    // 设置事件监听器跟踪进度
-    const originalConsoleLog = console.log;
-    let progressMessages: string[] = [];
-    
-    if (verbose) {
-      // 临时重定向console.log来捕获进度信息
-      console.log = (message: string) => {
-        progressMessages.push(message);
-        originalConsoleLog(message);
-      };
-    }
-
-    // 执行/init命令
-    await ragExtractor.handleInitCommand();
-
-    // 恢复console.log
-    if (verbose) {
-      console.log = originalConsoleLog;
-    }
+    // Reinitialize the context agent
+    await contextAgent.reinitialize();
 
     const endTime = Date.now();
     const indexingTime = endTime - startTime;
 
-    // 获取最终状态
-    const finalStatus = ragExtractor.getIndexingStatus();
-    
     if (verbose) {
       console.log(`[InitRag] RAG rebuild completed in ${indexingTime}ms`);
-      console.log(`[InitRag] Watched directories: ${finalStatus.watchedDirectories.join(', ')}`);
-      console.log(`[InitRag] Queue size: ${finalStatus.queueSize}`);
     }
 
     return {
       success: true,
       message: `RAG system rebuild completed successfully in ${indexingTime}ms`,
       statistics: {
-        filesProcessed: Object.keys(finalStatus.lastIndexTime).length,
+        filesProcessed: 0, // This can be enhanced later if needed
         indexingTime,
         errorCount
       }

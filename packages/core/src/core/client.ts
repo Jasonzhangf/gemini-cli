@@ -203,7 +203,7 @@ export class GeminiClient {
 
   async addHistory(content: Content) {
     if (this.config.getOpenAIMode() && this.hijackAdapter) {
-      this.hijackAdapter.addHistory(content);
+            // this.hijackAdapter.addHistory(content);
     } else {
       this.getChat().addHistory(content);
     }
@@ -225,7 +225,8 @@ export class GeminiClient {
 
   getHistory(): Content[] {
     if (this.config.getOpenAIMode() && this.hijackAdapter) {
-      return this.hijackAdapter.getHistory();
+            // return this.hijackAdapter.getHistory();
+      return [];
     } else {
       return this.getChat().getHistory();
     }
@@ -233,7 +234,7 @@ export class GeminiClient {
 
   setHistory(history: Content[]) {
     if (this.config.getOpenAIMode() && this.hijackAdapter) {
-      this.hijackAdapter.setHistory(history);
+            // this.hijackAdapter.setHistory(history);
     } else {
       this.getChat().setHistory(history);
     }
@@ -241,7 +242,8 @@ export class GeminiClient {
 
   getCurrentModel(): string {
     if (this.config.getOpenAIMode() && this.hijackAdapter) {
-      return this.hijackAdapter.getCurrentModel();
+            // return this.hijackAdapter.getCurrentModel();
+      return this.config.getModel();
     }
     return this.config.getModel();
   }
@@ -327,7 +329,7 @@ export class GeminiClient {
       ];
       
       if (history.length > 0) {
-        this.hijackAdapter.setHistory(history);
+              // this.hijackAdapter.setHistory(history);
       }
       
       // Return a minimal GeminiChat that won't be used for actual communication
@@ -434,7 +436,7 @@ export class GeminiClient {
         console.log('[Gemini Client] Hijacking request to OpenAI adapter');
       }
       
-      yield* this.hijackAdapter.sendMessageStream(request, signal, prompt_id);
+            // yield* this.hijackAdapter.sendMessageStream(request, signal, prompt_id);
       return new Turn(this.getChat(), prompt_id);
     }
 

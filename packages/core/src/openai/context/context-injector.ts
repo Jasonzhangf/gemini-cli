@@ -50,7 +50,7 @@ export class ContextInjector {
   async injectModelResponseContext(response: string, toolCallNames: string[] = []): Promise<void> {
     try {
       const contextAgent = this.config.getContextAgent();
-      if (contextAgent?.isInitialized()) {
+      if (contextAgent && (contextAgent as any).initialized) {
         let contextInput = response;
         if (toolCallNames.length > 0) {
           contextInput += `\nTool calls: ${toolCallNames.join(', ')}`;
@@ -156,6 +156,6 @@ export class ContextInjector {
    */
   isContextAgentAvailable(): boolean {
     const contextAgent = this.config.getContextAgent();
-    return contextAgent && contextAgent.isInitialized();
+    return contextAgent && (contextAgent as any).initialized;
   }
 }

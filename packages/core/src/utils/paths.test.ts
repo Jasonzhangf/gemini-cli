@@ -97,17 +97,17 @@ describe('RAG Storage Directory Examples', () => {
       {
         projectRoot: '/Users/fanzhang/Documents/github/gemini-cli',
         expectedFolder: 'Users-fanzhang-Documents-github-gemini-cli',
-        expectedPath: '/Users/fanzhang/.gemini/Projects/Users-fanzhang-Documents-github-gemini-cli/rag'
+        expectedPath: '/Users/fanzhang/.gemini/projects/Users-fanzhang-Documents-github-gemini-cli/rag'
       },
       {
         projectRoot: '/home/user/workspace/my-project',
         expectedFolder: 'home-user-workspace-my-project',
-        expectedPath: '/home/user/.gemini/Projects/home-user-workspace-my-project/rag'
+        expectedPath: '/home/user/.gemini/projects/home-user-workspace-my-project/rag'
       },
       {
         projectRoot: '/var/www/html/site',
         expectedFolder: 'var-www-html-site',
-        expectedPath: '/var/www/.gemini/Projects/var-www-html-site/rag'
+        expectedPath: '/var/www/.gemini/projects/var-www-html-site/rag'
       }
     ];
 

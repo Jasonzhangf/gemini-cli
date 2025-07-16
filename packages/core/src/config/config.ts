@@ -176,6 +176,7 @@ export interface ConfigParameters {
   noBrowser?: boolean;
   openaiMode?: boolean;
   analysis?: AnalysisSettings;
+  vectorProvider?: 'siliconflow';
 }
 
 export class Config {
@@ -227,6 +228,7 @@ export class Config {
   private toolCallInterceptor: ToolCallInterceptor | null = null;
   private contextAgent: ContextAgent | null = null;
   private readonly analysisSettings: AnalysisSettings;
+  private readonly vectorProvider: 'siliconflow';
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -278,26 +280,7 @@ export class Config {
       timeout: params.analysis?.timeout ?? 30000,
       enableCache: params.analysis?.enableCache ?? true,
     };
-
-    if (this.debugMode) {
-      console.log(`[Gemini Client] Initializing, OpenAI mode: ${this.openaiMode}`);
-    }
-
-    if (params.contextFileName) {
-      setGeminiMdFilename(params.contextFileName);
-    }
-
-    if (this.telemetrySettings.enabled) {
-      initializeTelemetry(this);
-    }
-
-    if (this.getUsageStatisticsEnabled()) {
-      ClearcutLogger.getInstance(this)?.logStartSessionEvent(
-        new StartSessionEvent(this),
-      );
-    } else {
-      console.log('Data collection is disabled.');
-    }
+    this.vectorProvider = params.vectorProvider ?? 'siliconflow';
   }
 
   async initialize(): Promise<void> {
@@ -620,6 +603,21 @@ export class Config {
 
   getNoBrowser(): boolean {
     return this.noBrowser;
+  }
+
+  getVectorProvider(): 'siliconflow' {
+    return this.vectorProvider;
+  }
+
+  getProviderConfig(type: 'siliconflow'): any {
+    if (type === 'siliconflow') {
+      return {
+        modelName: 'BAAI/bge-m3',
+        dimensions: 1024,
+        batchSize: 100
+      };
+    }
+    return {};
   }
 
   async getGitService(): Promise<GitService> {

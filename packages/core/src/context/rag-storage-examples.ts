@@ -30,7 +30,7 @@ const testProjects = [
 
 testProjects.forEach(projectRoot => {
   const folderName = getProjectFolderName(projectRoot);
-  const ragStorageDir = path.join(os.homedir(), '.gemini', 'Projects', folderName, 'rag');
+  const ragStorageDir = path.join(os.homedir(), '.gemini', 'projects', folderName, 'rag');
   
   console.log(`项目路径: ${projectRoot}`);
   console.log(`文件夹名: ${folderName}`);
@@ -41,7 +41,7 @@ testProjects.forEach(projectRoot => {
 console.log('\n=== 存储目录结构示例 ===\n');
 
 const exampleStructure = `
-~/.gemini/Projects/
+~/.gemini/projects/
 ├── Users-fanzhang-Documents-github-gemini-cli/
 │   └── rag/
 │       ├── graph/
@@ -101,7 +101,7 @@ console.log('\n=== 实际使用示例 ===\n');
 // 模拟实际使用场景
 const currentProject = process.cwd();
 const ragFolderName = getProjectFolderName(currentProject);
-const ragStorageDir = path.join(os.homedir(), '.gemini', 'Projects', ragFolderName, 'rag');
+const ragStorageDir = path.join(os.homedir(), '.gemini', 'projects', ragFolderName, 'rag');
 
 console.log(`当前项目: ${currentProject}`);
 console.log(`RAG文件夹名: ${ragFolderName}`);

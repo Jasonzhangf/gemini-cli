@@ -152,16 +152,21 @@ export class ContextAgent {
       // Determine project size for optimal provider configuration
       const stats = this.knowledgeGraph.getStatistics();
       const nodeCount = stats?.totalNodes || 0;
-      let projectSize: 'small' | 'medium' | 'large' = 'medium';
-      
-      if (nodeCount < 500) {
-        projectSize = 'small';
-      } else if (nodeCount > 5000) {
-        projectSize = 'large';
-      }
+      const projectSize = nodeCount > 10000 ? 'large' : (nodeCount > 1000 ? 'medium' : 'small');
 
       // Create provider configuration
       const providerConfig = this.providerFactory.createRecommendedSetup(projectSize);
+      
+      const vectorProviderType = this.config.getVectorProvider();
+      if (providerConfig.vectorProvider.type !== vectorProviderType) {
+        if (this.config.getDebugMode()) {
+          console.log(`[ContextAgent] Overriding default vector provider '${providerConfig.vectorProvider.type}' with '${vectorProviderType}' from config.`);
+        }
+        providerConfig.vectorProvider = {
+          type: vectorProviderType,
+          config: this.config.getProviderConfig(vectorProviderType) || {}
+        };
+      }
       
       if (this.config.getDebugMode()) {
         console.log(`[ContextAgent] Using ${projectSize} project configuration for RAG system`);
@@ -190,8 +195,6 @@ export class ContextAgent {
 
       if (this.config.getDebugMode()) {
         console.log('[ContextAgent] RAG system initialized successfully');
-        const config = await this.contextExtractor.getConfig();
-        console.log(`[ContextAgent] RAG capabilities: ${config.capabilities.join(', ')}`);
       }
 
     } catch (error) {
@@ -218,12 +221,13 @@ export class ContextAgent {
       let indexedCount = 0;
 
       // Index all nodes from knowledge graph
-      graph.forEachNode((nodeId: string, attributes: any) => {
+      graph.forEachNode(async (nodeId: string, attributes: any) => {
         const nodeData = attributes.data;
         if (nodeData && nodeData.name) {
           // Index as document in vector store
           const content = this.extractNodeContentForRAG(nodeData);
           if (content.trim()) {
+            await new Promise(resolve => setTimeout(resolve, 50)); // Add a 50ms delay
             this.vectorProvider!.indexDocument(nodeId, content, {
               type: nodeData.type || 'concept',
               filePath: nodeData.filePath || nodeData.path,
@@ -720,8 +724,6 @@ export class ContextAgent {
       
       if (this.config.getDebugMode()) {
         console.log(`[ContextAgent] RAG extraction completed in ${duration}ms`);
-        console.log(`[ContextAgent] Intent: ${extractedContext.semantic.intent}, Confidence: ${extractedContext.semantic.confidence}`);
-        console.log(`[ContextAgent] Found ${extractedContext.code.relevantFiles.length} files, ${extractedContext.code.relevantFunctions.length} functions`);
       }
 
       // Format the extracted context for model consumption
@@ -1002,16 +1004,73 @@ export class ContextAgent {
   }
 
   /**
-   * Force full re-initialization (equivalent to /init command)
+   * Re-initialize the RAG system and other context providers
    */
   async reinitialize(): Promise<void> {
-    if (this.config.getDebugMode()) {
-      console.log('[ContextAgent] Forcing full re-initialization');
+    if (this.ragInitializing) {
+      console.log('[ContextAgent] Reinitialization skipped: RAG system is already initializing.');
+      return;
     }
-
-    this.initialized = false;
     
-    // Clear RAG system components
+    if (this.config.getDebugMode()) {
+      console.log('[ContextAgent] Re-initializing RAG and context systems...');
+    }
+    
+    // Dispose existing providers to release resources
+    await this.disposeProviders();
+    
+    // Re-initialize RAG
+    await this.initializeRAGSystem();
+    
+    if (this.config.getDebugMode()) {
+      console.log('[ContextAgent] Re-initialization complete.');
+    }
+  }
+
+  /**
+   * Perform semantic analysis on user input
+   */
+  private async performSemanticAnalysis(userInput: string): Promise<SemanticAnalysisResult | null> {
+    if (!this.semanticAnalysisService) {
+      return null;
+    }
+    try {
+      const result = await this.semanticAnalysisService.analyze(userInput);
+      if (this.config.getDebugMode()) {
+        console.log(`[ContextAgent] Semantic analysis result:`, result);
+      }
+      return result;
+    } catch (error) {
+      console.error('[ContextAgent] Semantic analysis failed:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Format semantic analysis result for context injection
+   */
+  private formatSemanticAnalysisForContext(result: SemanticAnalysisResult): string {
+    const lines = [
+      '## 💡 Semantic Analysis',
+      `**Intent**: ${result.intent} (confidence: ${(result.confidence * 100).toFixed(1)}%)`
+    ];
+    if (result.entities.length > 0) {
+      lines.push(`**Entities**: ${result.entities.join(', ')}`);
+    }
+    return lines.join('\n');
+  }
+
+  /**
+   * Filter out <think> tags from user input
+   */
+  private filterThinkingContent(userInput: string): string {
+    return userInput.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  }
+
+  /**
+   * Dispose of any active providers to release resources
+   */
+  private async disposeProviders(): Promise<void> {
     if (this.contextExtractor) {
       try {
         await this.contextExtractor.dispose();
@@ -1035,211 +1094,9 @@ export class ContextAgent {
         console.warn('[ContextAgent] Failed to dispose vector provider:', error);
       }
     }
-    
-    // Reset RAG system references
-    this.contextExtractor = null;
-    this.graphProvider = null;
-    this.vectorProvider = null;
-    
-    // Clear knowledge graph
-    this.knowledgeGraph.clear();
-    
-    // Re-initialize everything
-    await this.initialize();
   }
 
-  /**
-   * Get knowledge graph statistics
-   */
-  getStatistics(): any {
-    if (!this.initialized) {
-      return null;
-    }
-    
-    return this.knowledgeGraph.getStatistics();
-  }
-
-  /**
-   * Check if ContextAgent is initialized
-   */
-  isInitialized(): boolean {
+  public isInitialized(): boolean {
     return this.initialized;
-  }
-
-  /**
-   * Get comprehensive summary of ContextAgent status and capabilities
-   * Used for documentation and debugging
-   */
-  async getSummary(): Promise<{
-    status: string;
-    capabilities: string[];
-    statistics: any;
-    recentActivity: string[];
-  }> {
-    const capabilities = [
-      'Static code analysis and AST parsing',
-      'Knowledge graph construction and storage',
-      'Intelligent context injection for AI prompts',
-      'Project structure analysis and insights',
-      'User intent detection and suggestions',
-      'Real-time file change tracking (Milestone 2)',
-      'Smart keyword extraction and relevance scoring'
-    ];
-
-    // Add RAG system capabilities
-    if (this.contextExtractor) {
-      try {
-        const ragConfig = await this.contextExtractor.getConfig();
-        capabilities.push(`Advanced RAG system: ${ragConfig.provider}`);
-        capabilities.push(...ragConfig.capabilities.map((cap: string) => `RAG: ${cap}`));
-      } catch (error) {
-        capabilities.push('Advanced RAG system: Available but status unknown');
-      }
-    }
-
-    const summary = {
-      status: this.initialized ? 'Initialized and Ready' : 'Not Initialized',
-      capabilities,
-      statistics: this.initialized ? this.knowledgeGraph.getStatistics() : null,
-      recentActivity: [] as string[]
-    };
-
-    if (this.initialized && summary.statistics) {
-      // Add recent activity information
-      summary.recentActivity.push(`Knowledge graph built with ${summary.statistics.totalNodes || 0} nodes`);
-      summary.recentActivity.push(`Project analysis completed in session ${this.sessionId}`);
-      if (summary.statistics.fileNodes && summary.statistics.fileNodes > 0) {
-        summary.recentActivity.push(`Analyzed ${summary.statistics.fileNodes} source files`);
-      }
-      
-      // Add RAG system activity
-      if (this.contextExtractor) {
-        summary.recentActivity.push('Advanced RAG system initialized and ready');
-        if (this.vectorProvider) {
-          try {
-            const vectorStats = await this.vectorProvider.getIndexStats();
-            summary.recentActivity.push(`Vector index: ${vectorStats.documentCount} documents indexed`);
-          } catch (error) {
-            summary.recentActivity.push('Vector index: Status unknown');
-          }
-        }
-      }
-    }
-
-    return summary;
-  }
-
-  /**
-   * Get current project directory
-   */
-  getProjectDir(): string {
-    return this.projectDir;
-  }
-
-  /**
-   * Get session ID
-   */
-  getSessionId(): string {
-    return this.sessionId;
-  }
-
-  /**
-   * Filter out <think> tags and their content from text
-   * @param content The text to filter
-   * @returns Text with <think> tags and their content removed
-   */
-  private filterThinkingContent(content: string): string {
-    // Remove content between <think> and </think> tags (case insensitive, multiline)
-    return content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-  }
-
-  /**
-   * 执行语义分析（基于配置的分析模式）
-   * @param userInput 用户输入文本
-   * @returns 语义分析结果或null（如果未启用或失败）
-   */
-  private async performSemanticAnalysis(userInput: string): Promise<SemanticAnalysisResult | null> {
-    const analysisMode = this.config.getAnalysisMode();
-    
-    if (analysisMode !== AnalysisMode.LLM || !this.semanticAnalysisService) {
-      return null;
-    }
-
-    try {
-      if (this.config.getDebugMode()) {
-        console.log('[ContextAgent] 执行LLM语义分析...');
-      }
-      
-      const result = await this.semanticAnalysisService.analyze(userInput);
-      
-      if (this.config.getDebugMode()) {
-        console.log(`[ContextAgent] 语义分析完成: 发现${result.entities.length}个实体, 意图: ${result.intent}`);
-      }
-      
-      return result;
-    } catch (error) {
-      if (this.config.getDebugMode()) {
-        console.warn('[ContextAgent] 语义分析失败:', error);
-      }
-      return null;
-    }
-  }
-
-  /**
-   * 将语义分析结果集成到上下文中
-   * @param semanticResult 语义分析结果
-   * @returns 格式化的语义上下文字符串
-   */
-  private formatSemanticAnalysisForContext(semanticResult: SemanticAnalysisResult): string {
-    const sections: string[] = [];
-    
-    sections.push('# 🧠 语义分析结果');
-    sections.push(`**用户意图**: ${semanticResult.intent}`);
-    sections.push(`**置信度**: ${(semanticResult.confidence * 100).toFixed(1)}%`);
-    
-    if (semanticResult.entities.length > 0) {
-      sections.push('');
-      sections.push('**识别的实体**:');
-      semanticResult.entities.forEach(entity => {
-        sections.push(`- ${entity}`);
-      });
-    }
-    
-    if (semanticResult.keyConcepts.length > 0) {
-      sections.push('');
-      sections.push('**关键概念**:');
-      semanticResult.keyConcepts.forEach(concept => {
-        sections.push(`- ${concept}`);
-      });
-    }
-    
-    sections.push('');
-    sections.push(`*分析耗时: ${semanticResult.analysisTime}ms*`);
-    
-    return sections.join('\n');
-  }
-
-  /**
-   * Get the status of the RAG system.
-   * @returns An object with the initialized and initializing status.
-   */
-  public getRagStatus(): { initialized: boolean; initializing: boolean } {
-    return {
-      initialized: !!this.contextExtractor,
-      initializing: this.ragInitializing,
-    };
-  }
-
-  /**
-   * Clean up resources
-   * Milestone 1: Empty implementation
-   */
-  async cleanup(): Promise<void> {
-    // No-op for Milestone 1
-    if (this.config.getDebugMode()) {
-      console.log('[ContextAgent] Cleanup called (Milestone 1: no-op mode)');
-    }
-    
-    this.initialized = false;
   }
 }

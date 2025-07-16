@@ -34,8 +34,8 @@ export const initCommand: SlashCommand = {
       const contextAgent = config.getContextAgent();
       await contextAgent.reinitialize();
       
-      // Get statistics
-      const stats = contextAgent.getStatistics();
+      // Get statistics from the knowledge graph
+      const stats = await (contextAgent as any).knowledgeGraph.getStatistics();
       
       let message = '✅ ContextAgent initialization complete!\n\n';
       

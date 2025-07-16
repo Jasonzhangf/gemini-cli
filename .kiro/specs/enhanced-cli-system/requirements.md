@@ -416,20 +416,15 @@ FORCE_JSON_TOOL_CALLS=false
 GEMINI_CONTEXT_AGENT=true
 DEFAULT_GEMINI_MODEL=gemini-2.5-pro
 
-# OpenAI Provider Configuration / OpenAI提供者配置
-OPENAI_API_ENDPOINT=https://api.openai.com/v1
-OPENAI_ACTUAL_MODEL=gpt-4
-OPENAI_API_KEY=${OPENAI_API_KEY}
-OPENAI_PROVIDER=OpenAI
-OPENAI_TEMPERATURE=0.7
-OPENAI_MAX_TOKENS=4096
-OPENAI_TIMEOUT=30000
+
+SILICONFLOW_API_KEY=sk-jlungjxjmgfmibhduhtxojjdvmzkmjwcxqcrwypckztdvvhr
+SILICONFLOW_EMBEDDING_MODEL=BAAI/bge-m3
 
 
 
 # LM Studio Configuration / LM Studio配置
 LMSTUDIO_API_ENDPOINT=http://localhost:1234/v1
-LMSTUDIO_ACTUAL_MODEL=local-model
+LMSTUDIO_ACTUAL_MODEL=unsloth/qwen3-235b-a22b-gguf/qwen3-235b-a22b-ud-q4_k_xl-00001-of-00003.gguf
 LMSTUDIO_API_KEY=lm-studio
 LMSTUDIO_PROVIDER=LMStudio
 
@@ -445,14 +440,6 @@ COMPLEX_TOOLS=write_file,replace
 CONTENT_ISOLATION_ENABLED=true
 CONTENT_START_MARKER=<*#*#CONTENT#*#*>
 CONTENT_END_MARKER=</*#*#CONTENT#*#*>
-
-# GraphRAG Configuration / 图RAG配置
-GRAPH_RAG_ENABLED=true
-GRAPH_RAG_MODE=neo4j
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=${NEO4J_PASSWORD}
-NEO4J_DATABASE=gemini
 
 # Fallback Configuration / 回退配置
 GRAPH_FALLBACK_ENABLED=true
@@ -482,33 +469,10 @@ GEMINI_CONTEXT_AGENT=true
 DEFAULT_GEMINI_MODEL=gemini-2.5-pro
 GEMINI_API_KEY=${GEMINI_API_KEY}
 
-# Global OpenAI Configuration / 全局OpenAI配置
-OPENAI_API_KEY=${OPENAI_API_KEY}
-OPENAI_ORG_ID=${OPENAI_ORG_ID}
-OPENAI_DEFAULT_MODEL=gpt-4
-OPENAI_DEFAULT_TEMPERATURE=0.7
-OPENAI_DEFAULT_MAX_TOKENS=4096
-
-# Global Azure Configuration / 全局Azure配置
-AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
-AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
-AZURE_OPENAI_API_VERSION=2024-02-15-preview
-
-# Global Anthropic Configuration / 全局Anthropic配置
-ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-ANTHROPIC_DEFAULT_MODEL=claude-3-sonnet-20240229
-
 # Global Tool Settings / 全局工具设置
 GLOBAL_DANGEROUS_TOOLS=run_shell_command,write_file,replace
 GLOBAL_COMPLEX_TOOLS=write_file,replace
 GLOBAL_CONTENT_ISOLATION=true
-
-# Global GraphRAG Settings / 全局图RAG设置
-GLOBAL_GRAPH_RAG_ENABLED=true
-GLOBAL_GRAPH_RAG_PROVIDER=neo4j
-GLOBAL_NEO4J_URI=bolt://localhost:7687
-GLOBAL_NEO4J_USERNAME=neo4j
-GLOBAL_NEO4J_PASSWORD=${NEO4J_PASSWORD}
 
 # Global Performance Settings / 全局性能设置
 GLOBAL_GRAPH_BATCH_SIZE=1000
@@ -527,7 +491,6 @@ GLOBAL_ENABLE_TELEMETRY=false
 #### Provider Priority Configuration / 提供者优先级配置
 
 **Supported Providers / 支持的提供者:**
-- `OPENAI` - Official OpenAI API
 - `LMSTUDIO` - Local LM Studio instance
 - `AIPROXY` - AI Studio Proxy for Gemini
 - `OLLAMA` - Local Ollama instance

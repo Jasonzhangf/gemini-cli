@@ -15,8 +15,7 @@ import {
 // Import concrete implementations
 import { LocalKnowledgeGraphProvider } from './graph/localKnowledgeGraph.js';
 import { MemoryKnowledgeGraphProvider } from './graph/memoryKnowledgeGraph.js';
-import { TFIDFVectorProvider } from './vector/tfidfVectorProvider.js';
-import { LocalEmbeddingVectorProvider } from './vector/localEmbeddingProvider.js';
+import { SiliconFlowEmbeddingProvider } from './vector/siliconFlowEmbeddingProvider.js';
 import { RAGContextExtractor } from './extractor/ragContextExtractor.js';
 import { RuleBasedContextExtractor } from './extractor/ruleBasedExtractor.js';
 import { HybridContextExtractor } from './extractor/hybridExtractor.js';
@@ -53,8 +52,7 @@ export class ContextProviderFactory implements IContextProviderFactory {
     this.graphProviders.set('memory', MemoryKnowledgeGraphProvider);
     
     // Vector providers
-    this.vectorProviders.set('tfidf', TFIDFVectorProvider);
-    this.vectorProviders.set('local', LocalEmbeddingVectorProvider);
+    this.vectorProviders.set('siliconflow', SiliconFlowEmbeddingProvider);
     
     // Extractor providers
     this.extractorProviders.set('rag', RAGContextExtractor);
@@ -163,8 +161,12 @@ export class ContextProviderFactory implements IContextProviderFactory {
             config: { maxNodes: 1000 }
           },
           vectorProvider: {
-            type: 'tfidf',
-            config: { maxFeatures: 500 }
+            type: 'siliconflow',
+            config: {
+              modelName: 'BAAI/bge-m3',
+              dimensions: 1024,
+              batchSize: 20
+            }
           },
           extractorProvider: {
             type: 'rule_based',
@@ -183,10 +185,10 @@ export class ContextProviderFactory implements IContextProviderFactory {
             }
           },
           vectorProvider: {
-            type: 'local',
-            config: { 
-              modelName: 'all-MiniLM-L6-v2',
-              dimensions: 384,
+            type: 'siliconflow',
+            config: {
+              modelName: 'BAAI/bge-m3',
+              dimensions: 1024,
               batchSize: 100
             }
           },
@@ -211,10 +213,11 @@ export class ContextProviderFactory implements IContextProviderFactory {
             }
           },
           vectorProvider: {
-            type: 'tfidf',
-            config: { 
-              maxFeatures: 2000,
-              minDocFreq: 2
+            type: 'siliconflow',
+            config: {
+              modelName: 'BAAI/bge-m3',
+              dimensions: 1024,
+              batchSize: 100
             }
           },
           extractorProvider: {
@@ -245,13 +248,6 @@ export class ContextProviderFactory implements IContextProviderFactory {
 
     if (!this.extractorProviders.has(config.extractorProvider.type)) {
       errors.push(`Unknown extractor provider: ${config.extractorProvider.type}`);
-    }
-
-    // Validate hybrid extractor dependencies
-    if (config.extractorProvider.type === 'hybrid') {
-      if (config.vectorProvider.type === 'tfidf' && config.graphProvider.type === 'memory') {
-        errors.push('Hybrid extractor requires more capable providers for optimal performance');
-      }
     }
 
     return {

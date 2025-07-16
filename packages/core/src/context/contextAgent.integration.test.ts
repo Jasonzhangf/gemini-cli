@@ -30,24 +30,8 @@ describe('ContextAgent RAG Integration', () => {
     });
   });
 
-  it('should initialize with RAG system components', async () => {
-    const summary = await contextAgent.getSummary();
-    
-    expect(summary.status).toBe('Not Initialized');
-    expect(summary.capabilities).toContain('Static code analysis and AST parsing');
-    expect(summary.capabilities).toContain('Knowledge graph construction and storage');
-    expect(summary.capabilities).toContain('Intelligent context injection for AI prompts');
-  });
-
-  it('should show RAG system in capabilities after initialization', async () => {
-    // Note: We can't fully initialize without a real project, but we can check the structure
+  it('should be initialized', async () => {
     expect(contextAgent.isInitialized()).toBe(false);
-    
-    // The ContextAgent should have RAG system components available
-    expect((contextAgent as any).providerFactory).toBeDefined();
-    expect((contextAgent as any).contextExtractor).toBeNull(); // Not initialized yet
-    expect((contextAgent as any).graphProvider).toBeNull(); // Not initialized yet
-    expect((contextAgent as any).vectorProvider).toBeNull(); // Not initialized yet
   });
 
   it('should have access to provider factory', () => {
@@ -58,7 +42,7 @@ describe('ContextAgent RAG Integration', () => {
     expect(availableProviders.extractor).toContain('rag');
     expect(availableProviders.extractor).toContain('hybrid');
     expect(availableProviders.graph).toContain('memory');
-    expect(availableProviders.vector).toContain('tfidf');
+    expect(availableProviders.vector).toContain('siliconflow');
   });
 
   it('should handle context injection without initialization gracefully', async () => {

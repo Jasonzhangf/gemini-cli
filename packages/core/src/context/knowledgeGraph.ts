@@ -6,7 +6,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { DirectedGraph } from 'graphology';
+import { DirectedGraph, MultiDirectedGraph } from 'graphology';
 import { CodeNode, CodeRelation } from './staticAnalyzer.js';
 import { ProjectStorageManager } from '../config/projectStorageManager.js';
 
@@ -30,7 +30,7 @@ export interface KnowledgeGraphData {
  * Uses graphology to store and manage the project's code graph
  */
 export class KnowledgeGraph {
-  private graph: DirectedGraph;
+  private graph: MultiDirectedGraph;
   private projectDir: string;
   private graphPath: string;
   private storageManager: ProjectStorageManager;
@@ -40,9 +40,8 @@ export class KnowledgeGraph {
     this.storageManager = new ProjectStorageManager(projectDir);
     const structure = this.storageManager.getStorageStructure();
     this.graphPath = path.join(structure.knowledgeGraphStorage, 'graphology', 'context_graph.json');
-    this.graph = new DirectedGraph({
-      allowSelfLoops: false,
-      multi: true  // 允许多边以支持不同类型的关系
+    this.graph = new MultiDirectedGraph({
+      allowSelfLoops: false
     });
   }
 

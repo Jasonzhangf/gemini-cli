@@ -283,7 +283,7 @@ export interface ContextProviderConfig {
     config: Record<string, any>;
   };
   vectorProvider: {
-    type: 'tfidf' | 'embedding' | 'openai' | 'local' | 'custom';
+    type: 'embedding' | 'openai' | 'local' | 'custom' | 'siliconflow';
     config: Record<string, any>;
   };
   extractorProvider: {

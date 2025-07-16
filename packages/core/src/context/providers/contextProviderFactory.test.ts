@@ -29,8 +29,7 @@ describe('ContextProviderFactory', () => {
       
       expect(providers.graph).toContain('local');
       expect(providers.graph).toContain('memory');
-      expect(providers.vector).toContain('tfidf');
-      expect(providers.vector).toContain('local');
+      expect(providers.vector).toContain('siliconflow');
       expect(providers.extractor).toContain('rag');
       expect(providers.extractor).toContain('rule_based');
       expect(providers.extractor).toContain('hybrid');
@@ -43,8 +42,8 @@ describe('ContextProviderFactory', () => {
       
       expect(config.graphProvider.type).toBe('memory');
       expect(config.graphProvider.config.maxNodes).toBe(1000);
-      expect(config.vectorProvider.type).toBe('tfidf');
-      expect(config.vectorProvider.config.maxFeatures).toBe(500);
+      expect(config.vectorProvider.type).toBe('siliconflow');
+      expect(config.vectorProvider.config.modelName).toBe('BAAI/bge-m3');
       expect(config.extractorProvider.type).toBe('rule_based');
     });
 
@@ -54,8 +53,8 @@ describe('ContextProviderFactory', () => {
       expect(config.graphProvider.type).toBe('local');
       expect(config.graphProvider.config.persistToDisk).toBe(true);
       expect(config.graphProvider.config.maxNodes).toBe(10000);
-      expect(config.vectorProvider.type).toBe('tfidf');
-      expect(config.vectorProvider.config.maxFeatures).toBe(2000);
+      expect(config.vectorProvider.type).toBe('siliconflow');
+      expect(config.vectorProvider.config.modelName).toBe('BAAI/bge-m3');
       expect(config.extractorProvider.type).toBe('rag');
     });
 
@@ -66,7 +65,7 @@ describe('ContextProviderFactory', () => {
       expect(config.graphProvider.config.persistToDisk).toBe(true);
       expect(config.graphProvider.config.maxNodes).toBe(50000);
       expect(config.graphProvider.config.compressionEnabled).toBe(true);
-      expect(config.vectorProvider.type).toBe('local');
+      expect(config.vectorProvider.type).toBe('siliconflow');
       expect(config.extractorProvider.type).toBe('hybrid');
     });
   });
@@ -75,7 +74,7 @@ describe('ContextProviderFactory', () => {
     it('should validate valid configuration', () => {
       const config: ContextProviderConfig = {
         graphProvider: { type: 'memory', config: {} },
-        vectorProvider: { type: 'tfidf', config: {} },
+        vectorProvider: { type: 'siliconflow', config: {} },
         extractorProvider: { type: 'rag', config: {} }
       };
 
@@ -87,7 +86,7 @@ describe('ContextProviderFactory', () => {
     it('should detect invalid graph provider', () => {
       const config: ContextProviderConfig = {
         graphProvider: { type: 'invalid' as any, config: {} },
-        vectorProvider: { type: 'tfidf', config: {} },
+        vectorProvider: { type: 'siliconflow', config: {} },
         extractorProvider: { type: 'rag', config: {} }
       };
 
@@ -111,7 +110,7 @@ describe('ContextProviderFactory', () => {
     it('should detect invalid extractor provider', () => {
       const config: ContextProviderConfig = {
         graphProvider: { type: 'memory', config: {} },
-        vectorProvider: { type: 'tfidf', config: {} },
+        vectorProvider: { type: 'siliconflow', config: {} },
         extractorProvider: { type: 'invalid' as any, config: {} }
       };
 
@@ -123,7 +122,7 @@ describe('ContextProviderFactory', () => {
     it('should warn about hybrid extractor with basic providers', () => {
       const config: ContextProviderConfig = {
         graphProvider: { type: 'memory', config: {} },
-        vectorProvider: { type: 'tfidf', config: {} },
+        vectorProvider: { type: 'siliconflow', config: {} },
         extractorProvider: { type: 'hybrid', config: {} }
       };
 
@@ -165,14 +164,14 @@ describe('ContextProviderFactory', () => {
   });
 
   describe('createVectorProvider', () => {
-    it('should create TFIDF vector provider', () => {
+    it('should create SiliconFlow vector provider', () => {
       const provider = factory.createVectorProvider({
-        type: 'tfidf',
-        config: { maxFeatures: 1000 }
+        type: 'siliconflow',
+        config: { modelName: 'BAAI/bge-m3' }
       });
 
       expect(provider).toBeDefined();
-      expect(provider.constructor.name).toBe('TFIDFVectorProvider');
+      expect(provider.constructor.name).toBe('SiliconFlowEmbeddingProvider');
     });
 
     it('should create local embedding provider', () => {
