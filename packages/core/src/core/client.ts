@@ -445,6 +445,11 @@ export class GeminiClient {
     const turn = new Turn(this.getChat(), prompt_id);
     const resultStream = turn.run(request, signal);
     for await (const event of resultStream) {
+      // Check abort signal continuously during stream processing
+      if (signal?.aborted) {
+        yield { type: GeminiEventType.UserCancelled };
+        return turn;
+      }
       yield event;
     }
     if (!turn.pendingToolCalls.length && signal && !signal.aborted) {
@@ -461,7 +466,7 @@ export class GeminiClient {
         this,
         signal,
       );
-      if (nextSpeakerCheck?.next_speaker === 'model') {
+      if (nextSpeakerCheck?.next_speaker === 'model' && !signal?.aborted) {
         const nextRequest = [{ text: 'Please continue.' }];
         // This recursive call's events will be yielded out, but the final
         // turn object will be from the top-level call.

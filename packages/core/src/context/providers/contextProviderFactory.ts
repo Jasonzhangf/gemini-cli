@@ -13,12 +13,8 @@ import {
 } from '../interfaces/contextProviders.js';
 
 // Import concrete implementations
-import { LocalKnowledgeGraphProvider } from './graph/localKnowledgeGraph.js';
-import { MemoryKnowledgeGraphProvider } from './graph/memoryKnowledgeGraph.js';
 import { SiliconFlowEmbeddingProvider } from './vector/siliconFlowEmbeddingProvider.js';
 import { RAGContextExtractor } from './extractor/ragContextExtractor.js';
-import { RuleBasedContextExtractor } from './extractor/ruleBasedExtractor.js';
-import { HybridContextExtractor } from './extractor/hybridExtractor.js';
 
 /**
  * Factory for creating pluggable context providers
@@ -28,7 +24,6 @@ export class ContextProviderFactory implements IContextProviderFactory {
   private static instance: ContextProviderFactory;
   
   // Registry of available provider types
-  private graphProviders = new Map<string, new (...args: any[]) => IKnowledgeGraphProvider>();
   private vectorProviders = new Map<string, new (...args: any[]) => IVectorSearchProvider>();
   private extractorProviders = new Map<string, new (...args: any[]) => IContextExtractor>();
 
@@ -47,25 +42,13 @@ export class ContextProviderFactory implements IContextProviderFactory {
    * Register default provider implementations
    */
   private registerDefaultProviders(): void {
-    // Graph providers
-    this.graphProviders.set('local', LocalKnowledgeGraphProvider);
-    this.graphProviders.set('memory', MemoryKnowledgeGraphProvider);
-    
     // Vector providers
     this.vectorProviders.set('siliconflow', SiliconFlowEmbeddingProvider);
     
-    // Extractor providers
+    // Extractor providers - only keep RAG, remove simple rule-based and hybrid
     this.extractorProviders.set('rag', RAGContextExtractor);
-    this.extractorProviders.set('rule_based', RuleBasedContextExtractor);
-    this.extractorProviders.set('hybrid', HybridContextExtractor);
   }
 
-  /**
-   * Register a custom graph provider
-   */
-  registerGraphProvider(type: string, providerClass: new (...args: any[]) => IKnowledgeGraphProvider): void {
-    this.graphProviders.set(type, providerClass);
-  }
 
   /**
    * Register a custom vector provider
@@ -81,24 +64,6 @@ export class ContextProviderFactory implements IContextProviderFactory {
     this.extractorProviders.set(type, providerClass);
   }
 
-  /**
-   * Create knowledge graph provider
-   */
-  createGraphProvider(config: ContextProviderConfig['graphProvider'], projectRoot?: string): IKnowledgeGraphProvider {
-    const ProviderClass = this.graphProviders.get(config.type);
-    
-    if (!ProviderClass) {
-      throw new Error(`Unknown graph provider type: ${config.type}`);
-    }
-
-    // Add project root to local graph provider config
-    const enhancedConfig = config.type === 'local' ? {
-      ...config.config,
-      projectRoot: projectRoot || process.cwd()
-    } : config.config;
-
-    return new ProviderClass(enhancedConfig);
-  }
 
   /**
    * Create vector search provider
@@ -128,36 +93,37 @@ export class ContextProviderFactory implements IContextProviderFactory {
   }
 
   /**
-   * Create context extractor
+   * Create context extractor - simplified to only support RAG
    */
   createContextExtractor(
     config: ContextProviderConfig['extractorProvider'],
-    graphProvider: IKnowledgeGraphProvider,
     vectorProvider: IVectorSearchProvider,
     projectRoot?: string
   ): IContextExtractor {
-    const ExtractorClass = this.extractorProviders.get(config.type);
+    // Only RAG extractor is supported
+    if (config.type !== 'rag') {
+      throw new Error(`Only RAG extractor is supported, got: ${config.type}`);
+    }
     
+    const ExtractorClass = this.extractorProviders.get('rag');
     if (!ExtractorClass) {
-      throw new Error(`Unknown extractor provider type: ${config.type}`);
+      throw new Error('RAG extractor not found');
     }
 
-    // Add project root to RAG extractor config
-    const enhancedConfig = config.type === 'rag' ? {
+    const enhancedConfig = {
       ...config.config,
       projectRoot: projectRoot || process.cwd(),
       debugMode: true // Enable debug mode for RAG
-    } : config.config;
+    };
 
-    return new ExtractorClass(enhancedConfig, graphProvider, vectorProvider);
+    return new ExtractorClass(enhancedConfig, null, vectorProvider);
   }
 
   /**
    * Get available provider types
    */
-  getAvailableProviders(): { graph: string[]; vector: string[]; extractor: string[] } {
+  getAvailableProviders(): { vector: string[]; extractor: string[] } {
     return {
-      graph: Array.from(this.graphProviders.keys()),
       vector: Array.from(this.vectorProviders.keys()),
       extractor: Array.from(this.extractorProviders.keys())
     };
@@ -167,82 +133,27 @@ export class ContextProviderFactory implements IContextProviderFactory {
    * Create a complete provider setup with recommended defaults
    */
   createRecommendedSetup(projectSize: 'small' | 'medium' | 'large' = 'medium'): ContextProviderConfig {
-    switch (projectSize) {
-      case 'small':
-        return {
-          graphProvider: {
-            type: 'memory',
-            config: { maxNodes: 1000 }
-          },
-          vectorProvider: {
-            type: 'siliconflow',
-            config: {
-              modelName: 'BAAI/bge-m3',
-              dimensions: 1024,
-              batchSize: 20
-            }
-          },
-          extractorProvider: {
-            type: 'rule_based',
-            config: { maxResults: 5 }
-          }
-        };
+    const baseVectorConfig = {
+      type: 'siliconflow' as const,
+      config: {
+        modelName: 'BAAI/bge-m3',
+        dimensions: 1024,
+        batchSize: projectSize === 'small' ? 20 : 100
+      }
+    };
 
-      case 'large':
-        return {
-          graphProvider: {
-            type: 'local',
-            config: { 
-              persistToDisk: true,
-              maxNodes: 50000,
-              compressionEnabled: true
-            }
-          },
-          vectorProvider: {
-            type: 'siliconflow',
-            config: {
-              modelName: 'BAAI/bge-m3',
-              dimensions: 1024,
-              batchSize: 100
-            }
-          },
-          extractorProvider: {
-            type: 'hybrid',
-            config: { 
-              ragWeight: 0.7,
-              ruleWeight: 0.3,
-              maxResults: 10
-            }
-          }
-        };
+    const baseExtractorConfig = {
+      type: 'rag' as const,
+      config: { 
+        maxResults: projectSize === 'small' ? 5 : projectSize === 'large' ? 10 : 8,
+        threshold: 0.1
+      }
+    };
 
-      case 'medium':
-      default:
-        return {
-          graphProvider: {
-            type: 'local',
-            config: { 
-              persistToDisk: true,
-              maxNodes: 10000
-            }
-          },
-          vectorProvider: {
-            type: 'siliconflow',
-            config: {
-              modelName: 'BAAI/bge-m3',
-              dimensions: 1024,
-              batchSize: 100
-            }
-          },
-          extractorProvider: {
-            type: 'rag',
-            config: { 
-              maxResults: 8,
-              threshold: 0.1
-            }
-          }
-        };
-    }
+    return {
+      vectorProvider: baseVectorConfig,
+      extractorProvider: baseExtractorConfig
+    };
   }
 
   /**
@@ -252,10 +163,6 @@ export class ContextProviderFactory implements IContextProviderFactory {
     const errors: string[] = [];
 
     // Check if provider types exist
-    if (!this.graphProviders.has(config.graphProvider.type)) {
-      errors.push(`Unknown graph provider: ${config.graphProvider.type}`);
-    }
-
     if (!this.vectorProviders.has(config.vectorProvider.type)) {
       errors.push(`Unknown vector provider: ${config.vectorProvider.type}`);
     }

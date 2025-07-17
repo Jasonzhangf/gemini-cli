@@ -358,32 +358,35 @@ export class StandardContextIntegrator {
    * 将标准化上下文格式化为模型可读的字符串
    */
   formatStandardContextForModel(context: StandardContext, saveDebug: boolean = true): string {
+    // RAG content removed from system prompts - only basic context formatting
     const sections: string[] = [];
 
-    // 1. 系统上下文
-    sections.push(this.formatSystemContext(context.system));
+    // 1. 系统上下文 (minimal)
+    if (context.system.projectInfo.name) {
+      sections.push(`# 📂 项目信息\n**项目名称**: ${context.system.projectInfo.name}`);
+    }
 
-    // 2. 静态上下文
-    sections.push(this.formatStaticContext(context.static));
+    // 2. 静态上下文 (minimal)
+    if (context.static.globalrules || context.static.localrules) {
+      sections.push(`# 📋 项目规则\n*基本项目规则和配置*`);
+    }
 
-    // 3. 动态上下文
-    sections.push(this.formatDynamicContext(context.dynamic));
+    // 3. 动态上下文移除 - 现在由contextAgent处理
+    // Dynamic context is now handled entirely by contextAgent through separate injection
 
-    // 4. 任务上下文
-    sections.push(this.formatTaskContext(context.task));
+    // 4. 任务上下文 (保留)
+    if (context.task.todos.length > 0) {
+      sections.push(this.formatTaskContext(context.task));
+    }
 
-    const formattedContext = sections.join('\n\n' + '▀'.repeat(120) + '\n\n');
+    if (sections.length === 0) {
+      return '# 📋 基础上下文\n*系统使用简化上下文模式*';
+    }
 
-    // Save memory context in debug mode only once per session
-    if (saveDebug && this.config?.getDebugMode() && !this.debugRecordedForSession) {
-      this.saveDebugMemoryContext(context).catch(error => {
-        console.error('[StandardContextIntegrator] Failed to save debug memory context:', error);
-      });
-      this.debugRecordedForSession = true;
-      
-      if (this.config.getDebugMode()) {
-        console.log('[StandardContextIntegrator] Debug memory context recorded for session (one-time)');
-      }
+    const formattedContext = sections.join('\n\n');
+
+    if (saveDebug && this.config?.getDebugMode()) {
+      console.log('[StandardContextIntegrator] RAG removed from system prompts - using simplified context');
     }
 
     return formattedContext;

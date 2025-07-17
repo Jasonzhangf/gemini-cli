@@ -11,7 +11,7 @@ import { KnowledgeGraph } from './knowledgeGraph.js';
 import { LayeredContextManager } from './layeredContextManager.js';
 import { SemanticAnalysisService, AnalysisResult as SemanticAnalysisResult } from '../analysis/semanticAnalysisService.js';
 import { ContextProviderFactory } from './providers/contextProviderFactory.js';
-import { IContextExtractor, IKnowledgeGraphProvider, IVectorSearchProvider } from './interfaces/contextProviders.js';
+import { IContextExtractor, IVectorSearchProvider } from './interfaces/contextProviders.js';
 
 export interface ContextAgentOptions {
   config: Config;
@@ -39,9 +39,8 @@ export class ContextAgent {
   // Milestone 4 components
   private layeredContextManager: LayeredContextManager;
   
-  // RAG system components
+  // RAG system components - simplified architecture
   private contextExtractor: IContextExtractor | null = null;
-  private graphProvider: IKnowledgeGraphProvider | null = null;
   private vectorProvider: IVectorSearchProvider | null = null;
   private providerFactory: ContextProviderFactory;
   private ragInitializing: boolean = false;
@@ -170,22 +169,19 @@ export class ContextAgent {
       
       if (this.config.getDebugMode()) {
         console.log(`[ContextAgent] Using ${projectSize} project configuration for RAG system`);
-        console.log(`[ContextAgent] Extractor: ${providerConfig.extractorProvider.type}, Graph: ${providerConfig.graphProvider.type}, Vector: ${providerConfig.vectorProvider.type}`);
+        console.log(`[ContextAgent] Extractor: ${providerConfig.extractorProvider.type}, Vector: ${providerConfig.vectorProvider.type}`);
       }
 
-      // Create providers
-      this.graphProvider = this.providerFactory.createGraphProvider(providerConfig.graphProvider, this.projectDir);
+      // Create providers - simplified architecture without graph provider
       this.vectorProvider = this.providerFactory.createVectorProvider(providerConfig.vectorProvider);
       this.contextExtractor = this.providerFactory.createContextExtractor(
         providerConfig.extractorProvider,
-        this.graphProvider,
         this.vectorProvider,
         this.projectDir // Pass project root for RAG storage
       );
 
       // Initialize providers
       await Promise.all([
-        this.graphProvider.initialize(),
         this.vectorProvider.initialize(),
         this.contextExtractor.initialize()
       ]);
@@ -203,7 +199,6 @@ export class ContextAgent {
       console.error('[ContextAgent] Failed to initialize RAG system:', error);
       // Don't fail the entire initialization - fall back to layered context
       this.contextExtractor = null;
-      this.graphProvider = null;
       this.vectorProvider = null;
     } finally {
       this.ragInitializing = false;
@@ -214,7 +209,7 @@ export class ContextAgent {
    * Index existing knowledge graph data into RAG system
    */
   private async indexKnowledgeGraphData(): Promise<void> {
-    if (!this.graphProvider || !this.vectorProvider) {
+    if (!this.vectorProvider) {
       return;
     }
 
@@ -248,21 +243,6 @@ export class ContextAgent {
                 language: nodeData.language
               });
 
-              // Add to graph provider
-              await this.graphProvider!.upsertNode({
-                id: nodeId,
-                type: nodeData.type || 'concept',
-                name: nodeData.name,
-              content,
-              metadata: {
-                filePath: nodeData.filePath || nodeData.path,
-                lineStart: nodeData.startLine,
-                lineEnd: nodeData.endLine,
-                language: nodeData.language
-              },
-              relationships: []
-            });
-
               indexedCount++;
             }
           }
@@ -274,37 +254,8 @@ export class ContextAgent {
         }
       }
 
-      // Index relationships asynchronously
-      const edges: Array<{ edgeId: string; attributes: any; source: string; target: string }> = [];
-      graph.forEachEdge((edgeId: string, attributes: any, source: string, target: string) => {
-        edges.push({ edgeId, attributes, source, target });
-      });
-
-      for (const { edgeId, attributes, source, target } of edges) {
-        const edgeData = attributes.data;
-        if (edgeData && this.graphProvider) {
-          // Add relationships between nodes
-          const sourceNode = graph.getNodeAttributes(source)?.data;
-          const targetNode = graph.getNodeAttributes(target)?.data;
-          
-          if (sourceNode && targetNode) {
-            await this.graphProvider.upsertNode({
-              id: source,
-              type: sourceNode.type || 'concept',
-              name: sourceNode.name,
-              content: this.extractNodeContentForRAG(sourceNode),
-              metadata: {
-                filePath: sourceNode.filePath || sourceNode.path
-              },
-              relationships: [{
-                targetId: target,
-                type: edgeData.type || 'relates_to',
-                weight: edgeData.weight || 1.0
-              }]
-            });
-          }
-        }
-      }
+      // Note: Relationships are now handled by the existing knowledge graph structure
+      // The simplified architecture relies on vector similarity rather than explicit graph relationships
 
       if (this.config.getDebugMode()) {
         console.log(`[ContextAgent] Indexed ${indexedCount} nodes into RAG system`);
@@ -1105,14 +1056,6 @@ export class ContextAgent {
         await this.contextExtractor.dispose();
       } catch (error) {
         console.warn('[ContextAgent] Failed to dispose context extractor:', error);
-      }
-    }
-    
-    if (this.graphProvider) {
-      try {
-        await this.graphProvider.dispose();
-      } catch (error) {
-        console.warn('[ContextAgent] Failed to dispose graph provider:', error);
       }
     }
     

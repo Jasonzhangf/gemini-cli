@@ -15,10 +15,12 @@
  */
 
 import { EventEmitter } from 'events';
+import { UnifiedSystemOrchestrator, SystemModule } from './UnifiedSystemOrchestrator.js';
 import { UnifiedContextManager } from '../context/UnifiedContextManager.js';
 import { UnifiedToolSystem, ToolCallFormat } from '../tools/UnifiedToolSystem.js';
 import { ContextualMessage, ContextType } from '../context/ContextHistorySeparator.js';
 import { SystemPromptCleaner } from '../context/SystemPromptCleaner.js';
+import { Config } from '../config/config.js';
 
 /**
  * System state
@@ -43,27 +45,62 @@ export interface ProcessingResult {
 
 /**
  * SystemCoordinator class
- * Coordinates context management and tool execution
+ * Coordinates context management and tool execution through UnifiedSystemOrchestrator
  */
 export class SystemCoordinator extends EventEmitter {
+  private orchestrator: UnifiedSystemOrchestrator;
   private contextManager: UnifiedContextManager;
   private toolSystem: UnifiedToolSystem;
   private conversation: ContextualMessage[] = [];
   private projectId: string;
   private isProcessing: boolean = false;
   private shouldStop: boolean = false;
+  private config: Config;
   
-  constructor(projectId: string) {
+  constructor(projectId: string, config: Config) {
     super();
     this.projectId = projectId;
+    this.config = config;
+    
+    // Initialize the unified orchestrator as the single entry point
+    this.orchestrator = new UnifiedSystemOrchestrator(config);
+    
+    // Initialize legacy systems for backward compatibility
     this.contextManager = new UnifiedContextManager(projectId);
     this.toolSystem = new UnifiedToolSystem(projectId);
     
-    // Disable RAG explanations by default
+    // Disable RAG explanations by default (now handled by orchestrator)
     this.contextManager.setIncludeRagExplanations(false);
     
     // Set up event forwarding
     this.setupEventForwarding();
+  }
+  
+  /**
+   * Initialize the system coordinator
+   * @param projectDir Project directory
+   * @param sessionId Session ID
+   */
+  async initialize(projectDir: string, sessionId: string): Promise<void> {
+    try {
+      // Initialize the unified orchestrator
+      await this.orchestrator.initialize(projectDir, sessionId);
+      
+      // Get initialized subsystems from orchestrator
+      const contextAgent = this.orchestrator.getContextAgent();
+      const toolSystem = this.orchestrator.getToolSystem();
+      
+      // Update references if available
+      if (toolSystem) {
+        this.toolSystem = toolSystem;
+      }
+      
+      this.emit('initialized', { projectDir, sessionId });
+    } catch (error) {
+      console.error('[SystemCoordinator] 初始化失败:', error);
+      this.emit('initializationFailed', { error });
+      throw error;
+    }
   }
   
   /**
@@ -89,18 +126,43 @@ export class SystemCoordinator extends EventEmitter {
       
       this.conversation.push(userMessage);
       
-      // Process input with context manager
-      const contextResult = await this.contextManager.processInput(input, this.conversation);
+      // Use unified orchestrator to generate complete system context
+      let systemContext = '';
+      let userContext = input;
       
-      // Update conversation with processed history
-      this.conversation = contextResult.history;
+      if (this.orchestrator.isSystemInitialized()) {
+        try {
+          // Generate unified system context using the orchestrator
+          systemContext = await this.orchestrator.generateSystemContext(input, this.conversation);
+          
+          if (this.config.getDebugMode()) {
+            console.log('[SystemCoordinator] 使用统一编排器生成系统上下文');
+          }
+        } catch (error) {
+          console.warn('[SystemCoordinator] 统一编排器失败，回退到传统上下文管理:', error);
+          
+          // Fallback to legacy context manager
+          const contextResult = await this.contextManager.processInput(input, this.conversation);
+          systemContext = contextResult.systemContext;
+          userContext = contextResult.userContext;
+          this.conversation = contextResult.history;
+        }
+      } else {
+        console.warn('[SystemCoordinator] 统一编排器未初始化，使用传统上下文管理');
+        
+        // Fallback to legacy context manager
+        const contextResult = await this.contextManager.processInput(input, this.conversation);
+        systemContext = contextResult.systemContext;
+        userContext = contextResult.userContext;
+        this.conversation = contextResult.history;
+      }
       
       // Get current system state
       const state = this.getSystemState();
       
       return {
-        systemContext: contextResult.systemContext,
-        userContext: contextResult.userContext,
+        systemContext,
+        userContext,
         toolCalls: [],
         toolResults: [],
         state,
@@ -230,9 +292,26 @@ export class SystemCoordinator extends EventEmitter {
    * Set up event forwarding from child components
    */
   private setupEventForwarding(): void {
-    // Forward context manager events
-    this.contextManager.on('contextGenerated', (data) => {
+    // Forward orchestrator events
+    this.orchestrator.on('initialized', (data) => {
+      this.emit('orchestratorInitialized', data);
+    });
+    
+    this.orchestrator.on('contextGenerated', (data) => {
       this.emit('contextGenerated', data);
+    });
+    
+    this.orchestrator.on('moduleStatusChanged', (data) => {
+      this.emit('moduleStatusChanged', data);
+    });
+    
+    this.orchestrator.on('configurationUpdated', (data) => {
+      this.emit('configurationUpdated', data);
+    });
+    
+    // Forward context manager events (legacy support)
+    this.contextManager.on('contextGenerated', (data) => {
+      this.emit('legacyContextGenerated', data);
     });
     
     this.contextManager.on('error', (data) => {
@@ -275,5 +354,48 @@ export class SystemCoordinator extends EventEmitter {
    */
   public getToolSystem(): UnifiedToolSystem {
     return this.toolSystem;
+  }
+  
+  /**
+   * Get the unified system orchestrator
+   * @returns Unified system orchestrator
+   */
+  public getOrchestrator(): UnifiedSystemOrchestrator {
+    return this.orchestrator;
+  }
+  
+  /**
+   * Enable/disable a system module
+   * @param module System module
+   * @param enabled Whether to enable the module
+   */
+  public setModuleEnabled(module: SystemModule, enabled: boolean): void {
+    this.orchestrator.setModuleEnabled(module, enabled);
+    this.emit('moduleStatusChanged', { module, enabled });
+  }
+  
+  /**
+   * Check if a module is enabled
+   * @param module System module
+   * @returns Whether the module is enabled
+   */
+  public isModuleEnabled(module: SystemModule): boolean {
+    return this.orchestrator.isModuleEnabled(module);
+  }
+  
+  /**
+   * Get enabled modules
+   * @returns List of enabled modules
+   */
+  public getEnabledModules(): SystemModule[] {
+    return this.orchestrator.getEnabledModules();
+  }
+  
+  /**
+   * Clear module cache
+   */
+  public clearModuleCache(): void {
+    this.orchestrator.clearModuleCache();
+    this.emit('moduleCacheCleared');
   }
 }

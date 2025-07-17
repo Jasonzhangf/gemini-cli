@@ -134,19 +134,12 @@ export class ContextInjector {
   }
 
   /**
-   * 获取格式化的动态上下文
+   * 获取格式化的动态上下文 - RAG removed from system prompts
    */
   async getFormattedDynamicContext(): Promise<string> {
-    try {
-      const standardIntegrator = this.config.getContextManager().getStandardContextIntegrator();
-      if (standardIntegrator) {
-        const fullContext = await standardIntegrator.getStandardContext({ includeProjectDiscovery: false });
-        return standardIntegrator.formatStandardContextForModel(fullContext, false);
-      }
-    } catch (error) {
-      if (this.debugMode) {
-        console.warn('[ContextInjector] Failed to get formatted dynamic context:', error);
-      }
+    // RAG content removed from system prompts - all dynamic context handled by contextAgent
+    if (this.debugMode) {
+      console.log('[ContextInjector] Dynamic context removed from system prompts - handled by contextAgent');
     }
     return '';
   }

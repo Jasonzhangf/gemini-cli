@@ -173,22 +173,12 @@ function getNonMaintenanceModePrompt() {
 }
 
 async function getDynamicContextPrompt(config: Config) {
-  let dynamicContextContent = '';
-  try {
-    const standardIntegrator = config.getContextManager().getStandardContextIntegrator();
-    if (standardIntegrator) {
-      const fullContext = await standardIntegrator.getStandardContext({ includeProjectDiscovery: false });
-      dynamicContextContent = standardIntegrator.formatStandardContextForModel(fullContext);
-    }
-  } catch (error) {
-    if (config.getDebugMode()) {
-      console.log('[PromptEnhancer] Failed to get dynamic context:', error);
-    }
+  // RAG content removed from system prompts - all dynamic context now handled by contextAgent
+  // The contextAgent injects dynamic context through the separate dynamic context system
+  if (config.getDebugMode()) {
+    console.log('[PromptBuilder] Dynamic context removed from system prompts - handled by contextAgent');
   }
-
-  if (dynamicContextContent && dynamicContextContent.trim()) {
-    return `\n${'═'.repeat(100)}\n║                              📋 CURRENT CONTEXT SECTION                              ║\n${'═'.repeat(100)}\n\n${dynamicContextContent}\n\n${'═'.repeat(100)}\n║                            END OF CONTEXT SECTION                            ║\n${'═'.repeat(100)}`;
-  }
+  return '';
 }
 
 export async function buildPrompt(config: Config): Promise<string> {

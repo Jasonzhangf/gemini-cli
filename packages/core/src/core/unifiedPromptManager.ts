@@ -179,22 +179,13 @@ Always ask for permission before using these tools and explain what you plan to 
    * 生成上下文相关部分
    */
   private generateContextSection(): string {
-    const analysisMode = this.config.getAnalysisSettings()?.mode || 'vector';
     const isDebugMode = this.config.getDebugMode();
 
     return `# 🧠 Context & Analysis
 
-**Analysis Mode**: ${analysisMode}
 **Debug Mode**: ${isDebugMode ? 'Enabled' : 'Disabled'}
 
-This system uses advanced context analysis with RAG (Retrieval-Augmented Generation) to provide relevant code context and semantic understanding of your project.
-
-**Context Layers (L0-L4)**:
-- **L0**: Project structure discovery
-- **L1**: Code entity mapping  
-- **L2**: Semantic relationships
-- **L3**: Contextual patterns
-- **L4**: Intelligent inference
+This system provides intelligent context analysis for your project through dynamic context injection.
 
 The context system will automatically provide relevant information based on your queries and the current project state.`;
   }

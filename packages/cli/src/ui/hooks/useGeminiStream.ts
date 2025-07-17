@@ -187,7 +187,19 @@ export const useGeminiStream = (
         return;
       }
       turnCancelledRef.current = true;
-      abortControllerRef.current?.abort();
+      
+      // Force abort all pending operations
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        // Add timeout to force cleanup if abort doesn't work quickly
+        setTimeout(() => {
+          if (turnCancelledRef.current) {
+            setIsResponding(false);
+            setPendingHistoryItem(null);
+          }
+        }, 100);
+      }
+      
       if (pendingHistoryItemRef.current) {
         addItem(pendingHistoryItemRef.current, Date.now());
       }
