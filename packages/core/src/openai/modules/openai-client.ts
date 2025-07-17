@@ -19,10 +19,23 @@ export class OpenAIClient {
 
   constructor(config: OpenAIHijackConfig) {
     this.config = config;
-    this.client = new OpenAI({
+    
+    // 为不同的提供商设置特殊的配置
+    const clientConfig: any = {
       apiKey: config.apiKey,
       baseURL: config.baseURL
-    });
+    };
+    
+    // DOUBAO特殊配置
+    if (config.baseURL?.includes('volces.com') || config.baseURL?.includes('ark.cn-beijing')) {
+      // DOUBAO API可能需要特殊的头部或配置
+      clientConfig.defaultHeaders = {
+        'User-Agent': 'gemini-cli-doubao/1.0',
+        ...clientConfig.defaultHeaders
+      };
+    }
+    
+    this.client = new OpenAI(clientConfig);
   }
 
   async createChatCompletion(

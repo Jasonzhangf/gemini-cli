@@ -210,12 +210,21 @@ export interface ExtractedContext {
       path: string;
       relevance: number;
       summary: string;
+      contextLines?: string[];
+      startLine?: number;
+      endLine?: number;
+      matchedLineIndex?: number;
+      sourceNode?: KnowledgeNode;
     }>;
     relevantFunctions: Array<{
       name: string;
       filePath: string;
       relevance: number;
       signature?: string;
+      contextLines?: string[];
+      startLine?: number;
+      endLine?: number;
+      sourceNode?: KnowledgeNode;
     }>;
     relatedPatterns: Array<{
       pattern: string;

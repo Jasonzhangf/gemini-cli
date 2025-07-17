@@ -427,7 +427,7 @@ export class ProjectConfigurationManager {
         target: 'clearcut',
       },
       analysis: {
-        mode: 'static',
+        mode: 'vector',
         timeout: 30000,
         enableCache: true,
       },

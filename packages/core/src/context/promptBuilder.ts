@@ -76,7 +76,7 @@ async function getCurrentTaskPrompt() {
 🔥 **核心工作流程**: 
 1. **专注执行**: 当前任务是您的唯一工作目标，必须优先完成
 2. **完成标记**: 任务完成后，立即使用以下命令标记完成：
-   \`{"action": "update", "taskId": "${currentTask.id}", "status": "completed"}\`
+   \`[tool_call: todo for action 'update' taskId '${currentTask.id}' status 'completed']\`
 3. **获取下一个**: 标记完成后，系统自动分配下一个任务作为新的工作目标
 4. **状态同步**: 每次使用工具时，都要考虑是否推进了当前工作目标
 

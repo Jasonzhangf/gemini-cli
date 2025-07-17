@@ -66,16 +66,20 @@ export class ToolFormatter {
     }
 
     const instructions = [
-      '## 工具调用指南',
-      '当需要使用工具时，请严格按照以下格式：',
-      '✦ tool_name({"param": "value"}) ✦',
+      '## 🔧 工具调用指南',
+      '**MANDATORY TOOL CALL SYNTAX**: All tool calls MUST use this exact format:',
+      '`[tool_call: tool_name for parameters]`',
+      '',
+      '**EXAMPLES**:',
+      '- `[tool_call: glob for pattern "**/*.py"]`',
+      '- `[tool_call: read_file for "/path/to/file.py"]`',
+      '- `[tool_call: run_shell_command for "ls -la"]`',
       '',
       '可用工具：',
       ...toolNames.map(name => `- ${name}`),
       '',
       '注意：',
-      '- 工具调用必须以 ✦ 开始和结束',
-      '- 参数必须是有效的JSON格式',
+      '- 必须使用 [tool_call: ...] 格式',
       '- 一次只能调用一个工具',
       ''
     ];
@@ -84,7 +88,7 @@ export class ToolFormatter {
   }
 
   static isValidToolCall(text: string): boolean {
-    const toolCallPattern = /✦\s*\w+\s*\([^)]*\)\s*✦/;
+    const toolCallPattern = /\[tool_call:\s*\w+\s+for\s+[^\]]+\]/;
     return toolCallPattern.test(text);
   }
 }

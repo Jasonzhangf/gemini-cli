@@ -34,14 +34,29 @@ export function loadOpenAIConfig(): OpenAIHijackEnvConfig {
   let provider = process.env.OPENAI_PROVIDER || 'SILICONFLOW';
   
   // Initialize default configuration based on provider
-  const config: OpenAIHijackEnvConfig = {
-    // Default SiliconFlow configuration
-    apiKey: process.env.SILICONFLOW_API_KEY || 'sk-default',
-    baseURL: process.env.SILICONFLOW_BASE_URL || 'https://api.siliconflow.cn/v1',
-    model: process.env.SILICONFLOW_MODEL || 'Qwen/Qwen3-8B',
-    temperature: 0.7,
-    maxTokens: 4096,
-  };
+  let config: OpenAIHijackEnvConfig;
+  
+  switch (provider) {
+    case 'DOUBAO':
+      config = {
+        apiKey: process.env.DOUBAO_API_KEY || '',
+        baseURL: process.env.DOUBAO_API_ENDPOINT || 'https://ark.cn-beijing.volces.com/api/v3',
+        model: process.env.DOUBAO_ACTUAL_MODEL || 'ep-20241216165142-hsgmt',
+        temperature: 0.7,
+        maxTokens: 4096,
+      };
+      break;
+    case 'SILICONFLOW':
+    default:
+      config = {
+        apiKey: process.env.SILICONFLOW_API_KEY || 'sk-default',
+        baseURL: process.env.SILICONFLOW_BASE_URL || 'https://api.siliconflow.cn/v1',
+        model: process.env.SILICONFLOW_MODEL || 'Qwen/Qwen3-8B',
+        temperature: 0.7,
+        maxTokens: 4096,
+      };
+      break;
+  }
 
   try {
     if (fs.existsSync(envFile)) {
@@ -60,6 +75,44 @@ export function loadOpenAIConfig(): OpenAIHijackEnvConfig {
               // Provider selection
               case 'OPENAI_PROVIDER':
                 provider = cleanValue;
+                // Re-initialize config based on new provider
+                switch (provider) {
+                  case 'DOUBAO':
+                    config = {
+                      apiKey: process.env.DOUBAO_API_KEY || '',
+                      baseURL: process.env.DOUBAO_API_ENDPOINT || 'https://ark.cn-beijing.volces.com/api/v3',
+                      model: process.env.DOUBAO_ACTUAL_MODEL || 'ep-20241216165142-hsgmt',
+                      temperature: 0.7,
+                      maxTokens: 4096,
+                    };
+                    break;
+                  case 'SILICONFLOW':
+                  default:
+                    config = {
+                      apiKey: process.env.SILICONFLOW_API_KEY || 'sk-default',
+                      baseURL: process.env.SILICONFLOW_BASE_URL || 'https://api.siliconflow.cn/v1',
+                      model: process.env.SILICONFLOW_MODEL || 'Qwen/Qwen3-8B',
+                      temperature: 0.7,
+                      maxTokens: 4096,
+                    };
+                    break;
+                }
+                break;
+              // DOUBAO configuration
+              case 'DOUBAO_API_KEY':
+                if (provider === 'DOUBAO') {
+                  config.apiKey = cleanValue;
+                }
+                break;
+              case 'DOUBAO_API_ENDPOINT':
+                if (provider === 'DOUBAO') {
+                  config.baseURL = cleanValue;
+                }
+                break;
+              case 'DOUBAO_ACTUAL_MODEL':
+                if (provider === 'DOUBAO') {
+                  config.model = cleanValue;
+                }
                 break;
               // SiliconFlow configuration
               case 'SILICONFLOW_API_KEY':

@@ -37,17 +37,18 @@ export class ToolGuidanceGenerator {
     const availableTools = this.getAvailableTools();
     const toolDescriptions = this.generateToolDescriptions(availableTools);
 
-    return `\n\n🔧 TOOL CALLING INSTRUCTIONS:
-You have access to powerful tools to help analyze and work with files and data. When you need to use a tool, format your response EXACTLY like this:
+    return `\n\n# 🔧 CRITICAL: Tool Call Format
+**MANDATORY TOOL CALL SYNTAX**: All tool calls MUST use this exact format:
+\`[tool_call: tool_name for parameters]\`
 
-✦ {"name": "tool_name", "arguments": {"param": "value"}}
+**EXAMPLES**:
+- \`[tool_call: glob for pattern '**/*.py']\`
+- \`[tool_call: read_file for '/path/to/file.py']\`
+- \`[tool_call: run_shell_command for 'ls -la']\`
+- \`[tool_call: todo for action 'create_list' tasks ["task1", "task2"]]\`
 
-📝 ALTERNATIVE FORMATS:
-
-**JSON Formats:**
-- \`\`\`json\n{"name": "tool_name", "arguments": {"param": "value"}}\n\`\`\`
-- tool_call: {"name": "tool_name", "arguments": {"param": "value"}}
-- \`\`\`\n{"name": "tool_name", "arguments": {"param": "value"}}\n\`\`\`
+**✅ ALWAYS USE**: The exact [tool_call: ...] format above for ALL tool calls.
+**TEMPLATE**: \`[tool_call: TOOL_NAME for PARAMETERS]\`
 
 **🆕 CONTENT ISOLATION FORMAT (for write_file, replace with large content):**
 - ✦ write_file ./path/to/file.md <*#*#CONTENT#*#*>
@@ -66,14 +67,14 @@ old code here|||new code here
 1. NEVER claim to have created, written, or modified files without using the actual tools
 2. NEVER say "已保存到", "已写入", "saved to", "written to" unless you used the write_file tool
 3. NEVER describe what you would do - ALWAYS use tools to actually do it
-4. If you need to write a file, you MUST use: ✦ {"name": "write_file", "arguments": {"file_path": "./path", "content": "..."}}
-5. If you need to modify a file, you MUST use: ✦ {"name": "replace", "arguments": {"file_path": "./path", "old_string": "...", "new_string": "..."}}
+4. If you need to write a file, you MUST use: [tool_call: write_file for file_path './path' content '...']
+5. If you need to modify a file, you MUST use: [tool_call: replace for file_path './path' old_string '...' new_string '...']
 6. WITHOUT TOOL CALLS, YOUR RESPONSE IS JUST PLANNING - NOT EXECUTION
 7. FOR COMPLEX TOOLS (write_file, replace, create_tasks): ONLY use JSON format - descriptive format will FAIL
 
 🎯 🚨 CRITICAL TASK MANAGEMENT RULE 🚨:
 For ANY request involving 2+ distinct operations (like "清理空文件夹" + "合并目录"), you MUST IMMEDIATELY create a task list BEFORE starting work:
-✦ {"name": "todo", "arguments": {"action": "create_list", "tasks": ["清理空文件夹", "识别相似目录", "合并目录", "分类整理"]}}
+[tool_call: todo for action 'create_list' tasks ['清理空文件夹', '识别相似目录', '合并目录', '分类整理']]
 
 Examples requiring IMMEDIATE task creation:
 - File organization + cleanup workflows  
@@ -85,7 +86,7 @@ Examples requiring IMMEDIATE task creation:
 ${toolDescriptions}
 
 ⚠️ MANDATORY EXECUTION PATTERN:
-✅ CORRECT: "I will create the file now:" followed by ✦ {"name": "write_file", ...}
+✅ CORRECT: "I will create the file now:" followed by [tool_call: write_file for ...]
 ❌ WRONG: "I have created the file at ./docs/example.md" (without tool call)
 
 🚨 DANGEROUS TOOLS:
@@ -95,11 +96,10 @@ Tools marked with ⚠️ [DANGEROUS] can modify the system or files and require 
 - replace: Modify file contents
 Always ask for permission before using these tools and explain what you plan to do.
 
-⚡ COMPLEX TOOLS REQUIRING SPECIAL FORMAT:
-These tools MUST use JSON format OR Content Isolation format and CANNOT use simple descriptive format:
-- write_file: Use JSON or ✦ write_file ./path <*#*#CONTENT#*#*>content</*#*#CONTENT#*#*>
-- replace: Use JSON or ✦ replace ./path <*#*#CONTENT#*#*>old|||new</*#*#CONTENT#*#*>  
-- create_tasks: Use JSON format for structured task arrays
+⚡ LARGE CONTENT TOOLS:
+For tools with large content (write_file, replace), you can use Content Isolation format:
+- write_file: [tool_call: write_file for file_path './path'] OR ✦ write_file ./path <*#*#CONTENT#*#*>content</*#*#CONTENT#*#*>
+- replace: [tool_call: replace for file_path './path' old_string '...' new_string '...'] OR ✦ replace ./path <*#*#CONTENT#*#*>old|||new</*#*#CONTENT#*#*>
 
 The user will execute the tools and provide you with the results. Use the results to provide comprehensive analysis and insights.`;
   }

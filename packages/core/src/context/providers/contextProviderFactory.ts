@@ -110,7 +110,21 @@ export class ContextProviderFactory implements IContextProviderFactory {
       throw new Error(`Unknown vector provider type: ${config.type}`);
     }
 
-    return new ProviderClass(config.config);
+    // Add environment-specific config for certain providers
+    let enhancedConfig = { ...config.config };
+    
+    if (config.type === 'siliconflow') {
+      enhancedConfig = {
+        ...enhancedConfig,
+        apiKey: process.env.SILICONFLOW_API_KEY || enhancedConfig.apiKey || '',
+        baseUrl: process.env.SILICONFLOW_BASE_URL || enhancedConfig.baseUrl || 'https://api.siliconflow.cn/v1',
+        model: process.env.SILICONFLOW_EMBEDDING_MODEL || enhancedConfig.model || 'BAAI/bge-m3',
+        dimensions: enhancedConfig.dimensions || 1024,
+        timeout: enhancedConfig.timeout || 30000
+      };
+    }
+
+    return new ProviderClass(enhancedConfig);
   }
 
   /**

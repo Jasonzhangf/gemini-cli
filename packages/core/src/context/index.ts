@@ -20,43 +20,63 @@ export function isContextEnhancementEnabled(): boolean {
 
 // 便捷函数：获取增强的系统提示（如果可用）
 import { Config } from '../config/config.js';
+import { UnifiedPromptManager } from '../core/unifiedPromptManager.js';
 
 export async function getEnhancedSystemPromptIfAvailable(config: Config, userMessage?: string): Promise<string> {
-  // Import getCoreSystemPrompt from prompts
-  const { getCoreSystemPrompt } = await import('../core/prompts.js');
+  // 使用统一的提示词管理器
+  const promptManager = new UnifiedPromptManager(config);
   
   if (!isContextEnhancementEnabled()) {
-    // 回退到原始的getCoreSystemPrompt，而不是仅仅getUserMemory
+    // 回退到基础的系统提示词
     if (config.getDebugMode()) {
-      console.log('[Context] Context enhancement disabled, using original system prompt');
+      console.log('[Context] Context enhancement disabled, using basic system prompt');
     }
-    const originalMemory = config.getUserMemory();
-    return getCoreSystemPrompt(originalMemory);
+    // 即使在fallback模式下，也获取基本工具列表
+    try {
+      const toolRegistry = await config.getToolRegistry();
+      const basicTools = toolRegistry.getFunctionDeclarations();
+      return promptManager.generateSystemPrompt(basicTools, false, false);
+    } catch (error) {
+      console.warn('[Context] Failed to get tool registry, using minimal prompt:', error);
+      return promptManager.generateSystemPrompt([], false, false);
+    }
   }
 
   try {
     if (config.getDebugMode()) {
-      console.log('[Context] Using enhanced system prompt with context management');
+      console.log('[Context] Using enhanced system prompt with unified prompt manager');
     }
     
-    const promptEnhancer = config.getPromptEnhancer();
-    let enhancedPrompt = await promptEnhancer.getEnhancedSystemPrompt();
+    // 获取可用工具列表
+    const toolRegistry = await config.getToolRegistry();
+    const availableTools = toolRegistry.getFunctionDeclarations();
+    
+    // 生成统一的增强系统提示词
+    let enhancedPrompt = promptManager.generateSystemPrompt(
+      availableTools,
+      true, // 包含上下文
+      true  // 包含任务管理
+    );
+    
+    // 添加工具特定引导
+    const toolSpecificGuidance = promptManager.generateToolSpecificGuidance(availableTools);
+    if (toolSpecificGuidance) {
+      enhancedPrompt += '\n\n---\n\n' + toolSpecificGuidance;
+    }
     
     // ContextAgent integration is now handled in hijack.ts for better timing
     // This avoids duplicate injection calls
     
     // 在每次调用时保存debug快照（如果启用了debug模式）
     if (config.getDebugMode()) {
-      const contextWrapper = promptEnhancer.getContextWrapper();
-      await contextWrapper.saveDebugSnapshot(enhancedPrompt, userMessage);
+      console.log('[Context] Enhanced system prompt generated successfully');
     }
     
     return enhancedPrompt;
   } catch (_error) {
-    // 如果增强器未初始化，回退到原始方法
-    console.warn('[Context] PromptEnhancer not available, falling back to original method:', _error);
-    const originalMemory = config.getUserMemory();
-    return getCoreSystemPrompt(originalMemory);
+    // 如果增强器未初始化，回退到基础方法
+    console.warn('[Context] Enhanced prompt generation failed, falling back to basic method:', _error);
+    return promptManager.generateSystemPrompt([], false, false);
   }
 }
 

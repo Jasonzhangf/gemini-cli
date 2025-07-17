@@ -430,8 +430,14 @@ export class ContextAgent {
       }
     }
 
+    // 过滤掉thinking内容，确保RAG和语义分析使用一致的输入
+    const filteredUserInput = userInput ? this.filterThinkingContent(userInput) : userInput;
+
     if (this.config.getDebugMode()) {
       console.log('[ContextAgent] Context injection called (Milestone 4: layered context injection)');
+      if (userInput && userInput !== filteredUserInput) {
+        console.log('[ContextAgent] Filtered out thinking content from user input');
+      }
     }
     
     try {
@@ -499,10 +505,10 @@ export class ContextAgent {
         }
       }
       
-      // 执行语义分析（如果已配置）
+      // 执行语义分析（使用过滤后的输入）
       let semanticContext = '';
-      if (userInput) {
-        const semanticResult = await this.performSemanticAnalysis(userInput);
+      if (filteredUserInput) {
+        const semanticResult = await this.performSemanticAnalysis(filteredUserInput);
         if (semanticResult) {
           semanticContext = this.formatSemanticAnalysisForContext(semanticResult);
           contextSections.unshift(semanticContext); // Add at beginning

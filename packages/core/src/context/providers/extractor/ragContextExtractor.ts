@@ -49,9 +49,21 @@ class TextAnalyzer {
   private stopWords: Set<string>;
   private documentFrequency: Map<string, number> = new Map();
   private corpusSize: number = 0;
+  private externalToolIdentifiers: Set<string>;
   
   constructor() {
     this.stopWords = new Set();
+    // 初始化外部工具标识符黑名单
+    this.externalToolIdentifiers = new Set([
+      'GEMINI_CLI_TOOL_CALL_NAME',
+      'GEMINI_CLI_TOOL_CALL_DECISION', 
+      'GEMINI_CLI_TOOL_CALL_SUCCESS',
+      'GEMINI_CLI_TOOL_CALL_DURATION_MS',
+      'GEMINI_CLI_TOOL_CALL_ERROR_TYPE',
+      'TOOL_CALL',
+      'TOOL_CALL_PATTERN',
+      'EVENT_TOOL_CALL'
+    ]);
   }
   
   tokenize(text: string): string[] {
@@ -70,11 +82,20 @@ class TextAnalyzer {
   
   private filterStopWords(tokens: string[]): string[] {
     if (this.corpusSize === 0) {
-      return tokens.filter(token => token.length > 1);
+      return tokens.filter(token => {
+        if (token.length <= 1) return false;
+        // 过滤外部工具标识符
+        return !this.externalToolIdentifiers.has(token.toUpperCase());
+      });
     }
     
     return tokens.filter(token => {
       if (token.length <= 1) return false;
+      
+      // 过滤外部工具标识符
+      if (this.externalToolIdentifiers.has(token.toUpperCase())) {
+        return false;
+      }
       
       const freq = this.documentFrequency.get(token) || 0;
       const relativeFreq = freq / this.corpusSize;
@@ -198,16 +219,254 @@ export class RAGContextExtractor implements IContextExtractor {
     
     const vectorResults = await this.vectorProvider.search({ text: tokens.join(' '), topK: this.config.maxResults }, { maxResults: this.config.maxResults });
 
+    // Enhanced file context extraction with source code lines
+    const relevantFiles = await Promise.all(vectorResults.results.map(async (r) => {
+      const sourceNode = await this.graphProvider.getNode(r.id);
+      const fileContext = await this.extractFileContext(r.id, r.content, userInput);
+      
+      return {
+        path: r.id,
+        summary: r.content.substring(0, 200) + (r.content.length > 200 ? '...' : ''),
+        relevance: r.score,
+        contextLines: fileContext.contextLines,
+        startLine: fileContext.startLine,
+        endLine: fileContext.endLine,
+        matchedLineIndex: fileContext.matchedLineIndex,
+        sourceNode: sourceNode || undefined
+      };
+    }));
+
+    // Extract relevant functions from graph traversal
+    const relevantFunctions = await this.extractRelevantFunctions(userInput, vectorResults.results);
+
     return {
       semantic: { intent: 'unknown', confidence: 0, entities: [], concepts: [] },
       code: {
-        relevantFiles: vectorResults.results.map(r => ({ path: r.id, summary: r.content, relevance: r.score })),
-        relevantFunctions: [],
+        relevantFiles,
+        relevantFunctions,
         relatedPatterns: [],
       },
       conversation: { userGoals: [], topicProgression: [], contextContinuity: [] },
       operational: { recentActions: [], workflowSuggestions: [], errorContext: [] },
     };
+  }
+
+  private async extractFileContext(filePath: string, content: string, query: string): Promise<{
+    contextLines: string[];
+    startLine: number;
+    endLine: number;
+    matchedLineIndex: number;
+  }> {
+    try {
+      // Try to read the actual file to get real source code
+      const actualContent = await this.readFileContent(filePath);
+      const lines = actualContent.split('\n');
+      
+      // Find the most relevant lines based on query
+      const queryLower = query.toLowerCase();
+      const matchingLines: { line: string; index: number; score: number }[] = [];
+      
+      lines.forEach((line, index) => {
+        const lineLower = line.toLowerCase();
+        let score = 0;
+        
+        // Score based on keyword matches
+        const queryWords = queryLower.split(/\s+/);
+        for (const word of queryWords) {
+          if (word.length > 2 && lineLower.includes(word)) {
+            score += 1;
+          }
+        }
+        
+        // Bonus for function/class definitions
+        if (lineLower.match(/(function|class|const|let|var|def|public|private)\s+\w+/)) {
+          score += 0.5;
+        }
+        
+        if (score > 0) {
+          matchingLines.push({ line, index, score });
+        }
+      });
+      
+      if (matchingLines.length === 0) {
+        // If no matches, return first few lines
+        return {
+          contextLines: lines.slice(0, 10),
+          startLine: 1,
+          endLine: Math.min(10, lines.length),
+          matchedLineIndex: 0
+        };
+      }
+      
+      // Sort by score and get the best match
+      matchingLines.sort((a, b) => b.score - a.score);
+      const bestMatch = matchingLines[0];
+      
+      // Extract context around the best matching line (前后各5行)
+      const contextSize = 5;
+      const startLine = Math.max(0, bestMatch.index - contextSize);
+      const endLine = Math.min(lines.length - 1, bestMatch.index + contextSize);
+      const contextLines = lines.slice(startLine, endLine + 1);
+      
+      return {
+        contextLines,
+        startLine: startLine + 1, // 1-based line numbers
+        endLine: endLine + 1,
+        matchedLineIndex: bestMatch.index - startLine
+      };
+    } catch (error) {
+      console.warn(`[RAG] Failed to extract file context for ${filePath}:`, error instanceof Error ? error.message : String(error));
+      // Fallback to content from vector search with better handling
+      if (!content || content.trim() === '') {
+        return {
+          contextLines: ['// File content not available'],
+          startLine: 1,
+          endLine: 1,
+          matchedLineIndex: 0
+        };
+      }
+      
+      const lines = content.split('\n');
+      // 确保至少返回前10行或整个内容
+      const contextLines = lines.length > 10 ? lines.slice(0, 10) : lines;
+      return {
+        contextLines,
+        startLine: 1,
+        endLine: contextLines.length,
+        matchedLineIndex: 0
+      };
+    }
+  }
+
+  private async readFileContent(filePath: string): Promise<string> {
+    try {
+      // Handle different file path formats
+      let actualPath = filePath;
+      
+      // Remove filename: prefix if present
+      if (filePath.startsWith('filename:')) {
+        actualPath = filePath.replace('filename:', '');
+      }
+      
+      // Remove any leading/trailing whitespace
+      actualPath = actualPath.trim();
+      
+      // If path is not absolute, make it relative to current working directory
+      if (!path.isAbsolute(actualPath)) {
+        actualPath = path.join(process.cwd(), actualPath);
+      }
+      
+      // Normalize the path
+      actualPath = path.normalize(actualPath);
+      
+      console.log(`[RAG Debug] Attempting to read file: ${actualPath}`);
+      const content = await fs.readFile(actualPath, 'utf-8');
+      console.log(`[RAG Debug] Successfully read file: ${actualPath} (${content.length} chars)`);
+      return content;
+    } catch (error) {
+      console.warn(`[RAG Debug] Failed to read file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      // File might not exist or be accessible, return empty content
+      return '';
+    }
+  }
+
+  private async extractRelevantFunctions(query: string, vectorResults: any[]): Promise<Array<{
+    name: string;
+    filePath: string;
+    relevance: number;
+    signature?: string;
+    contextLines?: string[];
+    startLine?: number;
+    endLine?: number;
+    sourceNode?: any;
+  }>> {
+    const functions: any[] = [];
+    
+    for (const result of vectorResults.slice(0, 3)) { // Limit to top 3 files
+      try {
+        const content = await this.readFileContent(result.id);
+        const extractedFunctions = this.extractFunctionsFromContent(content, result.id, query);
+        functions.push(...extractedFunctions);
+      } catch (error) {
+        // Skip files that can't be read
+        continue;
+      }
+    }
+    
+    // Sort by relevance and return top functions
+    return functions.sort((a, b) => b.relevance - a.relevance).slice(0, 5);
+  }
+
+  private extractFunctionsFromContent(content: string, filePath: string, query: string): Array<{
+    name: string;
+    filePath: string;
+    relevance: number;
+    signature?: string;
+    contextLines?: string[];
+    startLine?: number;
+    endLine?: number;
+  }> {
+    const functions: any[] = [];
+    const lines = content.split('\n');
+    const queryLower = query.toLowerCase();
+    
+    // Patterns for different languages
+    const functionPatterns = [
+      // JavaScript/TypeScript
+      /(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\([^)]*\)/g,
+      /(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s+)?\([^)]*\)\s*=>/g,
+      /(\w+)\s*:\s*(?:async\s+)?\([^)]*\)\s*=>/g,
+      // Python
+      /def\s+(\w+)\s*\([^)]*\):/g,
+      // Java/C++
+      /(?:public|private|protected)?\s*(?:static\s+)?(?:\w+\s+)*(\w+)\s*\([^)]*\)\s*\{/g,
+    ];
+    
+    lines.forEach((line, index) => {
+      for (const pattern of functionPatterns) {
+        pattern.lastIndex = 0; // Reset regex
+        const matches = pattern.exec(line);
+        if (matches && matches[1]) {
+          const functionName = matches[1];
+          let relevance = 0;
+          
+          // Score based on query matching
+          if (functionName.toLowerCase().includes(queryLower)) {
+            relevance += 2;
+          }
+          
+          const queryWords = queryLower.split(/\s+/);
+          for (const word of queryWords) {
+            if (word.length > 2 && functionName.toLowerCase().includes(word)) {
+              relevance += 1;
+            }
+            if (word.length > 2 && line.toLowerCase().includes(word)) {
+              relevance += 0.5;
+            }
+          }
+          
+          if (relevance > 0) {
+            // Extract context around function
+            const contextSize = 3;
+            const startLine = Math.max(0, index - contextSize);
+            const endLine = Math.min(lines.length - 1, index + contextSize);
+            const contextLines = lines.slice(startLine, endLine + 1);
+            
+            functions.push({
+              name: functionName,
+              filePath,
+              relevance,
+              signature: line.trim(),
+              contextLines,
+              startLine: startLine + 1,
+              endLine: endLine + 1
+            });
+          }
+        }
+      }
+    });
+    
+    return functions;
   }
 
   async updateContext(update: {

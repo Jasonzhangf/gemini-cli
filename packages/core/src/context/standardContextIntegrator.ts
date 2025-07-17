@@ -32,7 +32,6 @@ export interface StaticContext {
 export interface DynamicContext {
   recentOperations: string[];
   errorHistory: string[];
-  runtimeInfo: string[];
   userInstructions: string[];
 }
 
@@ -204,8 +203,7 @@ export class StandardContextIntegrator {
     // 从ContextManager获取当前的动态上下文（由ContextAgent注入的分层内容）
     const contextAgentContent = existingContext.dynamicContext || [];
     
-    // 收集基本的运行时信息
-    const runtimeInfo = this.collectRuntimeInfo();
+    // RuntimeInfo removed as per requirements
     
     // 从历史记录中提取最近的用户指令（用于上下文连贯性）
     const userInstructions = this.extractUserInstructions(existingContext);
@@ -228,7 +226,6 @@ export class StandardContextIntegrator {
     return {
       recentOperations,
       errorHistory: this.extractErrorHistory(), // 实际提取错误历史
-      runtimeInfo,
       userInstructions
     };
   }
@@ -263,38 +260,8 @@ export class StandardContextIntegrator {
   /**
    * 收集运行时信息
    */
-  private collectRuntimeInfo(): string[] {
-    const runtimeInfo: string[] = [];
-    
-    try {
-      // Node.js 版本
-      runtimeInfo.push(`Node.js: ${process.version}`);
-      
-      // 内存使用情况
-      const memUsage = process.memoryUsage();
-      runtimeInfo.push(`Memory: ${Math.round(memUsage.heapUsed / 1024 / 1024)}MB used`);
-      
-      // 当前时间
-      runtimeInfo.push(`Current time: ${new Date().toISOString()}`);
-      
-      // 调试模式状态
-      if (this.config.getDebugMode()) {
-        runtimeInfo.push('Debug mode: enabled');
-      }
-      
-      // 上下文管理器状态
-      const contextManager = this.contextManager;
-      if (contextManager) {
-        runtimeInfo.push('Context manager: active');
-      }
-      
-    } catch (error) {
-      runtimeInfo.push(`Runtime info collection failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    
-    return runtimeInfo;
-  }
-
+  // collectRuntimeInfo method removed as RuntimeInfo is no longer needed
+  
   /**
    * 从历史记录中提取用户指令
    */
@@ -530,10 +497,7 @@ ${context.gitStatus}
     sections.push(`# 🔄 动态上下文 (Dynamic Context)
 *来源: 运行时状态和操作历史*`);
 
-    if (context.runtimeInfo.length > 0) {
-      sections.push(`## ⚡ 运行时信息
-${context.runtimeInfo.join('\n\n')}`);
-    }
+    // RuntimeInfo section removed
 
     if (context.recentOperations.length > 0) {
       sections.push(`## 📝 最近操作

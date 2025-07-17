@@ -7,6 +7,19 @@
 import { SlashCommand, CommandContext, SlashCommandActionReturn } from './types.js';
 import { AnalysisMode } from '@google/gemini-cli-core';
 
+/**
+ * Format bytes to human readable string
+ */
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 export const contextCommand: SlashCommand = {
   name: 'context',
   description: 'Manage context settings and semantic analysis configuration',
@@ -29,11 +42,43 @@ export const contextCommand: SlashCommand = {
           const contextManager = config.getContextManager();
           const contextAgent = config.getContextAgent();
           const analysisSettings = config.getAnalysisSettings();
+          const projectRoot = config.getProjectRoot();
           
           let statusMessage = '# 🧠 Context Management Status\n\n';
           
+          // Project Information
+          statusMessage += '## 📁 Project Information\n';
+          statusMessage += `- **Project Root**: \`${projectRoot}\`\n`;
+          
+          // Get project storage info if ContextAgent is available
+          if (contextAgent) {
+            try {
+              const storageManager = (contextAgent as any).storageManager;
+              if (storageManager) {
+                const projectId = storageManager.getProjectId();
+                const storageStructure = storageManager.getStorageStructure();
+                const storageStats = await storageManager.getStorageStats();
+                
+                statusMessage += `- **Project ID**: \`${projectId}\`\n`;
+                statusMessage += `- **Storage Root**: \`${storageStructure.storageRoot}\`\n`;
+                statusMessage += `- **Total Storage**: ${formatBytes(storageStats.totalSize)}\n`;
+                statusMessage += `- **File Count**: ${storageStats.fileCount}\n\n`;
+                
+                // Storage Paths
+                statusMessage += '## 💾 Storage Paths\n';
+                statusMessage += `- **Knowledge Graph**: \`${storageStructure.knowledgeGraphStorage}\`\n`;
+                statusMessage += `  - Size: ${formatBytes(storageStats.knowledgeGraphSize)}\n`;
+                statusMessage += `- **RAG Storage**: \`${storageStructure.ragStorage}\`\n`;
+                statusMessage += `  - Size: ${formatBytes(storageStats.ragSize)}\n`;
+                statusMessage += `- **Metadata**: \`${storageStructure.metadataFile}\`\n`;
+              }
+            } catch (error) {
+              statusMessage += `- **Storage Info**: ⚠️ Unable to load (${error instanceof Error ? error.message : 'Unknown error'})\n`;
+            }
+          }
+          
           // Context Manager Status
-          statusMessage += '## 📋 Context Manager\n';
+          statusMessage += '\n## 📋 Context Manager\n';
           statusMessage += `- **Status**: ${contextManager ? '✅ Active' : '❌ Inactive'}\n`;
           
           if (contextManager) {
@@ -49,6 +94,42 @@ export const contextCommand: SlashCommand = {
             statusMessage += `- **Status**: ${contextAgent.isInitialized() ? '✅ Initialized' : '🔄 Not Initialized'}\n`;
             statusMessage += `- **Analysis Mode**: **${analysisSettings?.mode || 'static'}**\n`;
             statusMessage += `- **L0-L4 Layers**: 🚀 **Enabled** (Unlimited Token Budget)\n`;
+            
+            // RAG System Status
+            try {
+              const knowledgeGraph = (contextAgent as any).knowledgeGraph;
+              const ragIndexer = (contextAgent as any).ragIndexer;
+              
+              if (knowledgeGraph) {
+                const graphStats = knowledgeGraph.getStatistics();
+                statusMessage += `\n### 📊 Knowledge Graph Statistics:\n`;
+                statusMessage += `- **Total Nodes**: ${graphStats.totalNodes || 0}\n`;
+                statusMessage += `- **Total Relationships**: ${graphStats.totalEdges || 0}\n`;
+                statusMessage += `- **Files Analyzed**: ${graphStats.fileCount || 0}\n`;
+                statusMessage += `- **Functions/Methods**: ${graphStats.functionNodes || 0}\n`;
+                statusMessage += `- **Classes**: ${graphStats.classNodes || 0}\n`;
+              }
+              
+              if (ragIndexer) {
+                const indexingStatus = ragIndexer.getIndexingStatus();
+                statusMessage += `\n### 🔄 RAG Indexing Status:\n`;
+                statusMessage += `- **Is Indexing**: ${indexingStatus.isIndexing ? '🔄 Active' : '⏸️ Idle'}\n`;
+                statusMessage += `- **Queue Size**: ${indexingStatus.queueSize}\n`;
+                statusMessage += `- **Watched Directories**: ${indexingStatus.watchedDirectories.length}\n`;
+                
+                if (indexingStatus.watchedDirectories.length > 0) {
+                  statusMessage += `- **Watch Paths**:\n`;
+                  for (const dir of indexingStatus.watchedDirectories.slice(0, 3)) {
+                    statusMessage += `  - \`${dir}\`\n`;
+                  }
+                  if (indexingStatus.watchedDirectories.length > 3) {
+                    statusMessage += `  - ... and ${indexingStatus.watchedDirectories.length - 3} more\n`;
+                  }
+                }
+              }
+            } catch (error) {
+              statusMessage += `\n### ⚠️ RAG System Status: Unable to load details\n`;
+            }
             
             // Show available analysis modes
             statusMessage += '\n### 📊 Available Analysis Modes:\n';
@@ -119,7 +200,7 @@ export const contextCommand: SlashCommand = {
 
         try {
           // Update analysis settings
-          const analysisSettings = config.getAnalysisSettings() || { mode: AnalysisMode.STATIC };
+          const analysisSettings = config.getAnalysisSettings() || { mode: AnalysisMode.VECTOR };
           analysisSettings.mode = mode as AnalysisMode;
           config.setAnalysisSettings(analysisSettings);
           

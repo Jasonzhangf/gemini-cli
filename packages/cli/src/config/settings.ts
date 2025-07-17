@@ -225,6 +225,52 @@ function findEnvFile(startDir: string): string | null {
   }
 }
 
+/**
+ * Find all environment files in order of precedence (global first, project last)
+ * This allows global defaults to be overridden by project-specific settings
+ */
+function findAllEnvFiles(startDir: string): string[] {
+  const envFiles: string[] = [];
+  
+  // 1. Global user .env files (lowest precedence)
+  const homeEnvPath = path.join(homedir(), '.env');
+  if (fs.existsSync(homeEnvPath)) {
+    envFiles.push(homeEnvPath);
+  }
+  
+  const homeGeminiEnvPath = path.join(homedir(), GEMINI_DIR, '.env');
+  if (fs.existsSync(homeGeminiEnvPath)) {
+    envFiles.push(homeGeminiEnvPath);
+  }
+  
+  // 2. Project .env files (higher precedence)
+  let currentDir = path.resolve(startDir);
+  const projectEnvFiles: string[] = [];
+  
+  while (true) {
+    const envPath = path.join(currentDir, '.env');
+    if (fs.existsSync(envPath)) {
+      projectEnvFiles.unshift(envPath); // Add to beginning for correct order
+    }
+    
+    const geminiEnvPath = path.join(currentDir, GEMINI_DIR, '.env');
+    if (fs.existsSync(geminiEnvPath)) {
+      projectEnvFiles.unshift(geminiEnvPath); // Add to beginning for correct order
+    }
+    
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir || !parentDir || parentDir === homedir()) {
+      break;
+    }
+    currentDir = parentDir;
+  }
+  
+  // Add project files (they override global settings)
+  envFiles.push(...projectEnvFiles);
+  
+  return envFiles;
+}
+
 export function setUpCloudShellEnvironment(envFilePath: string | null): void {
   // Special handling for GOOGLE_CLOUD_PROJECT in Cloud Shell:
   // Because GOOGLE_CLOUD_PROJECT in Cloud Shell tracks the project
@@ -248,14 +294,19 @@ export function setUpCloudShellEnvironment(envFilePath: string | null): void {
 }
 
 export function loadEnvironment(): void {
-  const envFilePath = findEnvFile(process.cwd());
+  // Load environment files in order of precedence (later files override earlier ones)
+  const envFiles = findAllEnvFiles(process.cwd());
+  
+  // Load global env first (as defaults)
+  envFiles.forEach(envFilePath => {
+    if (fs.existsSync(envFilePath)) {
+      dotenv.config({ path: envFilePath, quiet: true });
+    }
+  });
 
   if (process.env.CLOUD_SHELL === 'true') {
-    setUpCloudShellEnvironment(envFilePath);
-  }
-
-  if (envFilePath) {
-    dotenv.config({ path: envFilePath, quiet: true });
+    const primaryEnvFile = envFiles[envFiles.length - 1] || null;
+    setUpCloudShellEnvironment(primaryEnvFile);
   }
 }
 

@@ -1,104 +1,35 @@
 /**
- * @license
  * Copyright 2025 Google LLC
- * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
-// Export config
-export * from './config/config.js';
+// Main System Coordinator
+export * from './system/SystemCoordinator.js';
 
-// Export Core Logic
-export * from './core/client.js';
-export * from './core/contentGenerator.js';
-export * from './core/geminiChat.js';
-export * from './core/logger.js';
-export * from './core/prompts.js';
-export * from './core/tokenLimits.js';
-export * from './core/turn.js';
-export * from './core/geminiRequest.js';
-export * from './core/coreToolScheduler.js';
-export * from './core/nonInteractiveToolExecutor.js';
+// Unified Context Management
+export * from './context/UnifiedContextManager.js';
+export * from './context/ContextHistorySeparator.js';
+export * from './context/IntegratedContextManager.js';
 
-export * from './code_assist/codeAssist.js';
-export * from './code_assist/oauth2.js';
-export * from './code_assist/server.js';
-export * from './code_assist/types.js';
+// Unified Tool System
+export * from './tools/UnifiedToolSystem.js';
+export * from './tools/ToolManager.js';
 
-// Export utilities
-export * from './utils/paths.js';
-export * from './utils/schemaValidator.js';
-export * from './utils/errors.js';
-export * from './utils/getFolderStructure.js';
-export * from './utils/memoryDiscovery.js';
-export * from './utils/gitIgnoreParser.js';
-export * from './utils/editor.js';
-export * from './utils/quotaErrorDetection.js';
+// Task Management
+export * from './tasks/TaskManager.js';
 
-// Export services
-export * from './services/fileDiscoveryService.js';
-export * from './services/gitService.js';
-
-// Export base tool definitions
-export * from './tools/tools.js';
-export * from './tools/tool-registry.js';
-
-// Export specific tool logic
-export * from './tools/read-file.js';
-export * from './tools/ls.js';
-export * from './tools/grep.js';
-export * from './tools/glob.js';
-export * from './tools/edit.js';
-export * from './tools/write-file.js';
-export * from './tools/web-fetch.js';
-export * from './tools/memoryTool.js';
-export * from './tools/shell.js';
-export * from './tools/web-search.js';
-export * from './tools/read-many-files.js';
-export * from './tools/mcp-client.js';
-export * from './tools/mcp-tool.js';
-
-// Export telemetry functions
-export * from './telemetry/index.js';
-export { sessionId } from './utils/session.js';
-
-// Export session history management
-export * from './context/sessionHistory.js';
-export * from './context/sessionRestorer.js';
-
-// Export context system
-export * from './context/contextAgent.js';
-
-// Export bacterial programming modules (with explicit naming to avoid conflicts)
-export {
-  OpenAIHijackConfig,
-  ToolCall as OpenAIToolCall,
-  ConversationMessage,
-  ContentMarkers,
-  PathMapping,
-  ToolCategories,
-  ContentIsolator,
-  ToolClassifier,
-  PathProcessor,
-  ToolParser,
-  ConversationManager,
-  ResponseProcessor,
-  StreamAdapter,
-  OpenAIClient,
-  ToolFormatter as OpenAIToolFormatter
-} from './openai/modules/index.js';
-
-export {
-  PromptBuilder,
-  ToolFormatter as GuidanceToolFormatter,
-  SyntaxValidator,
-  ValidationResult,
-  ToolCallExtraction,
-  ValidationSummary,
-  DevelopmentStrategy,
-  AnalysisStrategy,
-  WorkflowStrategy
-} from './tools/guidance/index.js';
-
-// Export slim implementations
-export * from './openai/hijack-slim.js';
-export * from './core/prompts-slim.js';
+// Individual Tools
+export * from './tools/CreateTasksTool.js';
+export * from './tools/GetCurrentTaskTool.js';
+export * from './tools/FinishCurrentTaskTool.js';

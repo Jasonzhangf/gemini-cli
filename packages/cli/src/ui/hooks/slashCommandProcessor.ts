@@ -190,6 +190,10 @@ export const useSlashCommandProcessor = (
   const commandService = useMemo(() => new CommandService(), []);
 
   useEffect(() => {
+    // Commands are loaded synchronously in constructor, so we can get them immediately
+    setCommands(commandService.getCommands());
+    
+    // Still call async load in case of future async commands
     const load = async () => {
       await commandService.loadCommands();
       setCommands(commandService.getCommands());

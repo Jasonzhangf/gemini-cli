@@ -276,7 +276,7 @@ export class Config {
     this.noBrowser = params.noBrowser ?? false;
     this.openaiMode = params.openaiMode ?? false;
     this.analysisSettings = {
-      mode: params.analysis?.mode ?? AnalysisMode.STATIC,
+      mode: params.analysis?.mode ?? AnalysisMode.VECTOR,
       timeout: params.analysis?.timeout ?? 30000,
       enableCache: params.analysis?.enableCache ?? true,
     };
