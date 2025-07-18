@@ -300,7 +300,7 @@ export interface ContextProviderConfig {
     config: Record<string, any>;
   };
   vectorProvider: {
-    type: 'embedding' | 'openai' | 'local' | 'custom' | 'siliconflow';
+    type: 'embedding' | 'openai' | 'local' | 'custom' | 'siliconflow' | 'none';
     config: Record<string, any>;
   };
   extractorProvider: {

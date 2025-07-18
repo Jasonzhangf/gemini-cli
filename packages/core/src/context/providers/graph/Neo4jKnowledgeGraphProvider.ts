@@ -55,7 +55,7 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
       database: config.database || process.env.NEO4J_DATABASE || 'neo4j',
       maxConnectionPoolSize: config.maxConnectionPoolSize || 50,
       connectionTimeout: config.connectionTimeout || 30000,
-      enableEncryption: config.enableEncryption ?? true,
+      enableEncryption: config.enableEncryption ?? false,
       trustStrategy: config.trustStrategy || 'TRUST_ALL_CERTIFICATES',
       enableDebug: config.enableDebug ?? false
     };
@@ -379,7 +379,9 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
 
     if (query.maxResults) {
       cypherQuery += ' LIMIT $maxResults';
-      params.maxResults = query.maxResults;
+      // Import neo4j to use integer conversion
+      const neo4j = await import('neo4j-driver');
+      params.maxResults = neo4j.default.int(Math.floor(query.maxResults));
     }
 
     try {

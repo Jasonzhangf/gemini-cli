@@ -14,6 +14,7 @@ import {
 
 // Import concrete implementations
 import { SiliconFlowEmbeddingProvider } from './vector/siliconFlowEmbeddingProvider.js';
+import { NullVectorProvider } from './vector/nullVectorProvider.js';
 import { RAGContextExtractor } from './extractor/ragContextExtractor.js';
 import { Neo4jKnowledgeGraphProvider } from './graph/Neo4jKnowledgeGraphProvider.js';
 import { Neo4jGraphRAGExtractor } from './extractor/Neo4jGraphRAGExtractor.js';
@@ -47,6 +48,7 @@ export class ContextProviderFactory implements IContextProviderFactory {
   private registerDefaultProviders(): void {
     // Vector providers
     this.vectorProviders.set('siliconflow', SiliconFlowEmbeddingProvider);
+    this.vectorProviders.set('none', NullVectorProvider);
     
     // Graph providers
     this.graphProviders.set('neo4j', Neo4jKnowledgeGraphProvider as any);
@@ -83,6 +85,11 @@ export class ContextProviderFactory implements IContextProviderFactory {
    * Create vector search provider
    */
   createVectorProvider(config: ContextProviderConfig['vectorProvider']): IVectorSearchProvider {
+    // Check if SiliconFlow embedding is disabled
+    if (config.type === 'siliconflow' && process.env.DISABLE_SILICONFLOW_EMBEDDING === 'true') {
+      throw new Error('SiliconFlow embedding provider is disabled. Please enable it in environment variables or use a different provider.');
+    }
+    
     const ProviderClass = this.vectorProviders.get(config.type);
     
     if (!ProviderClass) {
@@ -100,6 +107,12 @@ export class ContextProviderFactory implements IContextProviderFactory {
         model: process.env.SILICONFLOW_EMBEDDING_MODEL || enhancedConfig.model || 'BAAI/bge-m3',
         dimensions: enhancedConfig.dimensions || 1024,
         timeout: enhancedConfig.timeout || 30000
+      };
+    } else if (config.type === 'none') {
+      enhancedConfig = {
+        ...enhancedConfig,
+        disabled: true,
+        message: 'Vector search is disabled'
       };
     }
 
@@ -123,7 +136,7 @@ export class ContextProviderFactory implements IContextProviderFactory {
         ...enhancedConfig,
         uri: process.env.NEO4J_URI || enhancedConfig.uri || 'bolt://localhost:7687',
         username: process.env.NEO4J_USERNAME || enhancedConfig.username || 'neo4j',
-        password: process.env.NEO4J_PASSWORD || enhancedConfig.password || 'password',
+        password: process.env.NEO4J_PASSWORD || enhancedConfig.password || 'gemini123',
         database: process.env.NEO4J_DATABASE || enhancedConfig.database || 'neo4j',
         enableDebug: enhancedConfig.enableDebug ?? false
       };
@@ -151,7 +164,7 @@ export class ContextProviderFactory implements IContextProviderFactory {
         neo4jConfig: {
           uri: process.env.NEO4J_URI || 'bolt://localhost:7687',
           username: process.env.NEO4J_USERNAME || 'neo4j',
-          password: process.env.NEO4J_PASSWORD || 'password',
+          password: process.env.NEO4J_PASSWORD || 'gemini123',
           database: process.env.NEO4J_DATABASE || 'neo4j',
           enableDebug: config.config?.enableDebug ?? false
         },
@@ -159,7 +172,8 @@ export class ContextProviderFactory implements IContextProviderFactory {
           apiKey: process.env.SILICONFLOW_API_KEY,
           baseUrl: process.env.SILICONFLOW_BASE_URL || 'https://api.siliconflow.cn/v1',
           model: process.env.SILICONFLOW_EMBEDDING_MODEL || 'BAAI/bge-m3',
-          enableFallback: true
+          enableFallback: true,
+          disabled: process.env.DISABLE_SILICONFLOW_EMBEDDING === 'true'
         },
         searchConfig: {
           maxResults: config.config?.maxResults || 20,
@@ -223,12 +237,21 @@ export class ContextProviderFactory implements IContextProviderFactory {
                  process.env.ENABLE_NEO4J_GRAPH_RAG === 'true' ||
                  true; // 默认使用Neo4j
     }
-    const baseVectorConfig = {
+    // Check if SiliconFlow is disabled and use alternative or null
+    const useSiliconFlow = process.env.DISABLE_SILICONFLOW_EMBEDDING !== 'true';
+    
+    const baseVectorConfig = useSiliconFlow ? {
       type: 'siliconflow' as const,
       config: {
         modelName: 'BAAI/bge-m3',
         dimensions: 1024,
         batchSize: projectSize === 'small' ? 20 : 100
+      }
+    } : {
+      type: 'none' as const, // Use a placeholder type when SiliconFlow is disabled
+      config: {
+        disabled: true,
+        message: 'SiliconFlow embedding is disabled'
       }
     };
 
@@ -267,7 +290,7 @@ export class ContextProviderFactory implements IContextProviderFactory {
         config: {
           uri: process.env.NEO4J_URI || 'bolt://localhost:7687',
           username: process.env.NEO4J_USERNAME || 'neo4j',
-          password: process.env.NEO4J_PASSWORD || 'password',
+          password: process.env.NEO4J_PASSWORD || 'gemini123',
           database: process.env.NEO4J_DATABASE || 'neo4j',
           enableDebug: false
         }

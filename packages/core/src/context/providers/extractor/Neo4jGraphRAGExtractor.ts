@@ -81,9 +81,10 @@ interface SearchResultItem {
  */
 export class Neo4jGraphRAGExtractor implements IContextExtractor {
   private graphProvider: Neo4jKnowledgeGraphProvider;
-  private vectorProvider: SiliconFlowEmbeddingProvider;
+  private vectorProvider: SiliconFlowEmbeddingProvider | null;
   private config: Neo4jGraphRAGConfig;
   private isInitialized = false;
+  private siliconFlowDisabled = false;
 
   constructor(config: Partial<Neo4jGraphRAGConfig> = {}) {
     this.config = {
@@ -118,7 +119,18 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
     };
 
     this.graphProvider = new Neo4jKnowledgeGraphProvider(this.config.neo4jConfig);
-    this.vectorProvider = new SiliconFlowEmbeddingProvider(this.config.vectorConfig);
+    
+    // Check if SiliconFlow is disabled
+    this.siliconFlowDisabled = process.env.DISABLE_SILICONFLOW_EMBEDDING === 'true';
+    
+    if (!this.siliconFlowDisabled) {
+      this.vectorProvider = new SiliconFlowEmbeddingProvider(this.config.vectorConfig);
+    } else {
+      this.vectorProvider = null;
+      if (this.config.neo4jConfig.enableDebug) {
+        console.log('[Neo4jGraphRAGExtractor] SiliconFlow embedding disabled, using graph-only mode');
+      }
+    }
   }
 
   /**
@@ -139,10 +151,25 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
         throw new Error('Neo4j health check failed');
       }
 
+      // 初始化向量提供者（如果未禁用）
+      if (this.vectorProvider && !this.siliconFlowDisabled) {
+        try {
+          await this.vectorProvider.initialize();
+          if (this.config.neo4jConfig.enableDebug) {
+            console.log('[Neo4jGraphRAGExtractor] SiliconFlow embedding initialized');
+          }
+        } catch (error) {
+          console.warn('[Neo4jGraphRAGExtractor] SiliconFlow embedding initialization failed, using graph-only mode:', error);
+          this.vectorProvider = null;
+          this.siliconFlowDisabled = true;
+        }
+      }
+
       this.isInitialized = true;
       
       if (this.config.neo4jConfig.enableDebug) {
         console.log('[Neo4jGraphRAGExtractor] 初始化成功');
+        console.log('[Neo4jGraphRAGExtractor] 模式:', this.siliconFlowDisabled ? 'Graph-only' : 'Hybrid Graph+Vector');
         const stats = await this.graphProvider.getStatistics();
         console.log('[Neo4jGraphRAGExtractor] 数据库统计:', stats);
       }
@@ -208,8 +235,8 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
   private async executeGraphSearch(userInput: string, maxResults?: number): Promise<SearchResultItem[]> {
     const results: SearchResultItem[] = [];
 
-    // 1. 向量搜索 + 图查询
-    if (this.config.searchConfig.enableHybridSearch) {
+    // 1. 向量搜索 + 图查询（仅在未禁用时）
+    if (this.config.searchConfig.enableHybridSearch && this.vectorProvider && !this.siliconFlowDisabled) {
       try {
         // 使用向量搜索获取相似内容
         const vectorResults = await this.vectorProvider.search(
@@ -246,6 +273,8 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
       } catch (error) {
         console.warn('[Neo4jGraphRAGExtractor] 向量搜索失败，使用纯图搜索:', error);
       }
+    } else if (this.siliconFlowDisabled && this.config.neo4jConfig.enableDebug) {
+      console.log('[Neo4jGraphRAGExtractor] 向量搜索已禁用，使用纯图搜索模式');
     }
 
     // 2. 纯图搜索作为补充或主要方式
