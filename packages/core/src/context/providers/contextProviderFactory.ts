@@ -49,7 +49,7 @@ export class ContextProviderFactory implements IContextProviderFactory {
     this.vectorProviders.set('siliconflow', SiliconFlowEmbeddingProvider);
     
     // Graph providers
-    this.graphProviders.set('neo4j', Neo4jKnowledgeGraphProvider);
+    this.graphProviders.set('neo4j', Neo4jKnowledgeGraphProvider as any);
     
     // Extractor providers - support both RAG and Neo4j Graph RAG
     this.extractorProviders.set('rag', RAGContextExtractor);
@@ -109,16 +109,16 @@ export class ContextProviderFactory implements IContextProviderFactory {
   /**
    * Create graph provider
    */
-  createGraphProvider(type: string, config: any = {}): IKnowledgeGraphProvider {
-    const ProviderClass = this.graphProviders.get(type);
+  createGraphProvider(config: { type: 'local' | 'neo4j' | 'memory' | 'custom'; config: Record<string, any>; }, projectRoot?: string): IKnowledgeGraphProvider {
+    const ProviderClass = this.graphProviders.get(config.type);
     
     if (!ProviderClass) {
-      throw new Error(`Unknown graph provider type: ${type}`);
+      throw new Error(`Unknown graph provider type: ${config.type}`);
     }
 
     // Neo4j specific configuration enhancement
-    let enhancedConfig = { ...config };
-    if (type === 'neo4j') {
+    let enhancedConfig = { ...config.config };
+    if (config.type === 'neo4j') {
       enhancedConfig = {
         ...enhancedConfig,
         uri: process.env.NEO4J_URI || enhancedConfig.uri || 'bolt://localhost:7687',
@@ -137,8 +137,8 @@ export class ContextProviderFactory implements IContextProviderFactory {
    */
   createContextExtractor(
     config: ContextProviderConfig['extractorProvider'],
-    vectorProvider?: IVectorSearchProvider,
-    projectRoot?: string
+    graphProvider: IKnowledgeGraphProvider,
+    vectorProvider: IVectorSearchProvider
   ): IContextExtractor {
     const ExtractorClass = this.extractorProviders.get(config.type);
     if (!ExtractorClass) {
@@ -188,11 +188,11 @@ export class ContextProviderFactory implements IContextProviderFactory {
 
       const enhancedConfig = {
         ...config.config,
-        projectRoot: projectRoot || process.cwd(),
+        projectRoot: process.cwd(),
         debugMode: true // Enable debug mode for RAG
       };
 
-      return new ExtractorClass(enhancedConfig, null, vectorProvider);
+      return new ExtractorClass(enhancedConfig, graphProvider, vectorProvider);
     } else {
       throw new Error(`Unsupported extractor type: ${config.type}`);
     }
@@ -262,6 +262,16 @@ export class ContextProviderFactory implements IContextProviderFactory {
     }
 
     return {
+      graphProvider: {
+        type: 'neo4j' as const,
+        config: {
+          uri: process.env.NEO4J_URI || 'bolt://localhost:7687',
+          username: process.env.NEO4J_USERNAME || 'neo4j',
+          password: process.env.NEO4J_PASSWORD || 'password',
+          database: process.env.NEO4J_DATABASE || 'neo4j',
+          enableDebug: false
+        }
+      },
       vectorProvider: baseVectorConfig,
       extractorProvider: baseExtractorConfig
     };

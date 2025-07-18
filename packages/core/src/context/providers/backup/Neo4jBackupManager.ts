@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IContextExtractor, ContextQuery, ExtractedContext } from '../interfaces/contextExtractor.js';
-import { IKnowledgeGraphProvider } from '../interfaces/knowledgeGraphProvider.js';
+import { IContextExtractor, IKnowledgeGraphProvider, ContextQuery, ExtractedContext } from '../../interfaces/contextProviders.js';
 import { ContextProviderFactory } from '../contextProviderFactory.js';
 import { EventEmitter } from 'events';
 
@@ -168,17 +167,27 @@ export class Neo4jBackupManager extends EventEmitter {
    */
   async initialize(): Promise<void> {
     try {
+      // 创建共享的graph和vector providers
+      const sharedGraphProvider = this.factory.createGraphProvider({
+        type: 'neo4j',
+        config: {}
+      });
+      const sharedVectorProvider = this.factory.createVectorProvider({
+        type: 'siliconflow',
+        config: {}
+      });
+
       // 初始化主提取器
       this.primaryExtractor = this.factory.createContextExtractor({
         type: this.config.primaryExtractor.type,
         config: this.config.primaryExtractor.config
-      } as any);
+      } as any, sharedGraphProvider, sharedVectorProvider);
 
       // 初始化备份提取器
       this.backupExtractor = this.factory.createContextExtractor({
         type: this.config.backupExtractor.type,
         config: this.config.backupExtractor.config
-      } as any);
+      } as any, sharedGraphProvider, sharedVectorProvider);
 
       // 初始化备份提取器（如果是Neo4j Graph RAG）
       if (this.backupExtractor && 'initialize' in this.backupExtractor) {
@@ -250,7 +259,7 @@ export class Neo4jBackupManager extends EventEmitter {
         return await Promise.race([
           operation(),
           this.createTimeoutPromise(this.config.failoverConfig.failoverTimeout)
-        ]);
+        ]) as T;
       } catch (error) {
         lastError = error as Error;
         attempts++;
@@ -378,8 +387,7 @@ export class Neo4jBackupManager extends EventEmitter {
 
       // 对于其他提取器，执行简单的上下文提取测试
       const testQuery: ContextQuery = {
-        userInput: 'health check test',
-        maxResults: 1
+        userInput: 'health check test'
       };
 
       const result = await Promise.race([

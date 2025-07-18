@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IContextExtractor, ContextQuery, ExtractedContext } from '../interfaces/contextExtractor.js';
+import { IContextExtractor, ContextQuery, ExtractedContext, KnowledgeNode, GraphQuery, VectorQuery } from '../../interfaces/contextProviders.js';
 import { Neo4jKnowledgeGraphProvider } from '../graph/Neo4jKnowledgeGraphProvider.js';
 import { SiliconFlowEmbeddingProvider } from '../vector/siliconFlowEmbeddingProvider.js';
-import { KnowledgeNode, KnowledgeRelationship, GraphQuery } from '../interfaces/knowledgeGraphProvider.js';
-import { VectorQuery } from '../interfaces/vectorSearchProvider.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -59,7 +57,12 @@ export interface Neo4jGraphRAGConfig {
 interface SearchResultItem {
   node: KnowledgeNode;
   score: number;
-  relationships: KnowledgeRelationship[];
+  relationships: Array<{
+    sourceId: string;
+    targetId: string;
+    type: string;
+    weight?: number;
+  }>;
   depth: number;
 }
 
@@ -157,7 +160,8 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
       await this.initialize();
     }
 
-    const { userInput, conversationHistory, maxResults } = query;
+    const { userInput, conversationHistory } = query;
+    const maxResults = this.config.searchConfig.maxResults;
     const startTime = Date.now();
 
     try {
@@ -218,9 +222,9 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
           const graphQuery: GraphQuery = {
             searchTerm: vectorResult.content,
             maxResults: 1,
-            includeRelationships: this.config.searchConfig.includeRelationships,
+            includeNeighbors: this.config.searchConfig.includeRelationships,
             nodeTypes: undefined,
-            metadata: undefined
+            filters: undefined
           };
 
           const graphResults = await this.graphProvider.query(graphQuery);
@@ -229,7 +233,12 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
             results.push({
               node,
               score: vectorResult.score,
-              relationships: node.relationships || [],
+              relationships: (node.relationships || []).map(rel => ({
+                sourceId: node.id,
+                targetId: rel.toId,
+                type: rel.type,
+                weight: rel.weight
+              })),
               depth: 0
             });
           }
@@ -243,9 +252,9 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
     const graphQuery: GraphQuery = {
       searchTerm: userInput,
       maxResults: maxResults || this.config.searchConfig.maxResults!,
-      includeRelationships: this.config.searchConfig.includeRelationships,
+      includeNeighbors: this.config.searchConfig.includeRelationships,
       nodeTypes: undefined,
-      metadata: undefined
+      filters: undefined
     };
 
     const graphResults = await this.graphProvider.query(graphQuery);
@@ -257,7 +266,12 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
         results.push({
           node,
           score: this.calculateGraphScore(node, userInput),
-          relationships: node.relationships || [],
+          relationships: (node.relationships || []).map(rel => ({
+            sourceId: node.id,
+            targetId: rel.toId,
+            type: rel.type,
+            weight: rel.weight
+          })),
           depth: 0
         });
       } else {
@@ -346,9 +360,9 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
       const query: GraphQuery = {
         searchTerm: undefined,
         maxResults: 1,
-        includeRelationships: true,
+        includeNeighbors: true,
         nodeTypes: undefined,
-        metadata: { id: relationship.toId }
+        filters: { id: relationship.toId }
       };
 
       try {
@@ -364,7 +378,12 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
             results.push({
               node: relatedNode,
               score: Math.max(score, 0.1),
-              relationships: relatedNode.relationships || [],
+              relationships: (relatedNode.relationships || []).map(rel => ({
+                sourceId: relatedNode.id,
+                targetId: rel.toId,
+                type: rel.type,
+                weight: rel.weight
+              })),
               depth: currentDepth
             });
 
@@ -400,7 +419,7 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
     // 从每个聚类中选择最佳结果
     const clusteredResults: SearchResultItem[] = [];
     
-    for (const [clusterKey, clusterResults] of clusters) {
+    for (const [clusterKey, clusterResults] of Array.from(clusters.entries())) {
       // 按分数排序并选择前几个
       clusterResults.sort((a, b) => b.score - a.score);
       clusteredResults.push(...clusterResults.slice(0, 3));
@@ -415,19 +434,25 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
   private async buildContext(results: SearchResultItem[], query: string): Promise<ExtractedContext> {
     const context: ExtractedContext = {
       semantic: {
-        summary: '',
-        relevantConcepts: [],
-        confidenceScore: 0
+        intent: 'search',
+        confidence: 0.5,
+        entities: [],
+        concepts: []
       },
       code: {
         relevantFiles: [],
-        relevantFunctions: []
+        relevantFunctions: [],
+        relatedPatterns: []
       },
-      metadata: {
-        searchQuery: query,
-        resultsCount: results.length,
-        extractionMethod: 'neo4j-graph-rag',
-        timestamp: new Date().toISOString()
+      conversation: {
+        topicProgression: [],
+        userGoals: [],
+        contextContinuity: []
+      },
+      operational: {
+        recentActions: [],
+        errorContext: [],
+        workflowSuggestions: []
       }
     };
 
@@ -469,7 +494,6 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
         context.code.relevantFunctions.push({
           name: node.name || '',
           signature: node.content || '',
-          docstring: node.metadata?.docstring || '',
           relevance: weight,
           filePath: node.metadata?.filePath || '',
           startLine: node.metadata?.startLine || 0,
@@ -486,16 +510,17 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
     }
 
     // 生成相关概念
-    context.semantic.relevantConcepts = Array.from(conceptCounts.entries())
+    context.semantic.concepts = Array.from(conceptCounts.entries())
       .sort((a, b) => b[1] - a[1])
-      .map(([concept, count]) => ({ concept, weight: count / results.length }));
+      .slice(0, 10)
+      .map(([concept, count]) => concept);
 
-    // 生成摘要
-    context.semantic.summary = summaryParts.join('\n\n');
+    // 设置意图
+    context.semantic.intent = query;
 
     // 计算置信度分数
     const avgScore = results.reduce((sum, r) => sum + r.score, 0) / results.length;
-    context.semantic.confidenceScore = Math.min(avgScore * 0.9, 1.0);
+    context.semantic.confidence = Math.min(avgScore * 0.9, 1.0);
 
     return context;
   }
@@ -526,14 +551,10 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
       return context;
     }
 
-    // 添加对话历史到元数据
-    context.metadata = {
-      ...context.metadata,
-      conversationHistory: history.slice(-5).map(h => ({
-        role: h.role,
-        content: h.content.substring(0, 200)
-      }))
-    };
+    // 添加对话历史到上下文
+    context.conversation.contextContinuity = history.slice(-5).map(h => 
+      `${h.role}: ${h.content.substring(0, 200)}`
+    );
 
     return context;
   }
@@ -553,21 +574,22 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
       const graphQuery: GraphQuery = {
         searchTerm: userInput,
         maxResults: maxResults || 5,
-        includeRelationships: false,
+        includeNeighbors: false,
         nodeTypes: undefined,
-        metadata: undefined
+        filters: undefined
       };
 
       const results = await this.graphProvider.query(graphQuery);
       
       return {
         semantic: {
-          summary: `基于关键词"${userInput}"的基础搜索结果`,
-          relevantConcepts: [],
-          confidenceScore: 0.5
+          intent: userInput,
+          confidence: 0.5,
+          entities: [],
+          concepts: []
         },
         code: {
-          relevantFiles: results.nodes.filter(n => n.type === 'file').map(n => ({
+          relevantFiles: results.nodes.filter((n: KnowledgeNode) => n.type === 'file').map((n: KnowledgeNode) => ({
             path: n.id,
             summary: n.content || '',
             relevance: 0.5,
@@ -575,21 +597,25 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
             startLine: 1,
             endLine: 1
           })),
-          relevantFunctions: results.nodes.filter(n => n.type === 'function').map(n => ({
+          relevantFunctions: results.nodes.filter((n: KnowledgeNode) => n.type === 'function').map((n: KnowledgeNode) => ({
             name: n.name || '',
             signature: n.content || '',
-            docstring: '',
             relevance: 0.5,
             filePath: '',
             startLine: 0,
             endLine: 0
-          }))
+          })),
+          relatedPatterns: []
         },
-        metadata: {
-          searchQuery: userInput,
-          resultsCount: results.nodes.length,
-          extractionMethod: 'neo4j-fallback',
-          timestamp: new Date().toISOString()
+        conversation: {
+          topicProgression: [],
+          userGoals: [],
+          contextContinuity: []
+        },
+        operational: {
+          recentActions: [],
+          errorContext: [],
+          workflowSuggestions: []
         }
       };
     } catch (error) {
@@ -598,23 +624,60 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
       // 返回空上下文
       return {
         semantic: {
-          summary: '上下文提取失败',
-          relevantConcepts: [],
-          confidenceScore: 0
+          intent: userInput,
+          confidence: 0,
+          entities: [],
+          concepts: []
         },
         code: {
           relevantFiles: [],
-          relevantFunctions: []
+          relevantFunctions: [],
+          relatedPatterns: []
         },
-        metadata: {
-          searchQuery: userInput,
-          resultsCount: 0,
-          extractionMethod: 'neo4j-error',
-          timestamp: new Date().toISOString(),
-          error: error instanceof Error ? error.message : String(error)
+        conversation: {
+          topicProgression: [],
+          userGoals: [],
+          contextContinuity: []
+        },
+        operational: {
+          recentActions: [],
+          errorContext: [{
+            error: error instanceof Error ? error.message : String(error),
+            context: '上下文提取失败',
+            suggestions: ['检查Neo4j连接', '尝试重新初始化']
+          }],
+          workflowSuggestions: []
         }
       };
     }
+  }
+
+  /**
+   * 更新上下文
+   */
+  async updateContext(update: {
+    type: 'file_change' | 'tool_execution' | 'conversation_turn';
+    data: Record<string, any>;
+  }): Promise<void> {
+    // 实现上下文更新逻辑
+    if (this.config.neo4jConfig.enableDebug) {
+      console.log('[Neo4jGraphRAGExtractor] Context updated:', update.type);
+    }
+  }
+
+  /**
+   * 获取配置
+   */
+  async getConfig(): Promise<{
+    provider: string;
+    version: string;
+    capabilities: string[];
+  }> {
+    return {
+      provider: 'neo4j-graph-rag',
+      version: '1.0.0',
+      capabilities: ['graph-search', 'semantic-clustering', 'relationship-expansion', 'vector-search']
+    };
   }
 
   /**

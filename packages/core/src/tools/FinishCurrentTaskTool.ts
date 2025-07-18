@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { TaskManager, Task, TaskResult } from '../tasks/TaskManager';
+import { TaskManager, Task, TaskResult } from '../tasks/TaskManager.js';
 
 /**
  * FinishCurrentTaskTool input interface

@@ -13,17 +13,21 @@
 // Knowledge Graph Provider Interface
 // ============================================================================
 
+export interface KnowledgeRelationship {
+  toId: string;
+  targetId: string;
+  type: 'imports' | 'calls' | 'contains' | 'references' | 'implements';
+  weight?: number;
+  metadata?: Record<string, any>;
+}
+
 export interface KnowledgeNode {
   id: string;
   type: 'file' | 'function' | 'class' | 'module' | 'concept' | 'error';
   name: string;
   content?: string;
   metadata: Record<string, any>;
-  relationships: Array<{
-    targetId: string;
-    type: 'imports' | 'calls' | 'contains' | 'references' | 'implements';
-    weight?: number;
-  }>;
+  relationships: KnowledgeRelationship[];
 }
 
 export interface GraphQuery {
@@ -31,7 +35,11 @@ export interface GraphQuery {
   searchTerm?: string;
   maxResults?: number;
   includeNeighbors?: boolean;
+  includeRelationships?: boolean;
   filters?: Record<string, any>;
+  orderBy?: string;
+  orderDirection?: 'ASC' | 'DESC';
+  metadata?: Record<string, any>;
 }
 
 export interface GraphQueryResult {
@@ -43,7 +51,7 @@ export interface GraphQueryResult {
     weight?: number;
   }>;
   totalCount: number;
-  queryTime: number;
+  queryTime?: number;
 }
 
 export interface RelatedNode {
@@ -296,7 +304,7 @@ export interface ContextProviderConfig {
     config: Record<string, any>;
   };
   extractorProvider: {
-    type: 'rag' | 'rule_based' | 'llm' | 'hybrid' | 'custom';
+    type: 'rag' | 'rule_based' | 'llm' | 'hybrid' | 'custom' | 'neo4j-graph-rag';
     config: Record<string, any>;
   };
 }

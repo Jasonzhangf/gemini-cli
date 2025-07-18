@@ -15,10 +15,10 @@
  */
 
 import { EventEmitter } from 'events';
-import { TaskManager } from '../tasks/TaskManager';
-import { CreateTasksTool } from './CreateTasksTool';
-import { GetCurrentTaskTool } from './GetCurrentTaskTool';
-import { FinishCurrentTaskTool } from './FinishCurrentTaskTool';
+import { TaskManager } from '../tasks/TaskManager.js';
+import { CreateTasksTool } from './CreateTasksTool.js';
+import { GetCurrentTaskTool } from './GetCurrentTaskTool.js';
+import { FinishCurrentTaskTool } from './FinishCurrentTaskTool.js';
 
 /**
  * Tool interface

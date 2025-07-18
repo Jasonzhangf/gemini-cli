@@ -15,7 +15,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { ContextHistorySeparator, ContextType, ContextualMessage } from './ContextHistorySeparator';
+import { ContextHistorySeparator, ContextType, ContextualMessage } from './ContextHistorySeparator.js';
 
 /**
  * RAG result interface

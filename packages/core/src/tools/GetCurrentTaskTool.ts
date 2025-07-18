@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { TaskManager, Task } from '../tasks/TaskManager';
+import { TaskManager, Task } from '../tasks/TaskManager.js';
 
 /**
  * GetCurrentTaskTool input interface

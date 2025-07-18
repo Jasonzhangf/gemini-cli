@@ -425,9 +425,9 @@ export class UnifiedSystemOrchestrator extends EventEmitter {
   private async executeSystemPromptsModule(userInput?: string): Promise<string> {
     try {
       // 使用现有的UnifiedPromptManager或类似系统
-      const promptManager = this.config.getUnifiedPromptManager?.();
+      const promptManager = null; // TODO: Implement unified prompt manager
       if (promptManager) {
-        return await promptManager.generateSystemPrompt();
+        return await (promptManager as any).generateSystemPrompt();
       }
       
       // 后备基础提示词
@@ -445,23 +445,23 @@ export class UnifiedSystemOrchestrator extends EventEmitter {
   private async executeStaticContextModule(userInput?: string): Promise<string> {
     try {
       const contextManager = this.config.getContextManager();
-      const staticContext = contextManager.getStaticContext();
+      const staticContext = contextManager.getContext().staticContext;
       
       const sections = [];
       
-      if (staticContext.globalrules) {
+      if (staticContext.globalRules && staticContext.globalRules.length > 0) {
         sections.push('## 📋 全局规则');
-        sections.push(staticContext.globalrules);
+        sections.push(staticContext.globalRules.join('\n'));
       }
       
-      if (staticContext.localrules) {
+      if (staticContext.projectRules && staticContext.projectRules.length > 0) {
         sections.push('## 📂 项目规则');
-        sections.push(staticContext.localrules);
+        sections.push(staticContext.projectRules.join('\n'));
       }
       
-      if (staticContext.memories?.length > 0) {
+      if (staticContext.globalMemories && staticContext.globalMemories.length > 0) {
         sections.push('## 🧠 记忆片段');
-        sections.push(staticContext.memories.slice(0, 3).join('\n'));
+        sections.push(staticContext.globalMemories.slice(0, 3).join('\n'));
       }
       
       return sections.length > 0 ? sections.join('\n\n') : '';
@@ -554,22 +554,22 @@ export class UnifiedSystemOrchestrator extends EventEmitter {
     }
     
     try {
-      const currentTask = this.taskManager.getCurrentTask();
-      const taskList = this.taskManager.getTaskList();
+      const currentTask = await this.taskManager.getCurrentTask();
+      const taskList = await this.taskManager.getAllTasks();
       
       const sections = [];
       
       if (currentTask) {
         sections.push('## 📋 当前任务');
-        sections.push(`**${currentTask.title}**: ${currentTask.description}`);
-        sections.push(`状态: ${currentTask.status}, 优先级: ${currentTask.priority}`);
+        sections.push(`**${currentTask.description}**: ${currentTask.description}`);
+        sections.push(`状态: ${currentTask.status}`);
       }
       
       if (taskList.length > 1) {
         sections.push('## 📝 任务列表');
-        const pendingTasks = taskList.filter(t => t.status === 'pending').slice(0, 3);
+        const pendingTasks = taskList.filter((t: any) => t.status === 'pending').slice(0, 3);
         for (const task of pendingTasks) {
-          sections.push(`- ${task.title} (${task.priority})`);
+          sections.push(`- ${task.description}`);
         }
       }
       
@@ -611,9 +611,9 @@ export class UnifiedSystemOrchestrator extends EventEmitter {
    */
   private async executeProjectDiscoveryModule(userInput?: string): Promise<string> {
     try {
-      const projectInfo = this.config.getProjectInfo?.();
+      const projectInfo = null; // TODO: Implement project info
       if (projectInfo) {
-        return `## 📂 项目信息\n**名称**: ${projectInfo.name}\n**类型**: ${projectInfo.type || '未知'}`;
+        return `## 📂 项目信息\n**名称**: ${(projectInfo as any).name}\n**类型**: ${(projectInfo as any).type || '未知'}`;
       }
       return '';
     } catch (error) {

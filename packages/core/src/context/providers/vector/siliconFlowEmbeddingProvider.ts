@@ -150,7 +150,7 @@ export class SiliconFlowEmbeddingProvider implements IVectorSearchProvider {
     const queryEmbedding = await this.generateEmbedding(queryText);
     const results: VectorSearchResult[] = [];
 
-    for (const [id, doc] of this.documents.entries()) {
+    for (const [id, doc] of Array.from(this.documents.entries())) {
       if (!doc.embedding) {
         // Generate embedding for documents that don't have one
         try {
@@ -189,7 +189,7 @@ export class SiliconFlowEmbeddingProvider implements IVectorSearchProvider {
     // Enhanced text matching with multiple strategies
     const queryWords = this.tokenizeQuery(queryLower);
 
-    for (const [id, doc] of this.documents.entries()) {
+    for (const [id, doc] of Array.from(this.documents.entries())) {
       const contentLower = doc.content.toLowerCase();
       const score = this.calculateTextMatchScore(queryWords, contentLower, queryLower);
       

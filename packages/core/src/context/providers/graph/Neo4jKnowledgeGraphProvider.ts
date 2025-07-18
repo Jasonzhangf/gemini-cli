@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import neo4j, { Driver, Session, Result, Record } from 'neo4j-driver';
+// Neo4j driver is optional - will be loaded dynamically
+// import neo4j, { Driver, Session, Result, Record } from 'neo4j-driver';
 import { 
   IKnowledgeGraphProvider, 
   KnowledgeNode, 
-  KnowledgeRelationship, 
+  KnowledgeRelationship,
   GraphQuery, 
   GraphQueryResult 
-} from '../interfaces/knowledgeGraphProvider.js';
+} from '../../interfaces/contextProviders.js';
 
 /**
  * Neo4j配置接口
@@ -41,8 +42,8 @@ export interface Neo4jConfig {
  * - 数据持久化和备份
  */
 export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
-  private driver: Driver | null = null;
-  private session: Session | null = null;
+  private driver: any | null = null;
+  private session: any | null = null;
   private config: Neo4jConfig;
   private isInitialized = false;
   
@@ -77,10 +78,13 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
     }
 
     try {
+      // 动态加载Neo4j驱动程序
+      const neo4j = await import('neo4j-driver');
+      
       // 创建驱动程序
-      this.driver = neo4j.driver(
+      this.driver = neo4j.default.driver(
         this.config.uri,
-        neo4j.auth.basic(this.config.username, this.config.password),
+        neo4j.default.auth.basic(this.config.username, this.config.password),
         {
           maxConnectionPoolSize: this.config.maxConnectionPoolSize,
           connectionTimeout: this.config.connectionTimeout,
@@ -287,7 +291,7 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
   /**
    * 删除节点
    */
-  async deleteNode(nodeId: string): Promise<void> {
+  async removeNode(nodeId: string): Promise<void> {
     this.ensureConnection();
 
     const query = `
@@ -312,7 +316,21 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
   /**
    * 查询图数据
    */
-  async query(query: GraphQuery): Promise<GraphQueryResult> {
+  async query(searchTerm: string, options?: { maxResults?: number }): Promise<KnowledgeNode[]>;
+  async query(query: GraphQuery): Promise<GraphQueryResult>;
+  async query(queryOrSearchTerm: GraphQuery | string, options?: { maxResults?: number }): Promise<GraphQueryResult | KnowledgeNode[]> {
+    // Handle string search term overload
+    if (typeof queryOrSearchTerm === 'string') {
+      const graphQuery: GraphQuery = {
+        searchTerm: queryOrSearchTerm,
+        maxResults: options?.maxResults
+      };
+      const result = await this.query(graphQuery);
+      return result.nodes;
+    }
+    
+    // Handle GraphQuery overload
+    const query = queryOrSearchTerm;
     this.ensureConnection();
 
     let cypherQuery = 'MATCH (n:Node)';
@@ -330,11 +348,11 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
       params.searchTerm = query.searchTerm;
     }
 
-    if (query.metadata) {
-      for (const [key, value] of Object.entries(query.metadata)) {
-        const paramKey = `metadata_${key}`;
-        conditions.push(`n.metadata CONTAINS $${paramKey}`);
-        params[paramKey] = `"${key}":"${value}"`;
+    if (query.filters) {
+      for (const [key, value] of Object.entries(query.filters)) {
+        const paramKey = `filter_${key}`;
+        conditions.push(`n.${key} = $${paramKey}`);
+        params[paramKey] = value;
       }
     }
 
@@ -344,7 +362,7 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
     }
 
     // 添加关系查询
-    if (query.includeRelationships) {
+    if (query.includeNeighbors) {
       cypherQuery += ' OPTIONAL MATCH (n)-[r:RELATES_TO]-(related:Node)';
       cypherQuery += ' RETURN n, collect({relationship: r, node: related}) as relationships';
     } else {
@@ -376,11 +394,16 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
   /**
    * 处理查询结果
    */
-  private processQueryResult(result: Result): GraphQueryResult {
+  private processQueryResult(result: any): GraphQueryResult {
     const nodes: KnowledgeNode[] = [];
-    const relationships: KnowledgeRelationship[] = [];
+    const relationships: Array<{
+      sourceId: string;
+      targetId: string;
+      type: string;
+      weight?: number;
+    }> = [];
 
-    for (const record of result.records) {
+    for (const record of result.records as any[]) {
       const nodeRecord = record.get('n');
       const relationshipData = record.get('relationships') || [];
 
@@ -402,13 +425,19 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
             const relationship: KnowledgeRelationship = {
               type: relData.relationship.properties.type,
               toId: relData.node.properties.id,
+              targetId: relData.node.properties.id,
               weight: relData.relationship.properties.weight || 1.0,
               metadata: relData.relationship.properties.metadata ? 
                 JSON.parse(relData.relationship.properties.metadata) : {}
             };
 
             node.relationships!.push(relationship);
-            relationships.push(relationship);
+            relationships.push({
+              sourceId: node.id,
+              targetId: relationship.toId,
+              type: relationship.type,
+              weight: relationship.weight
+            });
           }
         }
 
@@ -435,7 +464,7 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
 
     try {
       const result = await this.session!.run(cypherQuery, params);
-      return result.records.map(record => record.toObject());
+      return result.records.map((record: any) => record.toObject());
     } catch (error) {
       console.error('[Neo4jKnowledgeGraphProvider] 原生查询执行失败:', error);
       throw error;
@@ -446,10 +475,10 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
    * 获取数据库统计信息
    */
   async getStatistics(): Promise<{
-    nodeCount: number;
-    relationshipCount: number;
-    nodeTypes: string[];
-    relationshipTypes: string[];
+    totalNodes: number;
+    totalRelationships: number;
+    nodeTypeDistribution: Record<string, number>;
+    lastUpdated: string;
   }> {
     this.ensureConnection();
 
@@ -464,26 +493,167 @@ export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {
 
       // 获取节点类型
       const nodeTypesResult = await this.session!.run('MATCH (n:Node) RETURN DISTINCT n.type as type');
-      const nodeTypes = nodeTypesResult.records.map(r => r.get('type')).filter(Boolean);
+      const nodeTypes = nodeTypesResult.records.map((r: any) => r.get('type')).filter(Boolean);
 
       // 获取关系类型
       const relTypesResult = await this.session!.run('MATCH ()-[r:RELATES_TO]-() RETURN DISTINCT r.type as type');
-      const relationshipTypes = relTypesResult.records.map(r => r.get('type')).filter(Boolean);
+      const relationshipTypes = relTypesResult.records.map((r: any) => r.get('type')).filter(Boolean);
+
+      const nodeTypeDistribution: Record<string, number> = {};
+      nodeTypes.forEach((type: string) => {
+        nodeTypeDistribution[type] = 0; // 这里可以进一步优化来获取实际计数
+      });
 
       return {
-        nodeCount,
-        relationshipCount,
-        nodeTypes,
-        relationshipTypes
+        totalNodes: nodeCount,
+        totalRelationships: relationshipCount,
+        nodeTypeDistribution: nodeTypeDistribution as Record<string, number>,
+        lastUpdated: new Date().toISOString()
       };
     } catch (error) {
       console.error('[Neo4jKnowledgeGraphProvider] 统计信息获取失败:', error);
+      const emptyDistribution: Record<string, number> = {};
       return {
-        nodeCount: 0,
-        relationshipCount: 0,
-        nodeTypes: [],
-        relationshipTypes: []
+        totalNodes: 0,
+        totalRelationships: 0,
+        nodeTypeDistribution: emptyDistribution,
+        lastUpdated: new Date().toISOString()
       };
+    }
+  }
+
+  /**
+   * 查询图数据（完整结果）
+   */
+  async queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
+    return this.query(query);
+  }
+
+  /**
+   * 获取特定节点
+   */
+  async getNode(nodeId: string): Promise<KnowledgeNode | null> {
+    this.ensureConnection();
+    
+    const query = `
+      MATCH (n:Node {id: $id})
+      OPTIONAL MATCH (n)-[r:RELATES_TO]-(related:Node)
+      RETURN n, collect({relationship: r, node: related}) as relationships
+    `;
+    
+    try {
+      const result = await this.session!.run(query, { id: nodeId });
+      if (result.records.length === 0) {
+        return null;
+      }
+      
+      const record = result.records[0];
+      const nodeRecord = record.get('n');
+      const relationshipData = record.get('relationships') || [];
+      
+      const node: KnowledgeNode = {
+        id: nodeRecord.properties.id,
+        type: nodeRecord.properties.type,
+        name: nodeRecord.properties.name,
+        content: nodeRecord.properties.content || '',
+        metadata: nodeRecord.properties.metadata ? 
+          JSON.parse(nodeRecord.properties.metadata) : {},
+        relationships: []
+      };
+      
+      // 处理关系
+      for (const relData of relationshipData) {
+        if (relData.relationship && relData.node) {
+          const relationship: KnowledgeRelationship = {
+            type: relData.relationship.properties.type,
+            toId: relData.node.properties.id,
+            targetId: relData.node.properties.id,
+            weight: relData.relationship.properties.weight || 1.0,
+            metadata: relData.relationship.properties.metadata ?
+              JSON.parse(relData.relationship.properties.metadata) : {}
+          };
+          node.relationships.push(relationship);
+        }
+      }
+      
+      return node;
+    } catch (error) {
+      console.error(`[Neo4jKnowledgeGraphProvider] 获取节点失败 ${nodeId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 获取节点的邻居
+   */
+  async getNeighbors(nodeId: string, maxDepth: number = 1): Promise<KnowledgeNode[]> {
+    this.ensureConnection();
+    
+    const query = `
+      MATCH (start:Node {id: $id})
+      MATCH (start)-[r:RELATES_TO*1..${maxDepth}]-(neighbor:Node)
+      RETURN DISTINCT neighbor
+      LIMIT 100
+    `;
+    
+    try {
+      const result = await this.session!.run(query, { id: nodeId });
+      const neighbors: KnowledgeNode[] = [];
+      
+      for (const record of result.records as any[]) {
+        const neighborRecord = record.get('neighbor');
+        const neighbor: KnowledgeNode = {
+          id: neighborRecord.properties.id,
+          type: neighborRecord.properties.type,
+          name: neighborRecord.properties.name,
+          content: neighborRecord.properties.content || '',
+          metadata: neighborRecord.properties.metadata ?
+            JSON.parse(neighborRecord.properties.metadata) : {},
+          relationships: []
+        };
+        neighbors.push(neighbor);
+      }
+      
+      return neighbors;
+    } catch (error) {
+      console.error(`[Neo4jKnowledgeGraphProvider] 获取邻居失败 ${nodeId}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * 查找相关节点
+   */
+  async findRelatedNodes(pathOrId: string, maxDepth: number = 2): Promise<any[]> {
+    this.ensureConnection();
+    
+    const query = `
+      MATCH (start:Node {id: $pathOrId})
+      MATCH (start)-[r:RELATES_TO*1..${maxDepth}]-(related:Node)
+      RETURN DISTINCT related
+      LIMIT 50
+    `;
+    
+    try {
+      const result = await this.session!.run(query, { pathOrId });
+      const relatedNodes: any[] = [];
+      
+      for (const record of result.records as any[]) {
+        const relatedRecord = record.get('related');
+        const relatedNode = {
+          id: relatedRecord.properties.id,
+          name: relatedRecord.properties.name,
+          content: relatedRecord.properties.content || '',
+          metadata: relatedRecord.properties.metadata ?
+            JSON.parse(relatedRecord.properties.metadata) : {}
+        };
+        relatedNodes.push(relatedNode);
+      }
+      
+      return relatedNodes;
+    } catch (error) {
+      console.error(`[Neo4jKnowledgeGraphProvider] 查找相关节点失败 ${pathOrId}:`, error);
+      return [];
     }
   }
 

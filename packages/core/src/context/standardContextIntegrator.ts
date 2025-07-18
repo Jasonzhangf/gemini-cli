@@ -362,12 +362,12 @@ export class StandardContextIntegrator {
     const sections: string[] = [];
 
     // 1. 系统上下文 (minimal)
-    if (context.system.projectInfo.name) {
-      sections.push(`# 📂 项目信息\n**项目名称**: ${context.system.projectInfo.name}`);
+    if (context.system.sessionId) {
+      sections.push(`# 📂 系统信息\n**会话ID**: ${context.system.sessionId}`);
     }
 
     // 2. 静态上下文 (minimal)
-    if (context.static.globalrules || context.static.localrules) {
+    if (context.static.globalRules) {
       sections.push(`# 📋 项目规则\n*基本项目规则和配置*`);
     }
 
@@ -375,7 +375,7 @@ export class StandardContextIntegrator {
     // Dynamic context is now handled entirely by contextAgent through separate injection
 
     // 4. 任务上下文 (保留)
-    if (context.task.todos.length > 0) {
+    if (context.task.taskList && context.task.taskList.length > 0) {
       sections.push(this.formatTaskContext(context.task));
     }
 

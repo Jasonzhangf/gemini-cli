@@ -11,7 +11,7 @@ import { KnowledgeGraph } from './knowledgeGraph.js';
 import { LayeredContextManager } from './layeredContextManager.js';
 import { SemanticAnalysisService, AnalysisResult as SemanticAnalysisResult } from '../analysis/semanticAnalysisService.js';
 import { ContextProviderFactory } from './providers/contextProviderFactory.js';
-import { IContextExtractor, IVectorSearchProvider } from './interfaces/contextProviders.js';
+import { IContextExtractor, IVectorSearchProvider, IKnowledgeGraphProvider } from './interfaces/contextProviders.js';
 
 export interface ContextAgentOptions {
   config: Config;
@@ -39,9 +39,10 @@ export class ContextAgent {
   // Milestone 4 components
   private layeredContextManager: LayeredContextManager;
   
-  // RAG system components - simplified architecture
+  // RAG system components - with Neo4j graph provider
   private contextExtractor: IContextExtractor | null = null;
   private vectorProvider: IVectorSearchProvider | null = null;
+  private graphProvider: IKnowledgeGraphProvider | null = null;
   private providerFactory: ContextProviderFactory;
   private ragInitializing: boolean = false;
   
@@ -169,19 +170,21 @@ export class ContextAgent {
       
       if (this.config.getDebugMode()) {
         console.log(`[ContextAgent] Using ${projectSize} project configuration for RAG system`);
-        console.log(`[ContextAgent] Extractor: ${providerConfig.extractorProvider.type}, Vector: ${providerConfig.vectorProvider.type}`);
+        console.log(`[ContextAgent] Extractor: ${providerConfig.extractorProvider.type}, Graph: ${providerConfig.graphProvider.type}, Vector: ${providerConfig.vectorProvider.type}`);
       }
 
-      // Create providers - simplified architecture without graph provider
+      // Create providers - using Neo4j as primary graph provider
+      this.graphProvider = this.providerFactory.createGraphProvider(providerConfig.graphProvider);
       this.vectorProvider = this.providerFactory.createVectorProvider(providerConfig.vectorProvider);
       this.contextExtractor = this.providerFactory.createContextExtractor(
         providerConfig.extractorProvider,
-        this.vectorProvider,
-        this.projectDir // Pass project root for RAG storage
+        this.graphProvider,
+        this.vectorProvider
       );
 
       // Initialize providers
       await Promise.all([
+        this.graphProvider.initialize(),
         this.vectorProvider.initialize(),
         this.contextExtractor.initialize()
       ]);

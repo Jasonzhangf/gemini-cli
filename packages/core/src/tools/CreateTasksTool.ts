@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { TaskManager, Task, TaskCreationOptions } from '../tasks/TaskManager';
+import { TaskManager, Task, TaskCreationOptions } from '../tasks/TaskManager.js';
 
 /**
  * CreateTasksTool input interface
@@ -117,7 +117,13 @@ export class CreateTasksTool {
     // Handle the specific format from the logs
     if (input.includes('tasks [') && input.includes('"}')) {
       // Fix the malformed JSON by adding the missing closing bracket
-      const fixedInput = input.replace('"}', '"]"}');
+      // Extract the array part and properly format it
+      const arrayMatch = input.match(/tasks\s*\[(.*?)(?:\]|\}|$)/);
+      if (!arrayMatch || !arrayMatch[1]) {
+        throw new Error('Cannot parse tasks array');
+      }
+      const arrayStr = arrayMatch[1].replace(/\}$/, '').trim();
+      const fixedInput = `{"tasks":[${arrayStr}]}`;
       try {
         return JSON.parse(fixedInput) as CreateTasksToolInput;
       } catch (e) {
