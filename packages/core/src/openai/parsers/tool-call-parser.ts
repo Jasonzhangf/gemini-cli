@@ -186,6 +186,12 @@ export class ToolCallParser {
           });
         } else if (typeof newArgs[param] === 'string') {
           newArgs[param] = this.resolveToAbsolutePath(newArgs[param], CWD);
+        } else {
+          // 调试：记录非字符串路径参数
+          if (this.debugMode) {
+            console.warn(`[ToolCallParser] Non-string path parameter "${param}" in tool "${toolName}":`, 
+              typeof newArgs[param], newArgs[param]);
+          }
         }
       }
     }
@@ -197,6 +203,15 @@ export class ToolCallParser {
    * 智能路径解析：处理各种路径格式
    */
   private resolveToAbsolutePath(inputPath: string, cwd: string): string {
+    // 防护：确保输入是字符串
+    if (typeof inputPath !== 'string') {
+      if (this.debugMode) {
+        console.error(`[ToolCallParser] resolveToAbsolutePath received non-string input:`, 
+          typeof inputPath, inputPath);
+      }
+      return String(inputPath); // 强制转换为字符串
+    }
+    
     const originalPath = inputPath;
     
     // 如果已经是完整的绝对路径（包含用户目录等），直接返回

@@ -243,6 +243,9 @@ export class ContextAgent {
         return;
       }
 
+      // 检查向量存储是否已有数据（持久化检查）
+      // TODO: 添加向量存储持久化检查，当前使用Neo4j图数据库作为主要存储
+
       const graph = this.knowledgeGraph.getRawGraph();
       let indexedCount = 0;
 
@@ -414,6 +417,9 @@ export class ContextAgent {
       }
     }
 
+    // 提取原始用户输入用于RAG，避免任务规划提示污染RAG结果
+    const originalUserInput = this.extractOriginalUserInput(userInput);
+    
     // 过滤掉thinking内容，确保RAG和语义分析使用一致的输入
     const filteredUserInput = userInput ? this.filterThinkingContent(userInput) : userInput;
 
@@ -437,13 +443,13 @@ export class ContextAgent {
       const contextSections: string[] = [];
 
       // Primary: Use RAG system if available (LightRAG implementation)
-      if (this.contextExtractor && userInput) {
+      if (this.contextExtractor && originalUserInput) {
         console.log('=== [🧠 RAG] RAG系统调试信息 ===');
-        console.log(`[🧠 RAG] 输入的用户内容: "${userInput}"`);
-        console.log(`[🧠 RAG] 输入长度: ${userInput.length} 字符`);
+        console.log(`[🧠 RAG] 输入的用户内容: "${originalUserInput}"`);
+        console.log(`[🧠 RAG] 输入长度: ${originalUserInput.length} 字符`);
         console.log('=====================================');
         try {
-          const ragResult = await this.extractContextWithRAG(userInput);
+          const ragResult = await this.extractContextWithRAG(originalUserInput);
           if (ragResult) {
             contextSections.push(ragResult);
             console.log('=== [🧠 RAG] RAG系统输出结果 ===');
@@ -1164,6 +1170,27 @@ export class ContextAgent {
   /**
    * Filter out <think> tags from user input
    */
+  /**
+   * 提取原始用户输入，排除任务规划提示
+   */
+  private extractOriginalUserInput(userInput?: string): string {
+    if (!userInput) return '';
+    
+    // 检查是否包含任务规划提示
+    const taskPlanningMatch = userInput.match(/请先为以下请求制定详细的任务计划：\s*["""](.+?)["""]/s);
+    if (taskPlanningMatch && taskPlanningMatch[1]) {
+      const originalInput = taskPlanningMatch[1].trim();
+      if (this.config.getDebugMode()) {
+        console.log(`[ContextAgent] 🎯 提取原始用户输入: "${originalInput}" (长度: ${originalInput.length})`);
+        console.log(`[ContextAgent] 📝 任务增强输入长度: ${userInput.length}`);
+      }
+      return originalInput;
+    }
+    
+    // 如果没有任务规划提示，返回过滤后的用户输入
+    return this.filterThinkingContent(userInput);
+  }
+
   private filterThinkingContent(userInput: string): string {
     return userInput.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
   }

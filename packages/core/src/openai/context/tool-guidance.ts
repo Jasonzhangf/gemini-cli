@@ -35,6 +35,11 @@ export class ToolGuidanceGenerator {
     }
 
     const availableTools = this.getAvailableTools();
+    
+    if (this.contextManager && this.contextManager.getDebugMode) {
+      console.log(`[ToolGuidanceGenerator] 🔧 Generated guidance for ${availableTools.length}/${this.toolDeclarations.length} tools`);
+    }
+    
     const toolDescriptions = this.generateToolDescriptions(availableTools);
 
     return `\n\n# 🔧 CRITICAL: Tool Call Format
@@ -112,16 +117,22 @@ The user will execute the tools and provide you with the results. Use the result
   private getAvailableTools(): any[] {
     let availableTools = this.toolDeclarations;
     
-    if (this.contextManager?.isInMaintenanceMode()) {
+    const isMaintenanceMode = this.contextManager?.isInMaintenanceMode();
+    console.log(`[ToolGuidanceGenerator] Checking maintenance mode: ${isMaintenanceMode}`);
+    console.log(`[ToolGuidanceGenerator] ContextManager exists: ${!!this.contextManager}`);
+    
+    if (isMaintenanceMode) {
       // 维护模式：移除create_tasks，保留其他任务管理工具
       availableTools = this.toolDeclarations.filter(tool => 
         tool.name !== 'create_tasks'
       );
+      console.log(`[ToolGuidanceGenerator] 🚫 MAINTENANCE MODE: Filtered out create_tasks. Available tools: ${availableTools.map(t => t.name).join(', ')}`);
     } else {
       // 非维护模式：移除维护专用工具，保留create_tasks
       availableTools = this.toolDeclarations.filter(tool => 
         !['finish_current_task', 'insert_task', 'modify_task'].includes(tool.name)
       );
+      console.log(`[ToolGuidanceGenerator] 📝 NORMAL MODE: Filtered maintenance tools. Available tools: ${availableTools.map(t => t.name).join(', ')}`);
     }
     
     return availableTools;

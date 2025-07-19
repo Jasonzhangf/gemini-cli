@@ -41,7 +41,7 @@ export function loadOpenAIConfig(): OpenAIHijackEnvConfig {
       config = {
         apiKey: process.env.DOUBAO_API_KEY || '',
         baseURL: process.env.DOUBAO_API_ENDPOINT || 'https://ark.cn-beijing.volces.com/api/v3',
-        model: process.env.DOUBAO_ACTUAL_MODEL || 'ep-20241216165142-hsgmt',
+        model: process.env.DOUBAO_ACTUAL_MODEL || 'doubao-seed-1-6-250615',
         temperature: 0.7,
         maxTokens: 4096,
       };
@@ -81,7 +81,16 @@ export function loadOpenAIConfig(): OpenAIHijackEnvConfig {
                     config = {
                       apiKey: process.env.DOUBAO_API_KEY || '',
                       baseURL: process.env.DOUBAO_API_ENDPOINT || 'https://ark.cn-beijing.volces.com/api/v3',
-                      model: process.env.DOUBAO_ACTUAL_MODEL || 'ep-20241216165142-hsgmt',
+                      model: process.env.DOUBAO_ACTUAL_MODEL || 'doubao-seed-1-6-250615',
+                      temperature: 0.7,
+                      maxTokens: 4096,
+                    };
+                    break;
+                  case 'LMSTUDIO':
+                    config = {
+                      apiKey: process.env.LMSTUDIO_API_KEY || 'lm-studio',
+                      baseURL: process.env.LMSTUDIO_API_ENDPOINT || 'http://127.0.0.1:1234/v1',
+                      model: process.env.LMSTUDIO_ACTUAL_MODEL || 'local-model',
                       temperature: 0.7,
                       maxTokens: 4096,
                     };
@@ -111,6 +120,22 @@ export function loadOpenAIConfig(): OpenAIHijackEnvConfig {
                 break;
               case 'DOUBAO_ACTUAL_MODEL':
                 if (provider === 'DOUBAO') {
+                  config.model = cleanValue;
+                }
+                break;
+              // LMStudio configuration
+              case 'LMSTUDIO_API_KEY':
+                if (provider === 'LMSTUDIO') {
+                  config.apiKey = cleanValue;
+                }
+                break;
+              case 'LMSTUDIO_API_ENDPOINT':
+                if (provider === 'LMSTUDIO') {
+                  config.baseURL = cleanValue;
+                }
+                break;
+              case 'LMSTUDIO_ACTUAL_MODEL':
+                if (provider === 'LMSTUDIO') {
                   config.model = cleanValue;
                 }
                 break;

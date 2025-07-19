@@ -260,7 +260,7 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
             results.push({
               node,
               score: vectorResult.score,
-              relationships: (node.relationships || []).map(rel => ({
+              relationships: (node.relationships || []).map((rel: any) => ({
                 sourceId: node.id,
                 targetId: rel.toId,
                 type: rel.type,
@@ -277,16 +277,34 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
       console.log('[Neo4jGraphRAGExtractor] 向量搜索已禁用，使用纯图搜索模式');
     }
 
-    // 2. 纯图搜索作为补充或主要方式
-    const graphQuery: GraphQuery = {
-      searchTerm: userInput,
-      maxResults: maxResults || this.config.searchConfig.maxResults!,
-      includeNeighbors: this.config.searchConfig.includeRelationships,
-      nodeTypes: undefined,
-      filters: undefined
-    };
+    // 2. 纯图搜索作为补充或主要方式 (支持中英文查询扩展)
+    const searchTerms = this.getQueryTranslations(userInput);
+    let graphResults: any = { nodes: [] };
+    
+    // 使用扩展的搜索词进行查询
+    for (const searchTerm of searchTerms) {
+      const graphQuery: GraphQuery = {
+        searchTerm: searchTerm,
+        maxResults: Math.ceil((maxResults || this.config.searchConfig.maxResults!) / searchTerms.length),
+        includeNeighbors: this.config.searchConfig.includeRelationships,
+        nodeTypes: undefined,
+        filters: undefined
+      };
 
-    const graphResults = await this.graphProvider.query(graphQuery);
+      try {
+        const termResults = await this.graphProvider.query(graphQuery);
+        graphResults.nodes.push(...termResults.nodes);
+        
+        // 如果找到足够的结果，提前退出
+        if (graphResults.nodes.length >= (maxResults || this.config.searchConfig.maxResults!)) {
+          break;
+        }
+      } catch (error) {
+        if (this.config.neo4jConfig.enableDebug) {
+          console.warn(`[Neo4jGraphRAGExtractor] 搜索词 "${searchTerm}" 查询失败:`, error);
+        }
+      }
+    }
     
     for (const node of graphResults.nodes) {
       // 避免重复添加
@@ -295,7 +313,7 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
         results.push({
           node,
           score: this.calculateGraphScore(node, userInput),
-          relationships: (node.relationships || []).map(rel => ({
+          relationships: (node.relationships || []).map((rel: any) => ({
             sourceId: node.id,
             targetId: rel.toId,
             type: rel.type,
@@ -316,19 +334,68 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
   }
 
   /**
-   * 计算图节点分数
+   * 中英文查询映射表
+   */
+  private getQueryTranslations(query: string): string[] {
+    const translations: Record<string, string[]> = {
+      '项目结构': ['project structure', 'architecture', 'directory', 'folder', 'organization'],
+      '配置文件': ['config', 'configuration', 'settings', 'env', 'setup'],
+      '测试': ['test', 'testing', 'spec', 'jest', 'vitest'],
+      '构建': ['build', 'compile', 'bundle', 'webpack', 'esbuild'],
+      '部署': ['deploy', 'deployment', 'release', 'publish'],
+      '依赖': ['dependency', 'dependencies', 'package', 'npm', 'node_modules'],
+      '组件': ['component', 'module', 'class', 'function'],
+      '接口': ['interface', 'api', 'endpoint', 'service'],
+      '数据库': ['database', 'db', 'storage', 'neo4j', 'mongodb'],
+      '日志': ['log', 'logging', 'logger', 'debug'],
+      '错误': ['error', 'exception', 'bug', 'issue'],
+      '性能': ['performance', 'optimization', 'speed', 'benchmark'],
+      '安全': ['security', 'auth', 'authentication', 'authorization'],
+      '文档': ['documentation', 'docs', 'readme', 'guide'],
+      '工具': ['tool', 'utility', 'helper', 'utils']
+    };
+
+    const queryLower = query.toLowerCase();
+    const results = [query, queryLower];
+    
+    // 查找直接映射
+    for (const [chinese, english] of Object.entries(translations)) {
+      if (queryLower.includes(chinese)) {
+        results.push(...english);
+      }
+    }
+    
+    // 查找部分匹配
+    for (const [chinese, english] of Object.entries(translations)) {
+      if (chinese.includes(queryLower) || queryLower.includes(chinese)) {
+        results.push(...english.slice(0, 2)); // 只取前2个最相关的
+      }
+    }
+    
+    return [...new Set(results)];
+  }
+
+  /**
+   * 计算图节点分数 (支持中英文)
    */
   private calculateGraphScore(node: KnowledgeNode, query: string): number {
     let score = 0;
+    const searchTerms = this.getQueryTranslations(query);
 
-    // 名称匹配
-    if (node.name?.toLowerCase().includes(query.toLowerCase())) {
-      score += 0.8;
+    // 多语言名称匹配
+    for (const term of searchTerms) {
+      if (node.name?.toLowerCase().includes(term.toLowerCase())) {
+        score += 0.8;
+        break; // 找到匹配就退出，避免重复计分
+      }
     }
 
-    // 内容匹配
-    if (node.content?.toLowerCase().includes(query.toLowerCase())) {
-      score += 0.6;
+    // 多语言内容匹配
+    for (const term of searchTerms) {
+      if (node.content?.toLowerCase().includes(term.toLowerCase())) {
+        score += 0.6;
+        break;
+      }
     }
 
     // 关系权重
@@ -407,7 +474,7 @@ export class Neo4jGraphRAGExtractor implements IContextExtractor {
             results.push({
               node: relatedNode,
               score: Math.max(score, 0.1),
-              relationships: (relatedNode.relationships || []).map(rel => ({
+              relationships: (relatedNode.relationships || []).map((rel: any) => ({
                 sourceId: relatedNode.id,
                 targetId: rel.toId,
                 type: rel.type,
