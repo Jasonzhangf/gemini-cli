@@ -76,9 +76,50 @@ export class CreateTasksTool extends BaseTool<CreateTasksParams, ToolResult> {
     }
   }
 
+  /**
+   * Parse string input into CreateTasksParams
+   * Handles malformed JSON strings from tool calls
+   */
+  private parseStringInput(input: string): CreateTasksParams {
+    // Handle the specific format from the logs: 'tasks ["task1", "task2"...'
+    if (input.includes('tasks [')) {
+      // Extract the array part
+      const arrayMatch = input.match(/tasks\s*\[(.*?)(?:\]|$)/);
+      if (arrayMatch && arrayMatch[1]) {
+        try {
+          // Try to parse as a proper JSON array
+          const tasksArray = JSON.parse(`[${arrayMatch[1]}]`);
+          return { tasks: tasksArray };
+        } catch (e) {
+          // If parsing fails, split by commas and clean up
+          const tasks = arrayMatch[1]
+            .split(',')
+            .map(t => t.trim().replace(/^["']|["']$/g, '')) // Remove quotes
+            .filter(t => t.length > 0);
+          return { tasks };
+        }
+      }
+    }
+    
+    // Try to parse as JSON first
+    try {
+      return JSON.parse(input) as CreateTasksParams;
+    } catch (e) {
+      // Not valid JSON, treat as a single task
+      return { tasks: [input] };
+    }
+  }
 
-  async execute(params: CreateTasksParams): Promise<ToolResult> {
-    let { tasks, template, autoContext = true } = params;
+  async execute(params: CreateTasksParams | string): Promise<ToolResult> {
+    // Handle string input that might be malformed JSON
+    let parsedParams: CreateTasksParams;
+    if (typeof params === 'string') {
+      parsedParams = this.parseStringInput(params);
+    } else {
+      parsedParams = params;
+    }
+    
+    let { tasks, template, autoContext = true } = parsedParams;
     
     // **IMPORTANT**: Check task maintenance mode status - STRICTLY FORBIDDEN
     if (this.contextManager?.isInMaintenanceMode()) {
@@ -154,7 +195,7 @@ export class CreateTasksTool extends BaseTool<CreateTasksParams, ToolResult> {
         if (extractedTasks.length > 0) {
           console.log(`[CreateTasks] Extracted ${extractedTasks.length} tasks: ${JSON.stringify(extractedTasks)}`);
           // Use the corrected tasks array
-          params.tasks = extractedTasks;
+          parsedParams.tasks = extractedTasks;
           tasks = extractedTasks;
         } else {
           throw new Error(`参数格式错误：tasks必须是字符串数组，收到: ${tasksStr}。请使用格式: ["任务1", "任务2", "任务3"]`);
