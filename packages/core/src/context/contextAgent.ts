@@ -12,6 +12,10 @@ import { LayeredContextManager } from './layeredContextManager.js';
 import { SemanticAnalysisService, AnalysisResult as SemanticAnalysisResult } from '../analysis/semanticAnalysisService.js';
 import { ContextProviderFactory } from './providers/contextProviderFactory.js';
 import { IContextExtractor, IVectorSearchProvider, IKnowledgeGraphProvider } from './interfaces/contextProviders.js';
+import { Content } from '@google/genai';
+import { getResponseText } from '../utils/generateContentResponseUtilities.js';
+import { ContextAgentLLMClient } from './contextAgentLLMClient.js';
+import { logger } from '../utils/enhancedLogger.js';
 
 export interface ContextAgentOptions {
   config: Config;
@@ -48,6 +52,9 @@ export class ContextAgent {
   
   // Semantic analysis components
   private semanticAnalysisService: SemanticAnalysisService | null = null;
+  
+  // Separate LLM process for intent recognition
+  private llmClient: ContextAgentLLMClient | null = null;
 
   constructor(options: ContextAgentOptions) {
     this.config = options.config;
@@ -67,6 +74,12 @@ export class ContextAgent {
     if (this.config.getAnalysisMode() === AnalysisMode.LLM) {
       this.semanticAnalysisService = new SemanticAnalysisService(this.config);
     }
+    
+    // Initialize separate LLM client for intent recognition
+    this.llmClient = new ContextAgentLLMClient({
+      debugMode: this.config.getDebugMode(),
+      requestTimeout: 30000
+    });
   }
 
   /**
@@ -98,17 +111,21 @@ export class ContextAgent {
 
       const scanResult = await this.fileScanner.scanProject(scanOptions);
       
-      if (this.config.getDebugMode()) {
-        console.log(`[ContextAgent] Scanned ${scanResult.totalScanned} files, found ${scanResult.files.length} relevant files, skipped ${scanResult.skippedCount}`);
-      }
+      logger.info('context', `Scanned ${scanResult.totalScanned} files, found ${scanResult.files.length} relevant files, skipped ${scanResult.skippedCount}`, {
+        totalScanned: scanResult.totalScanned,
+        relevantFiles: scanResult.files.length,
+        skippedCount: scanResult.skippedCount
+      });
 
       // Step 3: Analyze files and build knowledge graph
       if (scanResult.files.length > 0) {
         const analysisResult = await this.staticAnalyzer.analyzeFiles(scanResult.files);
         
-        if (this.config.getDebugMode()) {
-          console.log(`[ContextAgent] Analysis complete: ${analysisResult.nodes.length} nodes, ${analysisResult.relations.length} relations, ${analysisResult.errors.length} errors`);
-        }
+        logger.info('context', `Analysis complete: ${analysisResult.nodes.length} nodes, ${analysisResult.relations.length} relations, ${analysisResult.errors.length} errors`, {
+          nodes: analysisResult.nodes.length,
+          relations: analysisResult.relations.length,
+          errors: analysisResult.errors.length
+        });
 
         // Step 4: Add analysis results to knowledge graph
         await this.knowledgeGraph.addAnalysisResult(analysisResult.nodes, analysisResult.relations);
@@ -123,17 +140,21 @@ export class ContextAgent {
       this.initialized = true;
       const duration = Date.now() - startTime;
       
-      if (this.config.getDebugMode()) {
-        const stats = this.knowledgeGraph.getStatistics();
-        console.log(`[ContextAgent] Initialization complete in ${duration}ms`);
-        console.log(`[ContextAgent] Graph statistics:`, stats);
-        if (stats.placeholderNodes > 0) {
-          console.log(`[ContextAgent] Created ${stats.placeholderNodes} placeholder nodes for external references`);
-        }
+      const stats = this.knowledgeGraph.getStatistics();
+      logger.success('context', `Initialization complete in ${duration}ms`, {
+        duration,
+        stats,
+        initialized: this.initialized
+      });
+      
+      if (stats.placeholderNodes > 0) {
+        logger.info('context', `Created ${stats.placeholderNodes} placeholder nodes for external references`, {
+          placeholderNodes: stats.placeholderNodes
+        });
       }
 
     } catch (error) {
-      console.error('[ContextAgent] Initialization failed:', error);
+      logger.error('context', 'Initialization failed', { error: error instanceof Error ? error.message : String(error) });
       // Don't throw - allow CLI to continue without ContextAgent
       this.initialized = false;
     }
@@ -145,9 +166,7 @@ export class ContextAgent {
   private async initializeRAGSystem(): Promise<void> {
     this.ragInitializing = true;
     try {
-      if (this.config.getDebugMode()) {
-        console.log('[ContextAgent] Initializing RAG system...');
-      }
+      logger.info('rag', 'Initializing RAG system...');
 
       // Determine project size for optimal provider configuration
       const stats = this.knowledgeGraph.getStatistics();
@@ -678,7 +697,7 @@ export class ContextAgent {
   }
 
   /**
-   * Extract context using advanced RAG system
+   * Extract context using advanced RAG system with LLM intent recognition
    */
   private async extractContextWithRAG(userInput: string): Promise<string | null> {
     if (!this.contextExtractor) {
@@ -688,9 +707,14 @@ export class ContextAgent {
     try {
       const startTime = Date.now();
       
-      // Build context query for RAG system
+      // First, use LLM for intent recognition and keyword extraction
+      const intentAnalysis = await this.performLLMIntentRecognition(userInput);
+      
+      // Build context query for RAG system using LLM-identified keywords
       const contextQuery = {
         userInput,
+        intentKeywords: intentAnalysis.keywords, // Use LLM-generated keywords
+        intent: intentAnalysis.intent,
         conversationHistory: [], // TODO: Could integrate with conversation history if needed
         recentOperations: [],
         sessionContext: {
@@ -707,10 +731,11 @@ export class ContextAgent {
       
       if (this.config.getDebugMode()) {
         console.log(`[ContextAgent] RAG extraction completed in ${duration}ms`);
+        console.log(`[ContextAgent] Intent: ${intentAnalysis.intent}, Keywords: ${intentAnalysis.keywords.join(', ')}`);
       }
 
       // Format the extracted context for model consumption
-      const formattedContext = this.formatRAGContextForModel(extractedContext);
+      const formattedContext = this.formatRAGContextForModel(extractedContext, intentAnalysis);
       
       return formattedContext;
 
@@ -723,14 +748,64 @@ export class ContextAgent {
   }
 
   /**
+   * Use separate LLM process to perform intent recognition and keyword extraction
+   * This implements the user's requirement:
+   * "contegent的llm模式是单独一个进程，和主对话不是一个进程"
+   */
+  private async performLLMIntentRecognition(userInput: string): Promise<{intent: string, keywords: string[], confidence: number}> {
+    try {
+      if (!this.llmClient) {
+        throw new Error('LLM client not initialized');
+      }
+
+      logger.info('llm', 'Using separate LLM process for intent recognition', {
+        inputLength: userInput.length,
+        inputPreview: userInput.substring(0, 100) + (userInput.length > 100 ? '...' : '')
+      });
+
+      // Send request to separate LLM process
+      const response = await this.llmClient.requestIntentRecognition(userInput);
+      
+      if (this.config.getDebugMode()) {
+        console.log(`[ContextAgent] LLM process response: Intent: ${response.intent}, Keywords: ${response.keywords.join(', ')}, Confidence: ${response.confidence}`);
+      }
+
+      return {
+        intent: response.intent,
+        keywords: response.keywords,
+        confidence: response.confidence
+      };
+
+    } catch (error) {
+      console.warn('[ContextAgent] Separate LLM process intent recognition failed, falling back to keyword extraction:', error);
+      
+      // Fallback to basic keyword extraction
+      return {
+        intent: 'general_inquiry',
+        keywords: this.extractKeywords(userInput),
+        confidence: 0.2
+      };
+    }
+  }
+
+  /**
    * Format RAG extracted context for model consumption
    */
-  private formatRAGContextForModel(context: any): string {
+  private formatRAGContextForModel(context: any, intentAnalysis?: {intent: string, keywords: string[], confidence: number}): string {
     const sections: string[] = [];
 
     // Add header
     sections.push('# 🧠 Advanced RAG Context Analysis');
     sections.push(`*Generated using LightRAG-inspired semantic analysis*\n`);
+
+    // Add LLM intent analysis section
+    if (intentAnalysis) {
+      sections.push('## 🎯 LLM Intent Recognition');
+      sections.push(`**Intent**: ${intentAnalysis.intent}`);
+      sections.push(`**Confidence**: ${(intentAnalysis.confidence * 100).toFixed(1)}%`);
+      sections.push(`**Keywords**: ${intentAnalysis.keywords.join(', ')}`);
+      sections.push('');
+    }
 
     // Semantic analysis section
     if (context.semantic) {
@@ -1067,6 +1142,14 @@ export class ContextAgent {
         await this.vectorProvider.dispose();
       } catch (error) {
         console.warn('[ContextAgent] Failed to dispose vector provider:', error);
+      }
+    }
+    
+    if (this.llmClient) {
+      try {
+        await this.llmClient.dispose();
+      } catch (error) {
+        console.warn('[ContextAgent] Failed to dispose LLM client:', error);
       }
     }
   }

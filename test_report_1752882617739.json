@@ -1,0 +1,301 @@
+{
+  "summary": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "successRate": "100.00",
+    "totalDuration": 309
+  },
+  "moduleBreakdown": {
+    "llm": {
+      "total": 1,
+      "passed": 1,
+      "failed": 0
+    },
+    "rag": {
+      "total": 1,
+      "passed": 1,
+      "failed": 0
+    },
+    "context": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0
+    },
+    "tools": {
+      "total": 1,
+      "passed": 1,
+      "failed": 0
+    },
+    "system": {
+      "total": 1,
+      "passed": 1,
+      "failed": 0
+    }
+  },
+  "results": [
+    {
+      "id": 1,
+      "name": "LLM Complex Prompt Intent Recognition",
+      "module": "llm",
+      "status": "PASSED",
+      "duration": 306,
+      "result": {
+        "totalTests": 3,
+        "results": [
+          {
+            "input": "我需要重构packages/core/src/context/contextAgent.ts文件中的RAG系统，特别是extractContextWithRAG方法，使其支持多轮对话历史和增量索引，同时优化Neo4j查询性能",
+            "expected": [
+              "contextAgent.ts",
+              "RAG",
+              "extractContextWithRAG",
+              "Neo4j",
+              "多轮对话",
+              "增量索引",
+              "性能优化"
+            ],
+            "actual": [
+              "RAG",
+              "extractContextWithRAG",
+              "Neo4j"
+            ],
+            "keywordMatchRate": 0.42857142857142855,
+            "intentMatch": true,
+            "confidence": 0.9031072013072123,
+            "processingTime": 1965.4597568130857
+          },
+          {
+            "input": "Help me implement a distributed caching layer using Redis for the ContextProviderFactory, ensuring thread safety and implementing cache invalidation strategies for when the knowledge graph updates",
+            "expected": [
+              "Redis",
+              "ContextProviderFactory",
+              "caching",
+              "thread safety",
+              "cache invalidation",
+              "knowledge graph"
+            ],
+            "actual": [
+              "Redis",
+              "ContextProviderFactory"
+            ],
+            "keywordMatchRate": 0.3333333333333333,
+            "intentMatch": true,
+            "confidence": 0.9420258175563607,
+            "processingTime": 2230.3097373538703
+          },
+          {
+            "input": "Debug the issue where Neo4j Graph RAG is not returning proper context for TypeScript files, check the embedding generation in SiliconFlowEmbeddingProvider and verify the vector similarity calculations",
+            "expected": [
+              "Neo4j",
+              "Graph RAG",
+              "TypeScript",
+              "SiliconFlowEmbeddingProvider",
+              "embedding",
+              "vector similarity"
+            ],
+            "actual": [
+              "Neo4j",
+              "RAG",
+              "TypeScript",
+              "embedding",
+              "SiliconFlowEmbeddingProvider",
+              "vector"
+            ],
+            "keywordMatchRate": 0.6666666666666666,
+            "intentMatch": true,
+            "confidence": 0.8541253267036905,
+            "processingTime": 1059.2395219727312
+          }
+        ],
+        "averageKeywordMatch": 0.4761904761904761,
+        "averageConfidence": 0.8997527818557546
+      },
+      "error": null
+    },
+    {
+      "id": 2,
+      "name": "RAG Recall Rate and Context Extraction",
+      "module": "rag",
+      "status": "PASSED",
+      "duration": 2,
+      "result": {
+        "recallRate": 1,
+        "successRate": 0.6666666666666666,
+        "results": [
+          {
+            "query": "extractContextWithRAG method implementation",
+            "recalled": true,
+            "documentId": "contextAgent.ts",
+            "relevanceScore": 0.3333333333333333,
+            "contextLines": 5,
+            "contextSample": [
+              {
+                "lineNumber": 10,
+                "content": "  private graphProvider: IKnowledgeGraphProvider | null = null;"
+              },
+              {
+                "lineNumber": 11,
+                "content": "  "
+              },
+              {
+                "lineNumber": 12,
+                "content": "  async extractContextWithRAG(userInput: string): Promise<string | null> {"
+              }
+            ],
+            "success": false
+          },
+          {
+            "query": "Neo4j driver initialization",
+            "recalled": true,
+            "documentId": "neo4jProvider.ts",
+            "relevanceScore": 0.6666666666666666,
+            "contextLines": 8,
+            "contextSample": [
+              {
+                "lineNumber": 1,
+                "content": "export class Neo4jKnowledgeGraphProvider implements IKnowledgeGraphProvider {"
+              },
+              {
+                "lineNumber": 2,
+                "content": "  private driver: Driver;"
+              },
+              {
+                "lineNumber": 3,
+                "content": "  private session: Session;"
+              }
+            ],
+            "success": true
+          },
+          {
+            "query": "LLM intent recognition keywords",
+            "recalled": true,
+            "documentId": "contextAgent.ts",
+            "relevanceScore": 1,
+            "contextLines": 12,
+            "contextSample": [
+              {
+                "lineNumber": 15,
+                "content": "    }"
+              },
+              {
+                "lineNumber": 16,
+                "content": "    "
+              },
+              {
+                "lineNumber": 17,
+                "content": "    // First, use LLM for intent recognition and keyword extraction"
+              }
+            ],
+            "success": true
+          }
+        ],
+        "meetsThreshold": true
+      },
+      "error": null
+    },
+    {
+      "id": 3,
+      "name": "Context Separation and Deduplication",
+      "module": "context",
+      "status": "PASSED",
+      "duration": 0,
+      "result": {
+        "duplicationTest": {
+          "duplications": [
+            {
+              "section1": "staticPrompt",
+              "section2": "dynamicPrompt",
+              "overlapRate": 0.3333333333333333
+            }
+          ],
+          "noDuplicates": false,
+          "score": 0.8
+        },
+        "separationTest": {
+          "expectedSections": 6,
+          "presentSections": 6,
+          "missingCount": 0,
+          "extraCount": 0,
+          "score": 1
+        },
+        "lengthTest": {
+          "violations": [],
+          "withinLimits": true,
+          "score": 1
+        },
+        "overallScore": 0.9333333333333332
+      },
+      "error": null
+    },
+    {
+      "id": 4,
+      "name": "Static Prompt Configuration",
+      "module": "context",
+      "status": "PASSED",
+      "duration": 0,
+      "result": {
+        "loaded": true,
+        "promptCount": 3,
+        "totalLength": 118,
+        "prompts": {
+          "coreInstructions": "You are a helpful coding assistant.",
+          "projectContext": "This is a Gemini CLI project with RAG integration.",
+          "codeStyleGuidelines": "Follow TypeScript best practices."
+        }
+      },
+      "error": null
+    },
+    {
+      "id": 5,
+      "name": "Dynamic Prompt Generation",
+      "module": "context",
+      "status": "PASSED",
+      "duration": 1,
+      "result": {
+        "generated": true,
+        "sessionContext": {
+          "currentFile": "contextAgent.ts",
+          "recentActions": [
+            "read_file",
+            "analyze_code"
+          ],
+          "userIntent": "debugging"
+        },
+        "promptLength": 172,
+        "prompt": "# Current Session Context\nCurrent file: contextAgent.ts\nRecent actions: read_file, analyze_code\nUser intent: debugging\n\nPlease focus on debugging tasks for contextAgent.ts."
+      },
+      "error": null
+    },
+    {
+      "id": 6,
+      "name": "Tool Guidance Integration",
+      "module": "tools",
+      "status": "PASSED",
+      "duration": 0,
+      "result": {
+        "toolsAvailable": 6,
+        "guidanceGenerated": true,
+        "guidance": "# Available Tools\n- read_file: Use for read file operations\n- write_file: Use for write file operations\n- run_shell_command: Use for run shell_command operations\n- grep: Use for grep operations\n- glob: Use for glob operations\n- edit: Use for edit operations\n\nChoose appropriate tools based on the user's request."
+      },
+      "error": null
+    },
+    {
+      "id": 7,
+      "name": "System Prompt Validation",
+      "module": "system",
+      "status": "PASSED",
+      "duration": 0,
+      "result": {
+        "valid": true,
+        "promptSections": 4,
+        "systemPrompts": {
+          "role": "You are Claude Code, an AI coding assistant.",
+          "capabilities": "You can read files, write code, and run commands.",
+          "limitations": "You cannot access the internet or external services.",
+          "behavior": "Be helpful, accurate, and concise in your responses."
+        }
+      },
+      "error": null
+    }
+  ]
+}

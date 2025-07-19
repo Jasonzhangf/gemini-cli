@@ -181,7 +181,7 @@ export class ContextProviderFactory implements IContextProviderFactory {
           includeRelationships: config.config?.includeRelationships ?? true,
           expandRelationships: config.config?.expandRelationships ?? true,
           maxExpansionDepth: config.config?.maxExpansionDepth || 2,
-          enableHybridSearch: config.config?.enableHybridSearch ?? true
+          enableHybridSearch: config.config?.enableHybridSearch ?? false // Disable hybrid search by default
         },
         contextConfig: {
           maxContextLength: config.config?.maxContextLength || 8000,
@@ -231,11 +231,12 @@ export class ContextProviderFactory implements IContextProviderFactory {
     projectSize: 'small' | 'medium' | 'large' = 'medium',
     useNeo4j?: boolean
   ): ContextProviderConfig {
-    // 自动检测是否应该使用Neo4j
+    // 自动检测是否应该使用Neo4j - RAG is now default
     if (useNeo4j === undefined) {
       useNeo4j = process.env.DEFAULT_RAG_PROVIDER === 'neo4j-graph-rag' || 
                  process.env.ENABLE_NEO4J_GRAPH_RAG === 'true' ||
-                 true; // 默认使用Neo4j
+                 process.env.DISABLE_RAG_SYSTEM !== 'true' ||
+                 true; // 默认使用Neo4j Graph RAG
     }
     // Check if SiliconFlow is disabled and use alternative or null
     const useSiliconFlow = process.env.DISABLE_SILICONFLOW_EMBEDDING !== 'true';
@@ -267,7 +268,7 @@ export class ContextProviderFactory implements IContextProviderFactory {
           includeRelationships: true,
           expandRelationships: projectSize !== 'small',
           maxExpansionDepth: projectSize === 'large' ? 3 : 2,
-          enableHybridSearch: true,
+          enableHybridSearch: false, // Disable hybrid search to avoid text matching fallback
           maxContextLength: projectSize === 'small' ? 4000 : projectSize === 'large' ? 12000 : 8000,
           enableSemanticClustering: projectSize !== 'small',
           enableDebug: false

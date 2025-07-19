@@ -39,6 +39,7 @@ import {
 } from '@google/gemini-cli-core';
 import { validateAuthMethod } from './config/auth.js';
 import { setMaxSizedBoxDebugging } from './ui/components/shared/MaxSizedBox.js';
+import { setGlobalLogger, EnhancedLogger } from '@google/gemini-cli-core/src/utils/enhancedLogger.js';
 
 function getNodeMemoryArgs(config: Config): string[] {
   const totalMemoryMB = os.totalmem() / (1024 * 1024);
@@ -130,6 +131,27 @@ export async function main() {
   }
 
   setMaxSizedBoxDebugging(config.getDebugMode());
+
+  // Initialize enhanced logger for debug mode
+  if (config.getDebugMode()) {
+    // Auto-enable enhanced logging features when --debug is used
+    if (!process.env.DEBUG_TURN_BASED_LOGS) {
+      process.env.DEBUG_TURN_BASED_LOGS = 'true';
+    }
+    if (!process.env.DEBUG_CONTEXT_FILE) {
+      process.env.DEBUG_CONTEXT_FILE = 'true';
+    }
+    
+    const logger = new EnhancedLogger();
+    setGlobalLogger(logger);
+    logger.startTurn();
+    logger.info('system', 'Gemini CLI started with debug mode enabled');
+    logger.info('system', 'Enhanced modular logging initialized (auto-enabled turn-based logs and context file output)', {
+      sessionId: logger.getSessionId(),
+      currentTurnId: logger.getCurrentTurnId(),
+      config: logger.getConfig()
+    });
+  }
 
   await config.initialize();
 

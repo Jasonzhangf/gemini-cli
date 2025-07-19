@@ -48,6 +48,11 @@ export interface GeneralConfiguration {
     timeout?: number;
     enableCache?: boolean;
   };
+  rag?: {
+    defaultProvider?: 'neo4j-graph-rag' | 'rag';
+    enableHybridSearch?: boolean;
+    disableTextMatching?: boolean;
+  };
   approvalMode?: 'default' | 'autoEdit' | 'yolo';
   accessibility?: {
     disableLoadingPhrases?: boolean;
@@ -430,6 +435,11 @@ export class ProjectConfigurationManager {
         mode: 'vector',
         timeout: 30000,
         enableCache: true,
+      },
+      rag: {
+        defaultProvider: 'neo4j-graph-rag',
+        enableHybridSearch: false,
+        disableTextMatching: true,
       },
       approvalMode: 'default',
       accessibility: {
