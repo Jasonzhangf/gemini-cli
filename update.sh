@@ -155,6 +155,13 @@ else
     log_warning "增强日志系统文件未找到"
 fi
 
+log_info "检查会话历史RAG系统..."
+if [ -f "packages/core/dist/src/context/conversationRAG.js" ]; then
+    log_success "会话历史RAG系统文件存在"
+else
+    log_warning "会话历史RAG系统文件未找到"
+fi
+
 log_info "检查Context测试套件..."
 if [ -f "comprehensive_context_test_suite.cjs" ]; then
     log_success "综合上下文测试套件存在"
@@ -253,6 +260,7 @@ echo "   ✅ Neo4j图数据库RAG - 语义关系和向量检索"
 echo "   ✅ 文本匹配完全移除 - 纯向量搜索"
 echo "   ✅ 轮次分模块日志 - content-time文件命名"
 echo "   ✅ 6分区上下文构建 - 静态、动态、工具、系统、RAG、LLM意图"
+echo "   ✅ 会话历史RAG系统 - 关键字检索对话历史"
 echo "   ✅ 环境变量模块化控制 - 细粒度调试配置"
 echo ""
 echo "🔧 如果遇到问题："

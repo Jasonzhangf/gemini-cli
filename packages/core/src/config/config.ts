@@ -176,7 +176,7 @@ export interface ConfigParameters {
   noBrowser?: boolean;
   openaiMode?: boolean;
   analysis?: AnalysisSettings;
-  vectorProvider?: 'siliconflow';
+  vectorProvider?: 'siliconflow' | 'none';
 }
 
 export class Config {
@@ -228,7 +228,7 @@ export class Config {
   private toolCallInterceptor: ToolCallInterceptor | null = null;
   private contextAgent: ContextAgent | null = null;
   private readonly analysisSettings: AnalysisSettings;
-  private readonly vectorProvider: 'siliconflow';
+  private readonly vectorProvider: 'siliconflow' | 'none';
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -280,7 +280,12 @@ export class Config {
       timeout: params.analysis?.timeout ?? 30000,
       enableCache: params.analysis?.enableCache ?? true,
     };
-    this.vectorProvider = params.vectorProvider ?? 'siliconflow';
+    // Check if SiliconFlow embedding is disabled, fallback to 'none'
+    if (process.env.DISABLE_SILICONFLOW_EMBEDDING === 'true') {
+      this.vectorProvider = 'none' as any;
+    } else {
+      this.vectorProvider = params.vectorProvider ?? 'siliconflow';
+    }
   }
 
   async initialize(): Promise<void> {
@@ -605,16 +610,21 @@ export class Config {
     return this.noBrowser;
   }
 
-  getVectorProvider(): 'siliconflow' {
+  getVectorProvider(): 'siliconflow' | 'none' {
     return this.vectorProvider;
   }
 
-  getProviderConfig(type: 'siliconflow'): any {
+  getProviderConfig(type: 'siliconflow' | 'none'): any {
     if (type === 'siliconflow') {
       return {
         modelName: 'BAAI/bge-m3',
         dimensions: 1024,
         batchSize: 100
+      };
+    } else if (type === 'none') {
+      return {
+        disabled: true,
+        message: 'Vector search is disabled'
       };
     }
     return {};

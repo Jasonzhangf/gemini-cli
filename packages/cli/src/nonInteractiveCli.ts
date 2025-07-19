@@ -124,22 +124,10 @@ export async function runNonInteractive(
         }
       }
 
-      // Point 2: RAG processing after model reply (think tags already filtered) - non-interactive mode
-      if (completeResponseText) {
-        try {
-          const contextAgent = config.getContextAgent();
-          if (contextAgent) {
-            await contextAgent.injectContextIntoDynamicSystem(completeResponseText);
-            if (config.getDebugMode()) {
-              console.log('[nonInteractiveCli] ✅ RAG processing completed for model response');
-            }
-          }
-        } catch (ragError) {
-          if (config.getDebugMode()) {
-            console.warn('[nonInteractiveCli] RAG processing failed for model response:', ragError);
-          }
-          // Continue execution even if RAG fails
-        }
+      // Point 2: No RAG processing for model response - RAG should only process original user input
+      // Model responses (including tool calls) should not be fed back into RAG system
+      if (config.getDebugMode() && completeResponseText) {
+        console.log('[nonInteractiveCli] 🚫 Skipped RAG processing for model response containing tool calls');
       }
 
       if (functionCalls.length > 0) {

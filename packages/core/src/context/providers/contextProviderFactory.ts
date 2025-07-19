@@ -44,18 +44,17 @@ export class ContextProviderFactory implements IContextProviderFactory {
 
   /**
    * Register default provider implementations
+   * Simplified to only Neo4j for optimal performance
    */
   private registerDefaultProviders(): void {
-    // Vector providers
-    this.vectorProviders.set('siliconflow', SiliconFlowEmbeddingProvider);
-    this.vectorProviders.set('none', NullVectorProvider);
-    
-    // Graph providers
+    // Only Neo4j Graph provider (other RAG providers removed)
     this.graphProviders.set('neo4j', Neo4jKnowledgeGraphProvider as any);
     
-    // Extractor providers - support both RAG and Neo4j Graph RAG
-    this.extractorProviders.set('rag', RAGContextExtractor);
+    // Only Neo4j Graph RAG extractor (simplified)
     this.extractorProviders.set('neo4j-graph-rag', Neo4jGraphRAGExtractor);
+    
+    // Minimal vector provider for compatibility
+    this.vectorProviders.set('none', NullVectorProvider);
   }
 
 
@@ -224,67 +223,12 @@ export class ContextProviderFactory implements IContextProviderFactory {
   }
 
   /**
-   * Create a complete provider setup with recommended defaults
-   * Neo4j Graph RAG is now the default RAG provider
+   * Create simplified Neo4j-only setup
+   * Removes all other RAG providers for clarity
    */
   createRecommendedSetup(
-    projectSize: 'small' | 'medium' | 'large' = 'medium',
-    useNeo4j?: boolean
+    projectSize: 'small' | 'medium' | 'large' = 'medium'
   ): ContextProviderConfig {
-    // 自动检测是否应该使用Neo4j - RAG is now default
-    if (useNeo4j === undefined) {
-      useNeo4j = process.env.DEFAULT_RAG_PROVIDER === 'neo4j-graph-rag' || 
-                 process.env.ENABLE_NEO4J_GRAPH_RAG === 'true' ||
-                 process.env.DISABLE_RAG_SYSTEM !== 'true' ||
-                 true; // 默认使用Neo4j Graph RAG
-    }
-    // Check if SiliconFlow is disabled and use alternative or null
-    const useSiliconFlow = process.env.DISABLE_SILICONFLOW_EMBEDDING !== 'true';
-    
-    const baseVectorConfig = useSiliconFlow ? {
-      type: 'siliconflow' as const,
-      config: {
-        modelName: 'BAAI/bge-m3',
-        dimensions: 1024,
-        batchSize: projectSize === 'small' ? 20 : 100
-      }
-    } : {
-      type: 'none' as const, // Use a placeholder type when SiliconFlow is disabled
-      config: {
-        disabled: true,
-        message: 'SiliconFlow embedding is disabled'
-      }
-    };
-
-    let baseExtractorConfig;
-    
-    if (useNeo4j) {
-      // Use Neo4j Graph RAG as primary extractor
-      baseExtractorConfig = {
-        type: 'neo4j-graph-rag' as const,
-        config: {
-          maxResults: projectSize === 'small' ? 10 : projectSize === 'large' ? 30 : 20,
-          similarityThreshold: 0.5,
-          includeRelationships: true,
-          expandRelationships: projectSize !== 'small',
-          maxExpansionDepth: projectSize === 'large' ? 3 : 2,
-          enableHybridSearch: false, // Disable hybrid search to avoid text matching fallback
-          maxContextLength: projectSize === 'small' ? 4000 : projectSize === 'large' ? 12000 : 8000,
-          enableSemanticClustering: projectSize !== 'small',
-          enableDebug: false
-        }
-      };
-    } else {
-      // Use traditional RAG extractor
-      baseExtractorConfig = {
-        type: 'rag' as const,
-        config: { 
-          maxResults: projectSize === 'small' ? 5 : projectSize === 'large' ? 10 : 8,
-          threshold: 0.1
-        }
-      };
-    }
-
     return {
       graphProvider: {
         type: 'neo4j' as const,
@@ -296,8 +240,27 @@ export class ContextProviderFactory implements IContextProviderFactory {
           enableDebug: false
         }
       },
-      vectorProvider: baseVectorConfig,
-      extractorProvider: baseExtractorConfig
+      vectorProvider: {
+        type: 'none' as const,
+        config: {
+          disabled: true,
+          message: 'Using Neo4j Graph RAG only'
+        }
+      },
+      extractorProvider: {
+        type: 'neo4j-graph-rag' as const,
+        config: {
+          maxResults: projectSize === 'small' ? 10 : projectSize === 'large' ? 30 : 20,
+          similarityThreshold: 0.5,
+          includeRelationships: true,
+          expandRelationships: projectSize !== 'small',
+          maxExpansionDepth: projectSize === 'large' ? 3 : 2,
+          enableHybridSearch: false,
+          maxContextLength: projectSize === 'small' ? 4000 : projectSize === 'large' ? 12000 : 8000,
+          enableSemanticClustering: projectSize !== 'small',
+          enableDebug: false
+        }
+      }
     };
   }
 
@@ -308,7 +271,7 @@ export class ContextProviderFactory implements IContextProviderFactory {
     primary: ContextProviderConfig;
     backup: ContextProviderConfig;
   } {
-    const backupConfig = this.createRecommendedSetup('medium', true);
+    const backupConfig = this.createRecommendedSetup('medium');
     
     return {
       primary: primaryConfig,

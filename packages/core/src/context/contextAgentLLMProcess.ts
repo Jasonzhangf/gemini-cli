@@ -56,8 +56,9 @@ export class ContextAgentLLMProcess {
       // 获取Gemini客户端
       this.geminiClient = this.config.getGeminiClient();
       
+      // 如果没有GeminiClient，抛出错误 - 不使用fallback机制
       if (!this.geminiClient) {
-        throw new Error('GeminiClient is not available');
+        throw new Error('GeminiClient is not available for independent LLM process');
       }
 
       this.isInitialized = true;
@@ -121,7 +122,7 @@ export class ContextAgentLLMProcess {
    * 构建意图识别提示
    */
   private buildIntentPrompt(userInput: string): string {
-    return `作为一个专业的代码分析助手，请分析用户输入的意图并提取关键字用于代码库RAG查询。
+    return `这是用户的原始输入，请你帮我将其语义进行理解并且提供十个以内的关键词来描述，用JSON格式来表示。
 
 用户输入：${userInput}
 
@@ -216,7 +217,7 @@ export class ContextAgentLLMProcess {
       // 降级到简单的关键字提取
       return {
         intent: 'general_inquiry',
-        keywords: this.extractBasicKeywords(userInput),
+        keywords: [],
         confidence: 0.3
       };
     }
@@ -248,36 +249,6 @@ export class ContextAgentLLMProcess {
     return Math.max(0, Math.min(1, confidence));
   }
 
-  /**
-   * 基础关键字提取（降级方案）
-   */
-  private extractBasicKeywords(input: string): string[] {
-    const keywords: string[] = [];
-    const text = input.toLowerCase();
-    
-    // 提取看起来像标识符的词
-    const identifierPattern = /\b[a-zA-Z_][a-zA-Z0-9_]*\b/g;
-    const matches = text.match(identifierPattern);
-    
-    if (matches) {
-      const stopWords = ['the', 'and', 'for', 'are', 'you', 'can', 'how', 'what', 'when', 'where', 'why', 'this', 'that', 'with', 'from', 'they', 'have', 'will', 'been', 'some', 'like', 'into', 'make', 'time', 'than', 'only', 'come', 'could', 'also', 'code', 'file', 'function'];
-      
-      for (const match of matches) {
-        if (match.length >= 3 && !stopWords.includes(match)) {
-          keywords.push(match);
-        }
-      }
-    }
-    
-    // 提取文件扩展名
-    const extPattern = /\.(ts|js|tsx|jsx|py|java|cpp|c|h|hpp|cs|go|rs|php|rb|swift|kt|scala|json|md|yml|yaml)\b/g;
-    const extMatches = text.match(extPattern);
-    if (extMatches) {
-      keywords.push(...extMatches.map(ext => ext.substring(1)));
-    }
-    
-    return [...new Set(keywords)].slice(0, 10);
-  }
 
   /**
    * 清理资源

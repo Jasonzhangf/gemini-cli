@@ -190,19 +190,30 @@ export class ContextAgentLLMServer {
    * 创建服务器配置
    */
   private async createServerConfig(): Promise<Config> {
-    // 这里我们需要创建一个真实的Config实例
-    // 由于这是一个独立进程，我们需要重新初始化配置
+    // 创建真实的Config实例来正确初始化GeminiClient
+    const { Config } = await import('../config/config.js');
     
-    // 临时的mock配置，实际实现需要正确初始化
-    const mockConfig = {
-      getDebugMode: () => process.env.DEBUG === '1' || process.env.CONTEXTAGENT_DEBUG === '1',
-      getGeminiClient: () => {
-        // 需要在这里正确初始化GeminiClient
-        throw new Error('GeminiClient initialization needed in server process');
-      }
-    };
-
-    return mockConfig as unknown as Config;
+    // 使用实际的Config实例，这样可以正确初始化GeminiClient
+    const config = new Config({
+      sessionId: 'llm-server-session',
+      model: process.env.CONTEXTAGENT_MODEL || 'gemini-1.5-flash',
+      cwd: process.cwd(),
+      targetDir: process.cwd(),
+      debugMode: process.env.DEBUG === '1' || process.env.CONTEXTAGENT_DEBUG === '1'
+    });
+    
+    // 初始化配置
+    await config.initialize();
+    
+    // 刷新认证以确保GeminiClient可用
+    try {
+      const { AuthType } = await import('../core/contentGenerator.js');
+      await config.refreshAuth(AuthType.USE_GEMINI);
+    } catch (error) {
+      console.warn('[ContextAgentLLMServer] Auth refresh failed, will rely on environment variables:', error);
+    }
+    
+    return config;
   }
 
   /**

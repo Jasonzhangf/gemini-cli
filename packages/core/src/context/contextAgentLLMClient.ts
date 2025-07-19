@@ -57,7 +57,7 @@ export class ContextAgentLLMClient {
         // 创建独立的Node.js进程来运行LLM服务器
         this.serverProcess = spawn('node', [
           '-e', `
-            const { ContextAgentLLMServer } = require('${__dirname}/contextAgentLLMServer.js');
+            const { ContextAgentLLMServer } = require('@google/gemini-cli-core/dist/src/context/contextAgentLLMServer.js');
             const server = new ContextAgentLLMServer();
             server.start().then(port => {
               console.log('SERVER_READY:' + port);
@@ -167,8 +167,29 @@ export class ContextAgentLLMClient {
       timestamp: Date.now()
     };
 
+    // 打印LLM输入信息
+    if (this.debugMode || process.env.CONTEXTAGENT_DEBUG === '1') {
+      console.log('=== [🤖 LLM] LLM意图识别输入调试信息 ===');
+      console.log('[🤖 LLM] 用户输入内容:', userInput);
+      console.log('[🤖 LLM] 请求ID:', request.requestId);
+      console.log('[🤖 LLM] 时间戳:', new Date(request.timestamp).toISOString());
+      console.log('============================================');
+    }
+
     try {
       const response = await this.makeHttpRequest('POST', '/intent-recognition', request);
+      
+      // 打印LLM语义分析结果
+      if (this.debugMode || process.env.CONTEXTAGENT_DEBUG === '1') {
+        console.log('=== [🤖 LLM] LLM意图识别输出结果 ===');
+        console.log('[🤖 LLM] 意图识别:', response.intent);
+        console.log('[🤖 LLM] 提取的关键字:', response.keywords);
+        console.log('[🤖 LLM] 置信度:', response.confidence);
+        console.log('[🤖 LLM] 处理时间:', response.processingTime + 'ms');
+        console.log('[🤖 LLM] 响应时间戳:', new Date(response.timestamp).toISOString());
+        console.log('==========================================');
+      }
+      
       return response as IntentRecognitionResponse;
     } catch (error) {
       console.error('[ContextAgentLLMClient] Intent recognition request failed:', error);

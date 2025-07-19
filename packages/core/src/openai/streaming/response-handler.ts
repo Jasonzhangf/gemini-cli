@@ -382,7 +382,7 @@ export class ResponseHandler {
 - 没有执行任何操作
 
 **正确做法**: 
-如需创建/写入文件，必须使用: ✦ {"name": "write_file", "arguments": {"file_path": "./path", "content": "..."}}
+如需创建/写入文件，必须使用: [tool_call: write_file for {"file_path": "./path", "content": "..."}]
 
 请使用正确的工具调用格式重新执行所需操作。`;
   }

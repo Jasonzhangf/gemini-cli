@@ -306,19 +306,24 @@ export class KnowledgeGraph {
       return relations;
     }
 
-    // Get outgoing edges
-    this.graph.forEachOutEdge(entityId, (edgeKey: string, attributes: any) => {
-      if (attributes.data) {
-        relations.push(attributes.data);
-      }
-    });
+    try {
+      // Get outgoing edges - use try-catch to handle any graph traversal errors
+      this.graph.forEachOutEdge(entityId, (edgeKey: string, attributes: any, source: string, target: string) => {
+        if (attributes && attributes.data) {
+          relations.push(attributes.data);
+        }
+      });
 
-    // Get incoming edges
-    this.graph.forEachInEdge(entityId, (edgeKey: string, attributes: any) => {
-      if (attributes.data) {
-        relations.push(attributes.data);
-      }
-    });
+      // Get incoming edges
+      this.graph.forEachInEdge(entityId, (edgeKey: string, attributes: any, source: string, target: string) => {
+        if (attributes && attributes.data) {
+          relations.push(attributes.data);
+        }
+      });
+    } catch (error) {
+      console.warn(`[KnowledgeGraph] Error traversing edges for entity ${entityId}:`, error);
+      // Return empty relations on error
+    }
 
     return relations;
   }

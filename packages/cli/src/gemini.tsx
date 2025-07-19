@@ -39,7 +39,7 @@ import {
 } from '@google/gemini-cli-core';
 import { validateAuthMethod } from './config/auth.js';
 import { setMaxSizedBoxDebugging } from './ui/components/shared/MaxSizedBox.js';
-import { setGlobalLogger, EnhancedLogger } from '@google/gemini-cli-core/src/utils/enhancedLogger.js';
+import { setGlobalLogger, EnhancedLogger } from '@google/gemini-cli-core/dist/src/utils/enhancedLogger.js';
 
 function getNodeMemoryArgs(config: Config): string[] {
   const totalMemoryMB = os.totalmem() / (1024 * 1024);
@@ -343,8 +343,10 @@ async function validateNonInterActiveAuth(
   selectedAuthType: AuthType | undefined,
   nonInteractiveConfig: Config,
 ) {
-  // Skip Gemini authentication for OpenAI mode
+  // Handle OpenAI mode - still need to initialize GeminiClient for hijack mode
   if (nonInteractiveConfig.getOpenAIMode()) {
+    // Initialize GeminiClient in hijack mode (no auth needed)
+    await nonInteractiveConfig.refreshAuth(AuthType.USE_GEMINI);
     return nonInteractiveConfig;
   }
   

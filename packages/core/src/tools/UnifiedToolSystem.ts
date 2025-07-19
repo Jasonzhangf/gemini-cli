@@ -17,9 +17,11 @@
 import { EventEmitter } from 'events';
 import { TaskManager } from '../tasks/TaskManager.js';
 import { ToolManager, Tool, ToolAvailabilityMode } from './ToolManager.js';
-import { CreateTasksTool } from './CreateTasksTool.js';
-import { GetCurrentTaskTool } from './GetCurrentTaskTool.js';
-import { FinishCurrentTaskTool } from './FinishCurrentTaskTool.js';
+// Legacy system - consider for removal
+// import { CreateTasksTool } from './create_tasks.js';
+// Legacy imports - tools removed, use main config-registered tools instead
+// import { GetCurrentTaskTool } from './GetCurrentTaskTool.js';
+// import { FinishCurrentTaskTool } from './FinishCurrentTaskTool.js';
 
 /**
  * Tool execution result
@@ -137,25 +139,20 @@ export class UnifiedToolSystem extends EventEmitter {
   
   /**
    * Parse tool calls from model response
+   * LEGACY: This method is deprecated, use OpenAI ToolCallParser instead
    * @param content Model response content
    * @param format Tool call format
    * @returns Parsed tool calls
    */
   public parseToolCalls(content: string, format: ToolCallFormat = ToolCallFormat.JSON): any[] {
-    switch (format) {
-      case ToolCallFormat.JSON:
-        return this.parseJsonToolCalls(content);
-      case ToolCallFormat.DESCRIPTIVE:
-        return this.parseDescriptiveToolCalls(content);
-      case ToolCallFormat.CONTENT_ISOLATION:
-        return this.parseContentIsolationToolCalls(content);
-      default:
-        throw new Error(`Unsupported tool call format: ${format}`);
-    }
+    console.warn('[UnifiedToolSystem] DEPRECATED: Use OpenAI ToolCallParser for tool parsing');
+    // Legacy fallback implementation
+    return [];
   }
   
   /**
    * Parse JSON format tool calls
+   * LEGACY: Deprecated, use OpenAI ToolCallParser
    * @param content Model response content
    * @returns Parsed tool calls
    */

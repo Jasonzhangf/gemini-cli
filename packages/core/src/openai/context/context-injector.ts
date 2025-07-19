@@ -45,31 +45,13 @@ export class ContextInjector {
   }
 
   /**
-   * 注入模型响应上下文
+   * 注入模型响应上下文 - 已移除，只在用户输入时进行上下文注入
+   * 模型响应（包括工具调用）不应该被重复注入到RAG系统
    */
   async injectModelResponseContext(response: string, toolCallNames: string[] = []): Promise<void> {
-    try {
-      const contextAgent = this.config.getContextAgent();
-      if (contextAgent && (contextAgent as any).initialized) {
-        let contextInput = response;
-        if (toolCallNames.length > 0) {
-          contextInput += `\nTool calls: ${toolCallNames.join(', ')}`;
-        }
-        
-        if (this.debugMode) {
-          console.log('[ContextInjector] Triggering ContextAgent for model response');
-        }
-        
-        await contextAgent.injectContextIntoDynamicSystem(contextInput);
-        
-        if (this.debugMode) {
-          console.log('[ContextInjector] ✅ Model response context injected');
-        }
-      }
-    } catch (error) {
-      if (this.debugMode) {
-        console.warn('[ContextInjector] Model response context injection failed:', error);
-      }
+    // 不再处理模型响应的上下文注入，避免重复处理
+    if (this.debugMode) {
+      console.log('[ContextInjector] 🚫 Skipped model response context injection to avoid duplication');
     }
   }
 

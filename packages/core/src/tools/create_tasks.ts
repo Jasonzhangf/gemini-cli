@@ -41,7 +41,7 @@ export class CreateTasksTool extends BaseTool<CreateTasksParams, ToolResult> {
           tasks: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: '任务列表数组，将大目标分解为3-8个具体的执行步骤。每个任务描述应简洁明确，建议不超过30个字符。\n\n**正确格式示例**：\n["分析项目结构", "设计接口方案", "实现核心功能", "编写测试代码", "集成调试"]\n\n**重要**：必须是有效的JSON数组格式，每个任务用双引号包围。',
+            description: '任务列表数组，将大目标分解为3-8个具体的执行步骤。每个任务描述应简洁明确，建议不超过30个字符。\n\n**正确格式示例**：\n["分析项目结构", "设计接口方案", "实现核心功能", "编写测试代码", "集成调试"]\n\n**重要**：必须是有效的JSON数组格式，每个任务用双引号包围。工具调用格式应为：{"tasks": ["任务1", "任务2", "任务3"]}',
           },
           template: {
             type: Type.STRING,
@@ -81,34 +81,99 @@ export class CreateTasksTool extends BaseTool<CreateTasksParams, ToolResult> {
    * Handles malformed JSON strings from tool calls
    */
   private parseStringInput(input: string): CreateTasksParams {
-    // Handle the specific format from the logs: 'tasks ["task1", "task2"...'
-    if (input.includes('tasks [')) {
-      // Extract the array part
-      const arrayMatch = input.match(/tasks\s*\[(.*?)(?:\]|$)/);
-      if (arrayMatch && arrayMatch[1]) {
-        try {
-          // Try to parse as a proper JSON array
-          const tasksArray = JSON.parse(`[${arrayMatch[1]}]`);
-          return { tasks: tasksArray };
-        } catch (e) {
-          // If parsing fails, split by commas and clean up
-          const tasks = arrayMatch[1]
-            .split(',')
-            .map(t => t.trim().replace(/^["']|["']$/g, '')) // Remove quotes
-            .filter(t => t.length > 0);
-          return { tasks };
+    if (!input || typeof input !== 'string') {
+      throw new Error('无效的输入参数');
+    }
+
+    // 规范化输入：移除多余的空格和换行
+    const normalizedInput = input.replace(/\s+/g, ' ').trim();
+    
+    if (this.config?.getDebugMode()) {
+      console.log(`[CreateTasksTool] 解析输入: "${normalizedInput}"`);
+    }
+
+    // 1. 处理标准JSON格式: {"tasks": ["task1", "task2"]}
+    try {
+      const parsed = JSON.parse(normalizedInput);
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.tasks && Array.isArray(parsed.tasks)) {
+          return { tasks: parsed.tasks.filter((task: any) => typeof task === 'string' && task.trim()) };
+        }
+        if (parsed.template && typeof parsed.template === 'string') {
+          return { template: parsed.template };
         }
       }
+    } catch (e) {
+      // 继续其他解析方法
+    }
+
+    // 2. 处理嵌套输入格式: {"input": "..."}
+    const inputMatch = normalizedInput.match(/\{\s*"input"\s*:\s*"(.+?)"\s*\}/);
+    if (inputMatch && inputMatch[1]) {
+      try {
+        return this.parseStringInput(inputMatch[1]);
+      } catch (e) {
+        // 继续其他解析方法
+      }
+    }
+
+    // 3. 处理不完整的JSON: {"tasks": ["task1", "task2"
+    if (normalizedInput.includes('"tasks"') && normalizedInput.includes('[')) {
+      try {
+        const fixedJson = this.fixIncompleteJson(normalizedInput);
+        const parsed = JSON.parse(fixedJson);
+        if (parsed.tasks && Array.isArray(parsed.tasks)) {
+          return { tasks: parsed.tasks.filter((task: any) => typeof task === 'string' && task.trim()) };
+        }
+      } catch (e) {
+        // 继续其他解析方法
+      }
+    }
+
+    // 4. 处理template格式
+    const templateMatch = normalizedInput.match(/template\s*[:"']\s*([^"'}]+)/);
+    if (templateMatch && templateMatch[1]) {
+      return { template: templateMatch[1].replace(/["}]/g, '') };
+    }
+
+    // 5. 最后尝试：将整个输入作为单个任务
+    if (normalizedInput.length > 0) {
+      return { tasks: [normalizedInput] };
+    }
+
+    throw new Error('无法解析输入参数');
+  }
+
+  /**
+   * 修复不完整的JSON
+   */
+  private fixIncompleteJson(input: string): string {
+    let fixed = input.trim();
+    
+    // 统计括号和引号
+    const openBraces = (fixed.match(/\{/g) || []).length;
+    const closeBraces = (fixed.match(/\}/g) || []).length;
+    const openBrackets = (fixed.match(/\[/g) || []).length;
+    const closeBrackets = (fixed.match(/\]/g) || []).length;
+    const doubleQuotes = (fixed.match(/"/g) || []).length;
+    
+    // 如果双引号数量是奇数，添加一个引号
+    if (doubleQuotes % 2 === 1) {
+      fixed += '"';
     }
     
-    // Try to parse as JSON first
-    try {
-      return JSON.parse(input) as CreateTasksParams;
-    } catch (e) {
-      // Not valid JSON, treat as a single task
-      return { tasks: [input] };
+    // 补充缺失的括号
+    for (let i = 0; i < openBrackets - closeBrackets; i++) {
+      fixed += ']';
     }
+    
+    for (let i = 0; i < openBraces - closeBraces; i++) {
+      fixed += '}';
+    }
+    
+    return fixed;
   }
+
 
   async execute(params: CreateTasksParams | string): Promise<ToolResult> {
     // Handle string input that might be malformed JSON

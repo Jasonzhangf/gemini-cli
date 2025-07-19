@@ -16,6 +16,7 @@ import { Content } from '@google/genai';
 import { getResponseText } from '../utils/generateContentResponseUtilities.js';
 import { ContextAgentLLMClient } from './contextAgentLLMClient.js';
 import { logger } from '../utils/enhancedLogger.js';
+import { ConversationRAGSystem, ConversationRecord } from './conversationRAG.js';
 
 export interface ContextAgentOptions {
   config: Config;
@@ -49,12 +50,16 @@ export class ContextAgent {
   private graphProvider: IKnowledgeGraphProvider | null = null;
   private providerFactory: ContextProviderFactory;
   private ragInitializing: boolean = false;
+  private ragIndexed: boolean = false; // 追踪是否已经索引过
   
   // Semantic analysis components
   private semanticAnalysisService: SemanticAnalysisService | null = null;
   
   // Separate LLM process for intent recognition
   private llmClient: ContextAgentLLMClient | null = null;
+  
+  // Conversation history RAG system
+  private conversationRAG: ConversationRAGSystem;
 
   constructor(options: ContextAgentOptions) {
     this.config = options.config;
@@ -80,13 +85,17 @@ export class ContextAgent {
       debugMode: this.config.getDebugMode(),
       requestTimeout: 30000
     });
+    
+    // Initialize conversation history RAG system
+    this.conversationRAG = new ConversationRAGSystem(this.projectDir, this.config.getDebugMode());
   }
 
   /**
-   * Initialize the ContextAgent
-   * Milestone 2: Full project scanning and knowledge graph building
+   * Initialize the ContextAgent with smart RAG logic
+   * /init triggers full scan, file changes trigger incremental updates
+   * Checks for existing database first
    */
-  async initialize(): Promise<void> {
+  async initialize(forceFullScan: boolean = false): Promise<void> {
     if (this.initialized) {
       return;
     }
@@ -95,67 +104,56 @@ export class ContextAgent {
     
     try {
       if (this.config.getDebugMode()) {
-        console.log('[ContextAgent] Starting initialization (Milestone 2: full scan mode)');
+        console.log('[ContextAgent] Starting initialization with smart RAG logic');
       }
 
-      // Step 1: Initialize knowledge graph
+      // Step 1: Initialize knowledge graph and check for existing data
       await this.knowledgeGraph.initialize();
-
-      // Step 2: Scan project files
-      const scanOptions: FileScanOptions = {
-        includePatterns: ['**/*.{ts,tsx,js,jsx,py,java,c,cpp,h,hpp,cs,go,rs,php,rb}'],
-        respectGitIgnore: true,
-        respectScanIgnore: true,
-        maxFiles: 2000 // Reasonable limit for initial scan
-      };
-
-      const scanResult = await this.fileScanner.scanProject(scanOptions);
+      const existingStats = this.knowledgeGraph.getStatistics();
+      const hasExistingData = existingStats.totalNodes > 0;
       
-      logger.info('context', `Scanned ${scanResult.totalScanned} files, found ${scanResult.files.length} relevant files, skipped ${scanResult.skippedCount}`, {
-        totalScanned: scanResult.totalScanned,
-        relevantFiles: scanResult.files.length,
-        skippedCount: scanResult.skippedCount
-      });
-
-      // Step 3: Analyze files and build knowledge graph
-      if (scanResult.files.length > 0) {
-        const analysisResult = await this.staticAnalyzer.analyzeFiles(scanResult.files);
+      if (hasExistingData && !forceFullScan) {
+        logger.info('context', `Loading existing database: ${existingStats.totalNodes} nodes, ${existingStats.totalEdges} edges`, existingStats);
         
-        logger.info('context', `Analysis complete: ${analysisResult.nodes.length} nodes, ${analysisResult.relations.length} relations, ${analysisResult.errors.length} errors`, {
-          nodes: analysisResult.nodes.length,
-          relations: analysisResult.relations.length,
-          errors: analysisResult.errors.length
-        });
-
-        // Step 4: Add analysis results to knowledge graph
-        await this.knowledgeGraph.addAnalysisResult(analysisResult.nodes, analysisResult.relations);
-
-        // Step 5: Save knowledge graph
-        await this.knowledgeGraph.saveGraph();
-        
-        // Step 6: Initialize RAG system
+        // Initialize RAG system with existing data
         await this.initializeRAGSystem();
+        this.initialized = true;
+        
+        logger.success('context', `Loaded existing context database in ${Date.now() - startTime}ms`);
+        return;
       }
+      
+      if (forceFullScan || !hasExistingData) {
+        logger.info('context', 'Performing full project scan and analysis');
+        
+        const scanOptions: FileScanOptions = {
+          includePatterns: ['**/*.{ts,tsx,js,jsx,py,java,c,cpp,h,hpp,cs,go,rs,php,rb}'],
+          respectGitIgnore: true,
+          respectScanIgnore: true,
+          maxFiles: 2000
+        };
+        
+        const scanResult = await this.fileScanner.scanProject(scanOptions);
+        
+        logger.info('context', `Scanned ${scanResult.totalScanned} files, found ${scanResult.files.length} relevant files`);
 
+        if (scanResult.files.length > 0) {
+          const analysisResult = await this.staticAnalyzer.analyzeFiles(scanResult.files);
+          
+          logger.info('context', `Analysis complete: ${analysisResult.nodes.length} nodes, ${analysisResult.relations.length} relations`);
+
+          await this.knowledgeGraph.addAnalysisResult(analysisResult.nodes, analysisResult.relations);
+          await this.knowledgeGraph.saveGraph();
+          await this.initializeRAGSystem();
+        }
+      }
+      
       this.initialized = true;
       const duration = Date.now() - startTime;
+      logger.success('context', `Initialization complete in ${duration}ms`, { duration });
       
-      const stats = this.knowledgeGraph.getStatistics();
-      logger.success('context', `Initialization complete in ${duration}ms`, {
-        duration,
-        stats,
-        initialized: this.initialized
-      });
-      
-      if (stats.placeholderNodes > 0) {
-        logger.info('context', `Created ${stats.placeholderNodes} placeholder nodes for external references`, {
-          placeholderNodes: stats.placeholderNodes
-        });
-      }
-
     } catch (error) {
       logger.error('context', 'Initialization failed', { error: error instanceof Error ? error.message : String(error) });
-      // Don't throw - allow CLI to continue without ContextAgent
       this.initialized = false;
     }
   }
@@ -229,6 +227,7 @@ export class ContextAgent {
 
   /**
    * Index existing knowledge graph data into RAG system
+   * Only indexes if vector store is empty (避免重复索引)
    */
   private async indexKnowledgeGraphData(): Promise<void> {
     if (!this.vectorProvider) {
@@ -236,6 +235,14 @@ export class ContextAgent {
     }
 
     try {
+      // 检查是否已经索引过，避免重复索引
+      if (this.ragIndexed) {
+        if (this.config.getDebugMode()) {
+          console.log('[ContextAgent] RAG system already indexed, skipping re-indexing');
+        }
+        return;
+      }
+
       const graph = this.knowledgeGraph.getRawGraph();
       let indexedCount = 0;
 
@@ -279,14 +286,18 @@ export class ContextAgent {
       // Note: Relationships are now handled by the existing knowledge graph structure
       // The simplified architecture relies on vector similarity rather than explicit graph relationships
 
+      // 标记为已索引
+      this.ragIndexed = true;
+      
       if (this.config.getDebugMode()) {
-        console.log(`[ContextAgent] Indexed ${indexedCount} nodes into RAG system`);
+        console.log(`[ContextAgent] Indexed ${indexedCount} nodes into RAG system (first time only)`);
       }
 
     } catch (error) {
       console.error('[ContextAgent] Failed to index knowledge graph data:', error);
     }
   }
+
 
   /**
    * Extract content from knowledge graph node for RAG indexing
@@ -427,13 +438,18 @@ export class ContextAgent {
 
       // Primary: Use RAG system if available (LightRAG implementation)
       if (this.contextExtractor && userInput) {
-        console.log('[🧠 RAG] ContextAgent正在调用RAG系统...');
-        console.log(`[🧠 RAG] 用户输入: ${userInput.substring(0, 100)}${userInput.length > 100 ? '...' : ''}`);
+        console.log('=== [🧠 RAG] RAG系统调试信息 ===');
+        console.log(`[🧠 RAG] 输入的用户内容: "${userInput}"`);
+        console.log(`[🧠 RAG] 输入长度: ${userInput.length} 字符`);
+        console.log('=====================================');
         try {
           const ragResult = await this.extractContextWithRAG(userInput);
           if (ragResult) {
             contextSections.push(ragResult);
-            console.log(`[🧠 RAG] ✅ RAG系统成功生成 ${ragResult.length} 字符的上下文`);
+            console.log('=== [🧠 RAG] RAG系统输出结果 ===');
+            console.log(`[🧠 RAG] 生成的上下文长度: ${ragResult.length} 字符`);
+            console.log(`[🧠 RAG] 生成的上下文内容:\n${ragResult.substring(0, 500)}${ragResult.length > 500 ? '\n...(更多内容省略)' : ''}`);
+            console.log('=======================================');
             
             if (this.config.getDebugMode()) {
               console.log('[ContextAgent] ✅ Used advanced RAG system for context extraction');
@@ -485,6 +501,26 @@ export class ContextAgent {
         if (semanticResult) {
           semanticContext = this.formatSemanticAnalysisForContext(semanticResult);
           contextSections.unshift(semanticContext); // Add at beginning
+        }
+      }
+      
+      // 搜索相关会话历史
+      if (filteredUserInput) {
+        try {
+          const relevantConversations = await this.conversationRAG.searchRelevantConversations(filteredUserInput, 3);
+          if (relevantConversations.length > 0) {
+            const conversationContext = this.conversationRAG.formatConversationHistory(relevantConversations);
+            if (conversationContext) {
+              contextSections.push(conversationContext);
+              if (this.config.getDebugMode()) {
+                console.log(`[ContextAgent] ✅ Added ${relevantConversations.length} relevant conversations to context`);
+              }
+            }
+          }
+        } catch (conversationError) {
+          if (this.config.getDebugMode()) {
+            console.warn('[ContextAgent] Failed to retrieve conversation history:', conversationError);
+          }
         }
       }
       
@@ -707,14 +743,21 @@ export class ContextAgent {
     try {
       const startTime = Date.now();
       
-      // First, use LLM for intent recognition and keyword extraction
-      const intentAnalysis = await this.performLLMIntentRecognition(userInput);
+      // Try to use LLM for intent recognition and keyword extraction
+      let intentAnalysis = null;
+      try {
+        intentAnalysis = await this.performLLMIntentRecognition(userInput);
+      } catch (llmError) {
+        const errorMessage = llmError instanceof Error ? llmError.message : String(llmError);
+        console.log('[ContextAgent] LLM intent recognition failed, continuing with basic RAG query:', errorMessage);
+        // 继续使用基本的RAG查询，不阻塞整个流程
+      }
       
-      // Build context query for RAG system using LLM-identified keywords
+      // Build context query for RAG system
       const contextQuery = {
         userInput,
-        intentKeywords: intentAnalysis.keywords, // Use LLM-generated keywords
-        intent: intentAnalysis.intent,
+        intentKeywords: intentAnalysis ? intentAnalysis.keywords : this.extractKeywords(userInput), // Fallback to basic keyword extraction
+        intent: intentAnalysis ? intentAnalysis.intent : 'general_inquiry',
         conversationHistory: [], // TODO: Could integrate with conversation history if needed
         recentOperations: [],
         sessionContext: {
@@ -731,11 +774,15 @@ export class ContextAgent {
       
       if (this.config.getDebugMode()) {
         console.log(`[ContextAgent] RAG extraction completed in ${duration}ms`);
-        console.log(`[ContextAgent] Intent: ${intentAnalysis.intent}, Keywords: ${intentAnalysis.keywords.join(', ')}`);
+        if (intentAnalysis) {
+          console.log(`[ContextAgent] Intent: ${intentAnalysis.intent}, Keywords: ${intentAnalysis.keywords.join(', ')}`);
+        } else {
+          console.log(`[ContextAgent] Using basic keyword extraction due to LLM intent recognition failure`);
+        }
       }
 
       // Format the extracted context for model consumption
-      const formattedContext = this.formatRAGContextForModel(extractedContext, intentAnalysis);
+      const formattedContext = this.formatRAGContextForModel(extractedContext, intentAnalysis || undefined);
       
       return formattedContext;
 
@@ -777,14 +824,10 @@ export class ContextAgent {
       };
 
     } catch (error) {
-      console.warn('[ContextAgent] Separate LLM process intent recognition failed, falling back to keyword extraction:', error);
+      console.warn('[ContextAgent] Separate LLM process intent recognition failed, will use conversation model for intent recognition:', error);
       
-      // Fallback to basic keyword extraction
-      return {
-        intent: 'general_inquiry',
-        keywords: this.extractKeywords(userInput),
-        confidence: 0.2
-      };
+      // 不使用fallback，抛出错误让对话模型处理
+      throw new Error('LLM intent recognition unavailable - conversation model should handle intent recognition during task creation');
     }
   }
 
@@ -1156,5 +1199,88 @@ export class ContextAgent {
 
   public isInitialized(): boolean {
     return this.initialized;
+  }
+
+  /**
+   * Force full project scan and rebuild (triggered by /init command)
+   */
+  public async forceFullInit(): Promise<void> {
+    if (this.config.getDebugMode()) {
+      console.log('[ContextAgent] Force full initialization requested');
+    }
+    
+    // Reset initialization state
+    this.initialized = false;
+    
+    // Clear knowledge graph
+    this.knowledgeGraph.clear();
+    
+    // Dispose existing providers
+    await this.disposeProviders();
+    
+    // Re-initialize with full scan
+    await this.initialize(true);
+  }
+
+  /**
+   * 记录会话内容到RAG系统
+   */
+  async recordConversation(options: {
+    userInput: string;
+    modelResponse: string;
+    toolCalls?: any[];
+    context?: string;
+  }): Promise<void> {
+    try {
+      const turnId = `turn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const now = new Date();
+      
+      const conversationRecord: ConversationRecord = {
+        timestamp: now.getTime(),
+        date: now.toISOString().split('T')[0],
+        turnId,
+        userInput: options.userInput,
+        modelResponse: options.modelResponse,
+        toolCalls: options.toolCalls?.map(tc => ({
+          name: tc.name || 'unknown',
+          args: tc.args || {},
+          result: tc.result,
+          status: tc.status || 'unknown'
+        })),
+        context: options.context,
+        sessionId: this.sessionId
+      };
+
+      await this.conversationRAG.recordConversation(conversationRecord);
+      
+      if (this.config.getDebugMode()) {
+        console.log(`[ContextAgent] Recorded conversation: ${turnId}`);
+      }
+    } catch (error) {
+      console.error('[ContextAgent] Failed to record conversation:', error);
+    }
+  }
+
+  /**
+   * 获取会话历史统计信息
+   */
+  async getConversationStatistics(): Promise<any> {
+    try {
+      return await this.conversationRAG.getStatistics();
+    } catch (error) {
+      console.error('[ContextAgent] Failed to get conversation statistics:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 清理旧的会话记录
+   */
+  async cleanupOldConversations(retentionDays: number = 30): Promise<void> {
+    try {
+      await this.conversationRAG.cleanupOldConversations(retentionDays);
+    } catch (error) {
+      console.error('[ContextAgent] Failed to cleanup old conversations:', error);
+    }
   }
 }

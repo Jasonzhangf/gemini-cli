@@ -12,8 +12,7 @@ export { PromptEnhancer } from './promptEnhancer.js';
 export { ToolCallInterceptor } from './toolCallInterceptor.js';
 export { ContextAgent } from './contextAgent.js';
 
-// 导出重构后的上下文生成系统
-export * from './refactored/index.js';
+// 注意：重构后的上下文生成系统已废弃，使用主要的 prompts.ts 实现
 
 // 便捷函数：检查是否启用了上下文增强功能
 export function isContextEnhancementEnabled(): boolean {
@@ -21,16 +20,17 @@ export function isContextEnhancementEnabled(): boolean {
   return process.env.GEMINI_CONTEXT_ENHANCEMENT !== 'false';
 }
 
-// 重构后的上下文生成系统
+// 使用主要的系统提示实现
 import { Config } from '../config/config.js';
-import { getSystemPrompt } from './refactored/index.js';
+import { getCoreSystemPrompt } from '../core/prompts.js';
 
 /**
- * 获取增强的系统提示（重构后的版本）
+ * 获取增强的系统提示（使用主要实现）
  * 保持向后兼容性
  */
 export async function getEnhancedSystemPromptIfAvailable(config: Config, userMessage?: string): Promise<string> {
-  return await getSystemPrompt(config, userMessage);
+  const userMemory = config.getUserMemory();
+  return getCoreSystemPrompt(userMemory);
 }
 
 // 便捷函数：获取工具调用拦截器（如果可用）

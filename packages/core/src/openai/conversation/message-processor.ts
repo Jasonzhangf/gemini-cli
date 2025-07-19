@@ -197,7 +197,7 @@ export class MessageProcessor {
 
 请首先创建任务列表分解这个请求为具体的任务步骤，然后逐步执行。使用以下格式：
 
-[tool_call: create_tasks for tasks ["任务1", "任务2", "任务3"]]
+[tool_call: create_tasks for {"tasks": ["任务1", "任务2", "任务3"]}]
 
 确保每个任务描述清晰且可执行，不超过20个字符。创建任务列表后，开始执行第一个任务。
 
@@ -239,7 +239,7 @@ export class MessageProcessor {
 - 没有执行任何操作
 
 **正确做法**: 
-如需创建/写入文件，必须使用: ✦ {"name": "write_file", "arguments": {"file_path": "./path", "content": "..."}}
+如需创建/写入文件，必须使用: [tool_call: write_file for {"file_path": "./path", "content": "..."}]
 
 请使用正确的工具调用格式重新执行所需操作。`;
   }

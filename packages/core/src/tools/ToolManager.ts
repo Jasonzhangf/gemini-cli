@@ -16,9 +16,11 @@
 
 import { EventEmitter } from 'events';
 import { TaskManager } from '../tasks/TaskManager.js';
-import { CreateTasksTool } from './CreateTasksTool.js';
-import { GetCurrentTaskTool } from './GetCurrentTaskTool.js';
-import { FinishCurrentTaskTool } from './FinishCurrentTaskTool.js';
+// Legacy system - consider for removal
+// import { CreateTasksTool } from './create_tasks.js';
+// Legacy imports - tools removed, use main config-registered tools instead
+// import { GetCurrentTaskTool } from './GetCurrentTaskTool.js';  
+// import { FinishCurrentTaskTool } from './FinishCurrentTaskTool.js';
 
 /**
  * Tool interface
@@ -163,25 +165,27 @@ export class ToolManager extends EventEmitter {
    */
   private registerTaskTools(): void {
     // Create tasks tool - only available in normal mode
-    this.registerTool(
-      'create_tasks',
-      new CreateTasksTool(this.taskManager),
-      ToolAvailabilityMode.NORMAL
-    );
+    // LEGACY: This system is no longer actively used, main system uses config-based approach
+    // this.registerTool(
+    //   'create_tasks',
+    //   new CreateTasksTool(this.taskManager),
+    //   ToolAvailabilityMode.NORMAL
+    // );
     
+    // LEGACY: Task tools moved to main config-based system
     // Get current task tool - always available
-    this.registerTool(
-      'get_current_task',
-      new GetCurrentTaskTool(this.taskManager),
-      ToolAvailabilityMode.ALWAYS
-    );
+    // this.registerTool(
+    //   'get_current_task', 
+    //   new GetCurrentTaskTool(this.taskManager),
+    //   ToolAvailabilityMode.ALWAYS
+    // );
     
     // Finish current task tool - only available in maintenance mode
-    this.registerTool(
-      'finish_current_task',
-      new FinishCurrentTaskTool(this.taskManager),
-      ToolAvailabilityMode.MAINTENANCE
-    );
+    // this.registerTool(
+    //   'finish_current_task',
+    //   new FinishCurrentTaskTool(this.taskManager),
+    //   ToolAvailabilityMode.MAINTENANCE
+    // );
   }
   
   /**

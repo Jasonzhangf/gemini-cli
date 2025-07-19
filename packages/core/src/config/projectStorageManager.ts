@@ -52,7 +52,7 @@ export class ProjectStorageManager {
   constructor(projectRoot: string) {
     this.projectRoot = path.resolve(projectRoot);
     this.projectId = getProjectFolderName(this.projectRoot);
-    this.globalStorageRoot = path.join(os.homedir(), '.gemini', 'projects');
+    this.globalStorageRoot = path.join(os.homedir(), '.gemini', 'Projects');
   }
 
   /**
@@ -95,19 +95,13 @@ export class ProjectStorageManager {
       // Create main storage directory
       await fs.promises.mkdir(structure.storageRoot, { recursive: true });
 
-      // Create RAG provider directories
-      const ragProviders = ['lightrag', 'llamaindex', 'custom'];
-      for (const provider of ragProviders) {
-        const providerDir = path.join(structure.ragStorage, provider);
-        await fs.promises.mkdir(providerDir, { recursive: true });
-      }
-
-      // Create knowledge graph provider directories
-      const graphProviders = ['graphology', 'neo4j', 'networkx'];
-      for (const provider of graphProviders) {
-        const providerDir = path.join(structure.knowledgeGraphStorage, provider);
-        await fs.promises.mkdir(providerDir, { recursive: true });
-      }
+      // Create only Neo4j directories (simplified RAG system)
+      const neo4jDir = path.join(structure.knowledgeGraphStorage, 'neo4j');
+      await fs.promises.mkdir(neo4jDir, { recursive: true });
+      
+      // Create graphology directory for local graph storage
+      const graphologyDir = path.join(structure.knowledgeGraphStorage, 'graphology');
+      await fs.promises.mkdir(graphologyDir, { recursive: true });
 
       // Create or update project metadata
       await this.updateMetadata();

@@ -45,7 +45,7 @@ export class ToolGuidanceGenerator {
 - \`[tool_call: glob for pattern '**/*.py']\`
 - \`[tool_call: read_file for '/path/to/file.py']\`
 - \`[tool_call: run_shell_command for 'ls -la']\`
-- \`[tool_call: todo for action 'create_list' tasks ["task1", "task2"]]\`
+- \`[tool_call: create_tasks for {"tasks": ["任务1", "任务2", "任务3"]}]\`
 
 **✅ ALWAYS USE**: The exact [tool_call: ...] format above for ALL tool calls.
 **TEMPLATE**: \`[tool_call: TOOL_NAME for PARAMETERS]\`
@@ -72,15 +72,15 @@ old code here|||new code here
 6. WITHOUT TOOL CALLS, YOUR RESPONSE IS JUST PLANNING - NOT EXECUTION
 7. FOR COMPLEX TOOLS (write_file, replace, create_tasks): ONLY use JSON format - descriptive format will FAIL
 
-🎯 🚨 CRITICAL TASK MANAGEMENT RULE 🚨:
-For ANY request involving 2+ distinct operations (like "清理空文件夹" + "合并目录"), you MUST IMMEDIATELY create a task list BEFORE starting work:
-[tool_call: todo for action 'create_list' tasks ['清理空文件夹', '识别相似目录', '合并目录', '分类整理']]
+🎯 🚨 TASK MANAGEMENT RULES 🚨:
+**NON-MAINTENANCE MODE** (can create tasks):
+- For complex requests with 2+ operations, create task list: [tool_call: create_tasks for {"tasks": ["任务1", "任务2", "任务3"]}]
 
-Examples requiring IMMEDIATE task creation:
-- File organization + cleanup workflows  
-- Analysis + action requests (analyze code + fix issues)
-- Multi-step implementations or system changes
-- Any request with "and", "then", "after", multiple verbs
+**MAINTENANCE MODE** (cannot create tasks):
+- Use get_current_task to check current work
+- Use finish_current_task when completed
+- Use insert_task to add sub-tasks if needed
+- NEVER use create_tasks in maintenance mode
 
 📋 AVAILABLE TOOLS:
 ${toolDescriptions}
@@ -105,14 +105,23 @@ The user will execute the tools and provide you with the results. Use the result
   }
 
   /**
-   * 获取可用工具
+   * 获取可用工具 - 实现维护模式互斥逻辑
+   * 维护模式：禁止create_tasks，允许其他任务工具
+   * 非维护模式：允许create_tasks，禁止维护专用工具
    */
   private getAvailableTools(): any[] {
     let availableTools = this.toolDeclarations;
     
-    // 在维护模式下过滤工具
     if (this.contextManager?.isInMaintenanceMode()) {
-      availableTools = this.toolDeclarations.filter(tool => tool.name !== 'create_tasks');
+      // 维护模式：移除create_tasks，保留其他任务管理工具
+      availableTools = this.toolDeclarations.filter(tool => 
+        tool.name !== 'create_tasks'
+      );
+    } else {
+      // 非维护模式：移除维护专用工具，保留create_tasks
+      availableTools = this.toolDeclarations.filter(tool => 
+        !['finish_current_task', 'insert_task', 'modify_task'].includes(tool.name)
+      );
     }
     
     return availableTools;
@@ -157,18 +166,22 @@ ${paramDescriptions}
    */
   private generateToolExample(toolName: string, params: any): string {
     const examples: Record<string, string> = {
-      'read_file': '✦ {"name": "read_file", "arguments": {"file_path": "./src/main.js"}}',
-      'list_directory': '✦ {"name": "list_directory", "arguments": {"path": "."}}',
-      'search_file_content': '✦ {"name": "search_file_content", "arguments": {"query": "function", "file_paths": ["./src/**/*.js"]}}',
-      'write_file': '✦ {"name": "write_file", "arguments": {"file_path": "./output.txt", "content": "Hello World"}}',
-      'run_shell_command': '✦ {"name": "run_shell_command", "arguments": {"command": "echo \'import os; print(\"Hello from Python\")\' > temp.py && python temp.py", "description": "Create and execute Python script for complex tasks"}}',
-      'replace': '✦ {"name": "replace", "arguments": {"file_path": "./file.txt", "old_string": "old", "new_string": "new"}}',
-      'glob': '✦ {"name": "glob", "arguments": {"patterns": ["**/*.js", "**/*.ts"]}}',
-      'web_fetch': '✦ {"name": "web_fetch", "arguments": {"url": "https://example.com"}}',
-      'read_many_files': '✦ {"name": "read_many_files", "arguments": {"paths": ["./src/*.js"]}}',
-      'save_memory': '✦ {"name": "save_memory", "arguments": {"key": "project_info", "value": "Important findings"}}',
-      'google_web_search': '✦ {"name": "google_web_search", "arguments": {"query": "search terms"}}',
-      'todo': '✦ {"name": "todo", "arguments": {"action": "create_list", "tasks": ["实现功能A", "测试功能B", "修复bug C"]}}'
+      'read_file': '[tool_call: read_file for {"file_path": "./src/main.js"}]',
+      'list_directory': '[tool_call: list_directory for {"path": "."}]',
+      'search_file_content': '[tool_call: search_file_content for {"query": "function", "file_paths": ["./src/**/*.js"]}]',
+      'write_file': '[tool_call: write_file for {"file_path": "./output.txt", "content": "Hello World"}]',
+      'run_shell_command': '[tool_call: run_shell_command for {"command": "ls -la", "description": "List files"}]',
+      'replace': '[tool_call: replace for {"file_path": "./file.txt", "old_string": "old", "new_string": "new"}]',
+      'glob': '[tool_call: glob for {"patterns": ["**/*.js", "**/*.ts"]}]',
+      'web_fetch': '[tool_call: web_fetch for {"url": "https://example.com"}]',
+      'read_many_files': '[tool_call: read_many_files for {"paths": ["./src/*.js"]}]',
+      'save_memory': '[tool_call: save_memory for {"key": "project_info", "value": "Important findings"}]',
+      'google_web_search': '[tool_call: google_web_search for {"query": "search terms"}]',
+      'create_tasks': '[tool_call: create_tasks for {"tasks": ["分析需求", "设计方案", "实现功能", "编写测试", "部署上线"]}]',
+      'get_current_task': '[tool_call: get_current_task for {}]',
+      'finish_current_task': '[tool_call: finish_current_task for {}]',
+      'insert_task': '[tool_call: insert_task for {"description": "新任务描述", "position": "after_current"}]',
+      'modify_task': '[tool_call: modify_task for {"taskId": "task-id", "description": "修改后的任务描述"}]'
     };
 
     if (examples[toolName]) {
@@ -178,9 +191,9 @@ ${paramDescriptions}
     // 通用示例生成
     const firstParam = Object.keys(params)[0];
     if (firstParam) {
-      return `✦ {"name": "${toolName}", "arguments": {"${firstParam}": "value"}}`;
+      return `[tool_call: ${toolName} for {"${firstParam}": "value"}]`;
     }
 
-    return `✦ {"name": "${toolName}", "arguments": {}}`;
+    return `[tool_call: ${toolName} for {}]`;
   }
 }
