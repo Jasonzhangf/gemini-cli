@@ -55,6 +55,7 @@ export interface CliArgs {
   extensions: string[] | undefined;
   listExtensions: boolean | undefined;
   openai: boolean | undefined;
+  official: boolean | undefined;
 }
 
 export async function parseArguments(): Promise<CliArgs> {
@@ -179,6 +180,11 @@ export async function parseArguments(): Promise<CliArgs> {
     .option('openai', {
       type: 'boolean',
       description: 'Enable OpenAI hijack mode - transparently redirect through third-party providers while using Gemini interface',
+      default: true,
+    })
+    .option('official', {
+      type: 'boolean',
+      description: 'Use official Gemini native mode instead of OpenAI hijack mode',
       default: false,
     })
 
@@ -339,7 +345,7 @@ export async function loadCliConfig(
       version: e.config.version,
     })),
     noBrowser: !!process.env.NO_BROWSER,
-    openaiMode: argv.openai || false,
+    openaiMode: argv.official ? false : (argv.openai !== false), // Default to true unless --official is used
   });
 }
 

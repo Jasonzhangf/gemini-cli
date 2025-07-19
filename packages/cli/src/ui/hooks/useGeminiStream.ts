@@ -630,8 +630,23 @@ export const useGeminiStream = (
             logModelResponse(config.getSessionId(), pendingHistoryItemRef.current.text);
           }
           
-          // Point 2: RAG processing disabled for debugging
-          // TODO: Re-enable RAG processing after fixing conversation flow
+          // Record conversation to RAG system
+          try {
+            const contextAgent = config.getContextAgent();
+            if (contextAgent && pendingHistoryItemRef.current.type === 'gemini') {
+              // Extract user input from queryToSend
+              const userInput = typeof queryToSend === 'string' ? queryToSend : JSON.stringify(queryToSend);
+              await contextAgent.recordConversation({
+                userInput: userInput,
+                modelResponse: pendingHistoryItemRef.current.text,
+                context: 'chat_completion'
+              });
+            }
+          } catch (conversationError) {
+            if (config.getDebugMode()) {
+              console.warn('[useGeminiStream] Failed to record conversation:', conversationError);
+            }
+          }
           
           addItem(pendingHistoryItemRef.current, userMessageTimestamp);
           setPendingHistoryItem(null);
