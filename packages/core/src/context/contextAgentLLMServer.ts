@@ -193,22 +193,37 @@ export class ContextAgentLLMServer {
     // 创建真实的Config实例来正确初始化GeminiClient
     const { Config } = await import('../config/config.js');
     
-    // 使用实际的Config实例，这样可以正确初始化GeminiClient
+    // 使用实际的Config实例，根据provider选择配置
+    const provider = process.env.CONTEXTAGENT_PROVIDER || 'gemini';
+    const isOpenAIProvider = ['doubao', 'openai', 'siliconflow', 'lmstudio'].includes(provider.toLowerCase());
+    
     const config = new Config({
       sessionId: 'llm-server-session',
       model: process.env.CONTEXTAGENT_MODEL || 'gemini-1.5-flash',
       cwd: process.cwd(),
       targetDir: process.cwd(),
-      debugMode: process.env.DEBUG === '1' || process.env.CONTEXTAGENT_DEBUG === '1'
+      debugMode: process.env.DEBUG === '1' || process.env.CONTEXTAGENT_DEBUG === '1',
+      openaiMode: isOpenAIProvider
     });
     
     // 初始化配置
     await config.initialize();
     
-    // 刷新认证以确保GeminiClient可用
+    // 刷新认证 - 根据CONTEXTAGENT_PROVIDER选择认证类型
     try {
       const { AuthType } = await import('../core/contentGenerator.js');
-      await config.refreshAuth(AuthType.USE_GEMINI);
+      const provider = process.env.CONTEXTAGENT_PROVIDER || 'gemini';
+      
+      if (isOpenAIProvider) {
+        // 对于OpenAI兼容的provider，使用Gemini认证但配置为OpenAI模式
+        // 这样会使用OpenAI兼容的客户端
+        await config.refreshAuth(AuthType.USE_GEMINI);
+        console.log(`[ContextAgentLLMServer] Using OpenAI-compatible mode for provider: ${provider}`);
+      } else {
+        // 默认使用Gemini认证
+        await config.refreshAuth(AuthType.USE_GEMINI);
+        console.log(`[ContextAgentLLMServer] Using Gemini auth for provider: ${provider}`);
+      }
     } catch (error) {
       console.warn('[ContextAgentLLMServer] Auth refresh failed, will rely on environment variables:', error);
     }

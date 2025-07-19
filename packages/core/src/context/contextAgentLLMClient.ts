@@ -118,7 +118,7 @@ export class ContextAgentLLMClient {
         // 设置启动超时
         setTimeout(() => {
           reject(new Error('Server startup timeout'));
-        }, 15000);
+        }, 60000); // 增加到60秒以允许RAG索引
 
       } catch (error) {
         reject(error);
@@ -134,7 +134,7 @@ export class ContextAgentLLMClient {
       throw new Error('Server port not available');
     }
 
-    const maxAttempts = 30;
+    const maxAttempts = 60; // 增加到60次尝试
     const attemptInterval = 1000;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
