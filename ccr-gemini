@@ -1,0 +1,305 @@
+#!/usr/bin/env node
+
+/**
+ * CCR-Gemini - Claude Code Router for Gemini CLI
+ * A wrapper script that intercepts gemini commands and routes them through our proxy
+ * 
+ * @author Jason Zhang
+ */
+
+import { spawn, exec } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { existsSync } from 'fs';
+import fetch from 'node-fetch';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Configuration
+const config = {
+  proxyPort: process.env.CCR_PORT || 3457,
+  proxyHost: process.env.CCR_HOST || 'localhost',
+  apiKey: process.env.CCR_API_KEY || 'sk-g4hBumofoYFvLjLivj9uxeIYUR5uE3he2twZERTextAgsXPl',
+  provider: process.env.CCR_PROVIDER || 'shuaihong',
+  model: process.env.CCR_MODEL || 'gpt-4o',
+  debug: process.env.CCR_DEBUG === 'true' || false,
+  
+  // Proxy service path
+  proxyServicePath: join(__dirname, 'proxy-service'),
+  
+  // Original gemini command (will try to find in PATH)
+  geminiCommand: 'gemini'
+};
+
+/**
+ * Print debug message
+ */
+function debug(message) {
+  if (config.debug) {
+    console.log(`[CCR-Gemini] ${message}`);
+  }
+}
+
+/**
+ * Print error message
+ */
+function error(message) {
+  console.error(`[CCR-Gemini Error] ${message}`);
+}
+
+/**
+ * Print info message
+ */
+function info(message) {
+  console.log(`[CCR-Gemini] ${message}`);
+}
+
+/**
+ * Find the correct gemini command path
+ */
+function findGeminiCommand() {
+  const { execSync } = require('child_process');
+  
+  try {
+    // Try to find gemini in PATH
+    const geminiPath = execSync('which gemini', { encoding: 'utf8' }).trim();
+    
+    // Check if it's the official gemini-cli
+    try {
+      const output = execSync(`${geminiPath} --version 2>/dev/null || echo ""`, { encoding: 'utf8' });
+      if (output.includes('0.') || output.includes('gemini')) {
+        return geminiPath;
+      }
+    } catch (e) {
+      // If version check fails, might not be the right gemini
+    }
+    
+    // Try to find @google/gemini-cli directly
+    const npmList = execSync('npm list -g @google/gemini-cli --depth=0 2>/dev/null || echo ""', { encoding: 'utf8' });
+    if (npmList.includes('@google/gemini-cli')) {
+      // Found global installation, try to find the executable
+      try {
+        const npmRoot = execSync('npm root -g', { encoding: 'utf8' }).trim();
+        const officialPath = `${npmRoot}/@google/gemini-cli/dist/index.js`;
+        if (existsSync(officialPath)) {
+          return `node ${officialPath}`;
+        }
+      } catch (e) {
+        // Continue with fallback
+      }
+    }
+    
+    // Fallback to gemini in PATH
+    return 'gemini';
+    
+  } catch (error) {
+    // If which command fails, assume gemini is in PATH
+    return 'gemini';
+  }
+}
+
+/**
+ * Check if proxy service is running
+ */
+function checkProxyStatus() {
+  return new Promise(async (resolve) => {
+    try {
+      const response = await fetch(`http://${config.proxyHost}:${config.proxyPort}/health`, {
+        method: 'GET',
+        timeout: 1000
+      });
+      resolve(response.ok);
+    } catch (error) {
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * Start the proxy service
+ */
+function startProxyService() {
+  return new Promise((resolve, reject) => {
+    debug('Starting Claude Code Router proxy service...');
+    
+    if (!existsSync(config.proxyServicePath)) {
+      reject(new Error(`Proxy service not found at: ${config.proxyServicePath}`));
+      return;
+    }
+    
+    // Set environment variables for the proxy service
+    const env = {
+      ...process.env,
+      CCR_PORT: config.proxyPort,
+      CCR_HOST: config.proxyHost,
+      CCR_API_KEY: config.apiKey,
+      CCR_PROVIDER: config.provider,
+      CCR_MODEL: config.model,
+      CCR_DEBUG: config.debug
+    };
+    
+    const proxyProcess = spawn('node', ['src/server.js'], {
+      cwd: config.proxyServicePath,
+      env,
+      detached: true,
+      stdio: config.debug ? 'inherit' : 'ignore'
+    });
+    
+    // Give the service time to start
+    setTimeout(async () => {
+      const isRunning = await checkProxyStatus();
+      if (isRunning) {
+        debug(`Proxy service started successfully on port ${config.proxyPort}`);
+        resolve(proxyProcess);
+      } else {
+        reject(new Error('Failed to start proxy service'));
+      }
+    }, 2000);
+    
+    proxyProcess.on('error', (err) => {
+      reject(new Error(`Failed to start proxy service: ${err.message}`));
+    });
+  });
+}
+
+/**
+ * Execute the original gemini command with proxy configuration
+ */
+function executeGeminiCommand(args) {
+  return new Promise((resolve, reject) => {
+    debug(`Executing gemini command with args: ${args.join(' ')}`);
+    
+    // Find the correct gemini command
+    const geminiCommand = findGeminiCommand();
+    debug(`Using gemini command: ${geminiCommand}`);
+    
+    // Prepare the environment for gemini to use our proxy
+    const env = {
+      ...process.env,
+      // Override SHUAIHONG provider to point to our proxy
+      SHUAIHONG_API_ENDPOINT: `http://${config.proxyHost}:${config.proxyPort}`,
+      SHUAIHONG_API_KEY: config.apiKey,
+      SHUAIHONG_ACTUAL_MODEL: config.model,
+      // Ensure OpenAI mode is enabled
+      OPENAI_PROVIDER: 'SHUAIHONG',
+      // Also set OpenAI environment variables as fallback
+      OPENAI_BASE_URL: `http://${config.proxyHost}:${config.proxyPort}`,
+      OPENAI_API_KEY: config.apiKey
+    };
+    
+    debug(`Setting SHUAIHONG_API_ENDPOINT to: ${env.SHUAIHONG_API_ENDPOINT}`);
+    
+    // Handle both simple command and node command
+    let cmd, cmdArgs;
+    if (geminiCommand.startsWith('node ')) {
+      cmd = 'node';
+      cmdArgs = [geminiCommand.split(' ')[1], ...args];
+    } else {
+      cmd = geminiCommand;
+      cmdArgs = args;
+    }
+    
+    const geminiProcess = spawn(cmd, cmdArgs, {
+      env,
+      stdio: 'inherit'
+    });
+    
+    geminiProcess.on('close', (code) => {
+      debug(`Gemini process exited with code: ${code}`);
+      resolve(code);
+    });
+    
+    geminiProcess.on('error', (err) => {
+      error(`Failed to execute gemini command: ${err.message}`);
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Main function
+ */
+async function main() {
+  const args = process.argv.slice(2);
+  
+  // Show help if no arguments
+  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+    console.log(`
+🤖 CCR-Gemini - Claude Code Router for Gemini CLI
+
+Usage: ccr-gemini [gemini-command-args...]
+
+Examples:
+  ccr-gemini chat "Hello, how are you?"
+  ccr-gemini --help
+  ccr-gemini config
+  
+Environment Variables:
+  CCR_API_KEY      - API key for target provider (default: SHUAIHONG key)
+  CCR_PROVIDER     - Target provider: shuaihong, deepseek, openai, claude (default: shuaihong)
+  CCR_MODEL        - Model to use (default: gpt-4o)
+  CCR_PORT         - Proxy service port (default: 3457)
+  CCR_HOST         - Proxy service host (default: localhost)
+  CCR_DEBUG        - Enable debug logging (default: false)
+
+Configuration:
+  Provider: ${config.provider}
+  Model: ${config.model}
+  Proxy: http://${config.proxyHost}:${config.proxyPort}
+  Debug: ${config.debug}
+
+Note: Make sure to set CCR_API_KEY environment variable for your target provider.
+`);
+    return;
+  }
+  
+  // Check if API key is configured
+  if (!config.apiKey) {
+    error('CCR_API_KEY environment variable is required!');
+    error('Set it to your API key for the target provider.');
+    error(`Current provider: ${config.provider}`);
+    process.exit(1);
+  }
+  
+  try {
+    // Check if proxy is already running
+    const isProxyRunning = await checkProxyStatus();
+    
+    if (!isProxyRunning) {
+      info('Starting proxy service...');
+      await startProxyService();
+      info('✅ Proxy service is ready!');
+    } else {
+      debug('Proxy service is already running');
+    }
+    
+    // Execute the gemini command
+    const exitCode = await executeGeminiCommand(args);
+    process.exit(exitCode);
+    
+  } catch (err) {
+    error(err.message);
+    process.exit(1);
+  }
+}
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  error(`Uncaught exception: ${err.message}`);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  error(`Unhandled rejection: ${reason}`);
+  process.exit(1);
+});
+
+// Run main function
+main().catch((err) => {
+  error(err.message);
+  process.exit(1);
+});
