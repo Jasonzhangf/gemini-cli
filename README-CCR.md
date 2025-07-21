@@ -1,4 +1,4 @@
-# CCR-Gemini: Third-Party Provider Proxy for Gemini CLI
+# GCR-Gemini: Third-Party Provider Proxy for Gemini CLI
 
 A clean proxy system that routes Gemini CLI requests to third-party AI providers without modifying the official code.
 
@@ -17,17 +17,17 @@ A clean proxy system that routes Gemini CLI requests to third-party AI providers
 
 3. **Usage**
    ```bash
-   ./ccr-gemini -p "Hello, world!"
-   CCR_DEBUG=true ./ccr-gemini -p "Test message"
+   ./gcr-gemini -p "Hello, world!"
+   GCR_DEBUG=true ./gcr-gemini -p "Test message"
    ```
 
 ## How It Works
 
 ```
-User Input → ccr-gemini → Proxy Service → Third-Party API → Response
+User Input → gcr-gemini → Proxy Service → Third-Party API → Response
 ```
 
-1. `ccr-gemini` starts the proxy service and sets environment variables
+1. `gcr-gemini` starts the proxy service and sets environment variables
 2. Official gemini-cli is called with redirected API endpoints
 3. Proxy service translates between API formats and forwards requests
 4. Responses are translated back and returned to user
@@ -36,14 +36,14 @@ User Input → ccr-gemini → Proxy Service → Third-Party API → Response
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CCR_PROVIDER` | `shuaihong` | Target provider (shuaihong, deepseek, openai, claude) |
-| `CCR_API_KEY` | SHUAIHONG key | API key for target provider |
-| `CCR_MODEL` | `gpt-4o` | Model to use |
-| `CCR_DEBUG` | `false` | Enable debug logging |
+| `GCR_PROVIDER` | `shuaihong` | Target provider (shuaihong, deepseek, openai, claude) |
+| `GCR_API_KEY` | (required) | API key for target provider |
+| `GCR_MODEL` | `gpt-4o` | Model to use |
+| `GCR_DEBUG` | `false` | Enable debug logging |
 
 ## Files
 
-- `ccr-gemini` - Main wrapper script
+- `gcr-gemini` - Main wrapper script
 - `proxy-service/` - Proxy server with API translation
 - `setup-proxy.sh` - Installation script
 - `test-proxy.js` - Testing utility
@@ -52,8 +52,8 @@ User Input → ccr-gemini → Proxy Service → Third-Party API → Response
 
 ```bash
 node test-proxy.js                           # Test proxy service
-./ccr-gemini -p "Hello"                      # Test complete workflow
-CCR_DEBUG=true ./ccr-gemini --help           # Debug mode
+./gcr-gemini -p "Hello"                      # Test complete workflow
+GCR_DEBUG=true ./gcr-gemini --help           # Debug mode
 ```
 
 ---

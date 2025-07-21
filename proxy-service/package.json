@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-router",
+  "name": "gemini-cli-router",
   "version": "1.0.0",
   "description": "A proxy service that routes Gemini API requests to third-party providers",
   "main": "src/server.js",

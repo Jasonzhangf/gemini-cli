@@ -1,5 +1,5 @@
 /**
- * Claude Code Router - Main Server
+ * Gemini CLI Router - Main Server
  * A proxy service that routes Gemini API requests to third-party providers
  * 
  * @author Jason Zhang
@@ -33,7 +33,7 @@ app.use((req, res, next) => {
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
-    service: 'claude-code-router',
+    service: 'gemini-cli-router',
     provider: config.provider.name,
     timestamp: new Date().toISOString()
   });
@@ -233,7 +233,7 @@ app.all('/v1beta/*', (req, res) => {
 
 // Start server
 const server = app.listen(config.port, config.host, () => {
-  console.log(`\n🚀 Claude Code Router started successfully!`);
+  console.log(`\n🚀 Gemini CLI Router started successfully!`);
   console.log(`📡 Server: http://${config.host}:${config.port}`);
   console.log(`🎯 Provider: ${config.provider.name} (${config.provider.model})`);
   console.log(`🔧 Debug mode: ${config.debug ? 'ON' : 'OFF'}`);

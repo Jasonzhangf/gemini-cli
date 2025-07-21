@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# CCR-Gemini Setup Script
-# Sets up the Claude Code Router proxy for Gemini CLI
+# GCR-Gemini Setup Script
+# Sets up the Gemini CLI Router proxy for Gemini CLI
 # Author: Jason Zhang
 
 set -e
 
-echo "🚀 Setting up CCR-Gemini (Claude Code Router for Gemini CLI)..."
+echo "🚀 Setting up GCR-Gemini (Gemini CLI Router for Third-Party AI Providers)..."
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
@@ -52,9 +52,9 @@ else
     exit 1
 fi
 
-# Make ccr-gemini executable
+# Make gcr-gemini executable
 cd "$SCRIPT_DIR"
-chmod +x ccr-gemini
+chmod +x gcr-gemini
 
 # Create environment file if it doesn't exist
 if [ ! -f "$PROXY_DIR/.env" ]; then
@@ -88,12 +88,12 @@ wait $PROXY_PID 2>/dev/null || true
 
 # Global installation option
 echo ""
-echo "🎉 CCR-Gemini setup complete!"
+echo "🎉 GCR-Gemini setup complete!"
 echo ""
 echo "📋 Choose installation method:"
 echo ""
 echo "1. 📍 Local usage (current directory):"
-echo "   ./ccr-gemini -p \"Hello, world!\""
+echo "   ./gcr-gemini -p \"Hello, world!\""
 echo ""
 echo "2. 🌍 Global installation (recommended):"
 read -p "   Install globally? [y/N]: " INSTALL_GLOBAL
@@ -103,17 +103,17 @@ if [[ $INSTALL_GLOBAL =~ ^[Yy]$ ]]; then
     
     # Create global symlink
     if [ -w "/usr/local/bin" ]; then
-        ln -sf "$SCRIPT_DIR/ccr-gemini" /usr/local/bin/ccr-gemini
-        echo "   ✅ Global symlink created: /usr/local/bin/ccr-gemini"
+        ln -sf "$SCRIPT_DIR/gcr-gemini" /usr/local/bin/gcr-gemini
+        echo "   ✅ Global symlink created: /usr/local/bin/gcr-gemini"
     else
         echo "   Creating global symlink (requires sudo):"
-        sudo ln -sf "$SCRIPT_DIR/ccr-gemini" /usr/local/bin/ccr-gemini
-        echo "   ✅ Global symlink created: /usr/local/bin/ccr-gemini"
+        sudo ln -sf "$SCRIPT_DIR/gcr-gemini" /usr/local/bin/gcr-gemini
+        echo "   ✅ Global symlink created: /usr/local/bin/gcr-gemini"
     fi
     
     echo ""
     echo "   🎯 Test global installation:"
-    echo "   ccr-gemini -p \"Hello, world!\""
+    echo "   gcr-gemini -p \"Hello, world!\""
 else
     echo ""
     echo "   📍 Using local installation."
@@ -121,7 +121,7 @@ else
     echo "   export PATH=\"$SCRIPT_DIR:\$PATH\""
     echo ""
     echo "   🎯 Test local installation:"
-    echo "   ./ccr-gemini -p \"Hello, world!\""
+    echo "   ./gcr-gemini -p \"Hello, world!\""
 fi
 
 echo ""
@@ -129,8 +129,8 @@ echo "🔧 Configuration:"
 echo "   Edit $PROXY_DIR/.env to change provider settings"
 echo ""
 echo "📚 Usage:"
-echo "   ccr-gemini [any-gemini-command]"
-echo "   ccr-gemini --help"
-echo "   CCR_DEBUG=true ccr-gemini -p \"test\""
+echo "   gcr-gemini [any-gemini-command]"
+echo "   gcr-gemini --help"
+echo "   GCR_DEBUG=true gcr-gemini -p \"test\""
 echo ""
 echo "✅ Setup complete! Happy coding! 🚀"

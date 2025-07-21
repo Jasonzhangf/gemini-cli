@@ -1,21 +1,21 @@
 /**
- * Configuration for Claude Code Router
+ * Configuration for Gemini CLI Router
  * 
  * @author Jason Zhang
  */
 
 export const config = {
   // Server configuration
-  port: process.env.CCR_PORT || 3457,
-  host: process.env.CCR_HOST || 'localhost',
+  port: process.env.GCR_PORT || 3457,
+  host: process.env.GCR_HOST || 'localhost',
   
   // Target provider configuration
   provider: {
     // Default to SHUAIHONG, but can be configured
-    name: process.env.CCR_PROVIDER || 'shuaihong',
-    baseUrl: process.env.CCR_BASE_URL || 'https://ai.shuaihong.fun/v1',
-    apiKey: process.env.CCR_API_KEY || 'sk-g4hBumofoYFvLjLivj9uxeIYUR5uE3he2twZERTextAgsXPl',
-    model: process.env.CCR_MODEL || 'gpt-4o'
+    name: process.env.GCR_PROVIDER || 'shuaihong',
+    baseUrl: process.env.GCR_BASE_URL || 'https://ai.shuaihong.fun/v1',
+    apiKey: process.env.GCR_API_KEY || '',
+    model: process.env.GCR_MODEL || 'gpt-4o'
   },
   
   // Supported providers

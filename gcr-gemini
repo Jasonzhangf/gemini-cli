@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * CCR-Gemini - Claude Code Router for Gemini CLI
+ * GCR-Gemini - Gemini CLI Router for Third-Party AI Providers
  * A wrapper script that intercepts gemini commands and routes them through our proxy
  * 
  * @author Jason Zhang
@@ -21,12 +21,12 @@ const __dirname = dirname(__filename);
 
 // Configuration
 const config = {
-  proxyPort: process.env.CCR_PORT || 3457,
-  proxyHost: process.env.CCR_HOST || 'localhost',
-  apiKey: process.env.CCR_API_KEY || 'sk-g4hBumofoYFvLjLivj9uxeIYUR5uE3he2twZERTextAgsXPl',
-  provider: process.env.CCR_PROVIDER || 'shuaihong',
-  model: process.env.CCR_MODEL || 'gpt-4o',
-  debug: process.env.CCR_DEBUG === 'true' || false,
+  proxyPort: process.env.GCR_PORT || 3457,
+  proxyHost: process.env.GCR_HOST || 'localhost',
+  apiKey: process.env.GCR_API_KEY || '',
+  provider: process.env.GCR_PROVIDER || 'shuaihong',
+  model: process.env.GCR_MODEL || 'gpt-4o',
+  debug: process.env.GCR_DEBUG === 'true' || false,
   
   // Proxy service path
   proxyServicePath: join(__dirname, 'proxy-service'),
@@ -40,7 +40,7 @@ const config = {
  */
 function debug(message) {
   if (config.debug) {
-    console.log(`[CCR-Gemini] ${message}`);
+    console.log(`[GCR-Gemini] ${message}`);
   }
 }
 
@@ -48,14 +48,14 @@ function debug(message) {
  * Print error message
  */
 function error(message) {
-  console.error(`[CCR-Gemini Error] ${message}`);
+  console.error(`[GCR-Gemini Error] ${message}`);
 }
 
 /**
  * Print info message
  */
 function info(message) {
-  console.log(`[CCR-Gemini] ${message}`);
+  console.log(`[GCR-Gemini] ${message}`);
 }
 
 /**
@@ -180,6 +180,8 @@ function executeGeminiCommand(args) {
     // Prepare the environment for gemini to use our proxy
     const env = {
       ...process.env,
+      // Set Gemini API key to bypass OAuth
+      GEMINI_API_KEY: 'dummy-key-for-proxy',
       // Override SHUAIHONG provider to point to our proxy
       SHUAIHONG_API_ENDPOINT: `http://${config.proxyHost}:${config.proxyPort}`,
       SHUAIHONG_API_KEY: config.apiKey,
@@ -229,22 +231,22 @@ async function main() {
   // Show help if no arguments
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     console.log(`
-🤖 CCR-Gemini - Claude Code Router for Gemini CLI
+🤖 GCR-Gemini - Gemini CLI Router for Third-Party AI Providers
 
-Usage: ccr-gemini [gemini-command-args...]
+Usage: gcr-gemini [gemini-command-args...]
 
 Examples:
-  ccr-gemini chat "Hello, how are you?"
-  ccr-gemini --help
-  ccr-gemini config
+  gcr-gemini chat "Hello, how are you?"
+  gcr-gemini --help
+  gcr-gemini config
   
 Environment Variables:
-  CCR_API_KEY      - API key for target provider (default: SHUAIHONG key)
-  CCR_PROVIDER     - Target provider: shuaihong, deepseek, openai, claude (default: shuaihong)
-  CCR_MODEL        - Model to use (default: gpt-4o)
-  CCR_PORT         - Proxy service port (default: 3457)
-  CCR_HOST         - Proxy service host (default: localhost)
-  CCR_DEBUG        - Enable debug logging (default: false)
+  GCR_API_KEY      - API key for target provider (required)
+  GCR_PROVIDER     - Target provider: shuaihong, deepseek, openai, claude (default: shuaihong)
+  GCR_MODEL        - Model to use (default: gpt-4o)
+  GCR_PORT         - Proxy service port (default: 3457)
+  GCR_HOST         - Proxy service host (default: localhost)
+  GCR_DEBUG        - Enable debug logging (default: false)
 
 Configuration:
   Provider: ${config.provider}
@@ -252,14 +254,14 @@ Configuration:
   Proxy: http://${config.proxyHost}:${config.proxyPort}
   Debug: ${config.debug}
 
-Note: Make sure to set CCR_API_KEY environment variable for your target provider.
+Note: Make sure to set GCR_API_KEY environment variable for your target provider.
 `);
     return;
   }
   
   // Check if API key is configured
   if (!config.apiKey) {
-    error('CCR_API_KEY environment variable is required!');
+    error('GCR_API_KEY environment variable is required!');
     error('Set it to your API key for the target provider.');
     error(`Current provider: ${config.provider}`);
     process.exit(1);
