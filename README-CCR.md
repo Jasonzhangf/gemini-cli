@@ -17,8 +17,14 @@ A clean proxy system that routes Gemini CLI requests to third-party AI providers
 
 3. **Usage**
    ```bash
+   # Using OAuth (will prompt for authentication)
    ./gcr-gemini -p "Hello, world!"
-   GCR_DEBUG=true ./gcr-gemini -p "Test message"
+   
+   # Using Gemini API key (no authentication prompts)
+   GCR_API_KEY=your_gemini_api_key ./gcr-gemini -p "Hello, world!"
+   
+   # With debug logging
+   GCR_DEBUG=true GCR_TARGET_API_KEY=your_provider_key ./gcr-gemini -p "Test message"
    ```
 
 ## How It Works
@@ -36,8 +42,9 @@ User Input → gcr-gemini → Proxy Service → Third-Party API → Response
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `GCR_API_KEY` | (optional) | Gemini API key (if not set, uses OAuth) |
+| `GCR_TARGET_API_KEY` | (required) | API key for target provider |
 | `GCR_PROVIDER` | `shuaihong` | Target provider (shuaihong, deepseek, openai, claude) |
-| `GCR_API_KEY` | (required) | API key for target provider |
 | `GCR_MODEL` | `gpt-4o` | Model to use |
 | `GCR_DEBUG` | `false` | Enable debug logging |
 

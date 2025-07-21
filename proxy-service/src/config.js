@@ -6,7 +6,7 @@
 
 export const config = {
   // Server configuration
-  port: process.env.GCR_PORT || 3457,
+  port: process.env.GCR_PORT || 3458,
   host: process.env.GCR_HOST || 'localhost',
   
   // Target provider configuration
@@ -14,7 +14,7 @@ export const config = {
     // Default to SHUAIHONG, but can be configured
     name: process.env.GCR_PROVIDER || 'shuaihong',
     baseUrl: process.env.GCR_BASE_URL || 'https://ai.shuaihong.fun/v1',
-    apiKey: process.env.GCR_API_KEY || '',
+    apiKey: process.env.GCR_TARGET_API_KEY || '',
     model: process.env.GCR_MODEL || 'gpt-4o'
   },
   
@@ -42,14 +42,14 @@ export const config = {
     },
     // Add more providers as needed
     custom: {
-      baseUrl: process.env.CCR_CUSTOM_BASE_URL || '',
-      chatEndpoint: process.env.CCR_CUSTOM_ENDPOINT || '/chat/completions',
-      model: process.env.CCR_CUSTOM_MODEL || 'custom-model'
+      baseUrl: process.env.GCR_CUSTOM_BASE_URL || '',
+      chatEndpoint: process.env.GCR_CUSTOM_ENDPOINT || '/chat/completions',
+      model: process.env.GCR_CUSTOM_MODEL || 'custom-model'
     }
   },
   
   // Debug mode
-  debug: process.env.CCR_DEBUG === 'true' || false,
+  debug: process.env.GCR_DEBUG === 'true' || false,
   
   // CORS configuration
   cors: {

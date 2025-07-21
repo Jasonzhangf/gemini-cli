@@ -56,7 +56,7 @@ CCR_DEBUG=true ./ccr-gemini -p "Test message"
 | `CCR_API_KEY` | SHUAIHONG key | 目标提供者的API密钥 |
 | `CCR_MODEL` | `gpt-4o` | 要使用的模型名称 |
 | `CCR_BASE_URL` | `https://ai.shuaihong.fun/v1` | 提供者API基础URL |
-| `CCR_PORT` | `3457` | 代理服务端口 |
+| `CCR_PORT` | `3458` | 代理服务端口 |
 | `CCR_HOST` | `localhost` | 代理服务主机 |
 | `CCR_DEBUG` | `false` | 启用调试日志 |
 

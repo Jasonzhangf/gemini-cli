@@ -7,7 +7,7 @@
 
 import fetch from 'node-fetch';
 
-const proxyUrl = 'http://localhost:3457';
+const proxyUrl = 'http://localhost:3458';
 
 // Test 1: Health check
 console.log('🔍 Testing proxy health...');
