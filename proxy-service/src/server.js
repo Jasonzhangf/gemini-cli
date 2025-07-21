@@ -35,6 +35,7 @@ app.get('/health', (req, res) => {
     status: 'ok', 
     service: 'gemini-cli-router',
     provider: config.provider.name,
+    model: config.provider.model,
     timestamp: new Date().toISOString()
   });
 });
@@ -46,6 +47,124 @@ app.get('/config', (req, res) => {
     model: config.provider.model,
     version: '1.0.0'
   });
+});
+
+// Standard Gemini API endpoints (used by official Gemini CLI)
+app.all('/v1beta/*', async (req, res) => {
+  try {
+    const geminiRequest = req.body;
+    
+    if (config.debug) {
+      console.log(`[Router] Received Gemini API request: ${req.method} ${req.path}`);
+      if (geminiRequest) {
+        console.log(`[Router] Request:`, JSON.stringify(geminiRequest, null, 2));
+      }
+    }
+    
+    // Handle different types of Gemini requests
+    if (req.path.includes('/generateContent')) {
+      // Translate Gemini request to provider format
+      const translatedRequest = GeminiTranslator.translateRequest(geminiRequest);
+      
+      // Get provider configuration
+      const providerConfig = config.providers[config.provider.name] || config.providers.custom;
+      const targetUrl = `${config.provider.baseUrl}${providerConfig.chatEndpoint}`;
+      
+      // Check for third-party model specification in request headers or URL
+      let targetModel = null;
+      
+      // Option 1: Check URL path for model name (e.g., /v1beta/models/gpt-4o/generateContent)
+      const modelMatch = req.path.match(/\/models\/([^\/]+)\/generateContent/);
+      if (modelMatch && modelMatch[1] !== 'gemini-pro') {
+        targetModel = modelMatch[1];
+      }
+      
+      // Option 2: Check custom header
+      if (req.headers['x-third-party-model']) {
+        targetModel = req.headers['x-third-party-model'];
+      }
+      
+      // Set model priority: custom model > configured model > default
+      if (!translatedRequest.model) {
+        translatedRequest.model = targetModel || config.provider.model || providerConfig.model;
+      }
+      
+      if (config.debug && targetModel) {
+        console.log(`[Router] Using third-party model: ${targetModel}`);
+      }
+      
+      // Prepare headers
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.provider.apiKey}`
+      };
+      
+      // Handle different provider authentication
+      if (config.provider.name === 'claude') {
+        headers['x-api-key'] = config.provider.apiKey;
+        headers['anthropic-version'] = '2023-06-01';
+        delete headers['Authorization'];
+      }
+      
+      if (config.debug) {
+        console.log(`[Router] Making request to: ${targetUrl}`);
+      }
+      
+      // Make request to target provider
+      const response = await fetch(targetUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(translatedRequest)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[Router] Provider error (${response.status}):`, errorText);
+        
+        return res.status(response.status).json({
+          error: {
+            message: `Provider error: ${errorText}`,
+            type: 'provider_error',
+            code: response.status
+          }
+        });
+      }
+      
+      const providerResponse = await response.json();
+      
+      if (config.debug) {
+        console.log(`[Router] Provider response received`);
+      }
+      
+      // Translate response back to Gemini format
+      const geminiResponse = GeminiTranslator.translateResponse(providerResponse);
+      
+      res.json(geminiResponse);
+      
+    } else {
+      // Handle other Gemini API endpoints (models list, etc.)
+      res.json({
+        models: [
+          {
+            name: `models/${config.provider.model}`,
+            displayName: config.provider.model,
+            description: `Model provided by ${config.provider.name}`,
+            supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+          }
+        ]
+      });
+    }
+    
+  } catch (error) {
+    console.error('[Router] Error:', error);
+    res.status(500).json({
+      error: {
+        message: error.message,
+        type: 'internal_error',
+        code: 500
+      }
+    });
+  }
 });
 
 // OpenAI-compatible endpoint (used by SHUAIHONG provider)
@@ -126,8 +245,105 @@ app.post('/chat/completions', async (req, res) => {
   }
 });
 
+// Gemini CLI internal endpoint (used by official CLI)
+// Note: Express doesn't handle colons in paths well, so we use a catch-all
+app.post('/v1internal*', async (req, res) => {
+  try {
+    const geminiRequest = req.body;
+    
+    if (config.debug) {
+      console.log(`[Router] Received internal stream request`);
+      console.log(`[Router] Request:`, JSON.stringify(geminiRequest, null, 2));
+    }
+    
+    // Translate Gemini request to provider format
+    const translatedRequest = GeminiTranslator.translateRequest(geminiRequest);
+    
+    // Get provider configuration
+    const providerConfig = config.providers[config.provider.name] || config.providers.custom;
+    const targetUrl = `${config.provider.baseUrl}${providerConfig.chatEndpoint}`;
+    
+    // Set model if not specified
+    if (!translatedRequest.model) {
+      translatedRequest.model = config.provider.model || providerConfig.model;
+    }
+    
+    // Prepare headers
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.provider.apiKey}`
+    };
+    
+    // Handle different provider authentication
+    if (config.provider.name === 'claude') {
+      headers['x-api-key'] = config.provider.apiKey;
+      headers['anthropic-version'] = '2023-06-01';
+      delete headers['Authorization'];
+    }
+    
+    if (config.debug) {
+      console.log(`[Router] Making request to: ${targetUrl}`);
+      console.log(`[Router] Headers:`, { ...headers, Authorization: '[REDACTED]' });
+    }
+    
+    // Make request to target provider
+    const response = await fetch(targetUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(translatedRequest)
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Router] Provider error (${response.status}):`, errorText);
+      
+      return res.status(response.status).json({
+        error: {
+          message: `Provider error: ${errorText}`,
+          type: 'provider_error',
+          code: response.status
+        }
+      });
+    }
+    
+    const providerResponse = await response.json();
+    
+    if (config.debug) {
+      console.log(`[Router] Provider response:`, JSON.stringify(providerResponse, null, 2));
+    }
+    
+    // Translate response back to Gemini format
+    const geminiResponse = GeminiTranslator.translateResponse(providerResponse);
+    
+    // Add GCR signature to response for identification
+    if (geminiResponse.candidates && geminiResponse.candidates[0] && geminiResponse.candidates[0].content) {
+      const content = geminiResponse.candidates[0].content;
+      if (content.parts && content.parts[0] && content.parts[0].text) {
+        // Add subtle GCR signature at the end
+        content.parts[0].text += '\n\n*[Response routed via Gemini CLI Router (GCR) through ' + config.provider.name.toUpperCase() + ' provider]*';
+      }
+    }
+    
+    if (config.debug) {
+      console.log(`[Router] Translated response:`, JSON.stringify(geminiResponse, null, 2));
+    }
+    
+    res.json(geminiResponse);
+    
+  } catch (error) {
+    console.error('[Router] Error:', error);
+    res.status(500).json({
+      error: {
+        message: error.message,
+        type: 'internal_error',
+        code: 500
+      }
+    });
+  }
+});
+
 // Main Gemini API proxy endpoint
-app.post('/v1beta/models/:model/generateContent', async (req, res) => {
+app.post('/v1beta/models/:model', async (req, res) => {
   try {
     const { model } = req.params;
     const geminiRequest = req.body;

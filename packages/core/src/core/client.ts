@@ -107,7 +107,31 @@ export class GeminiClient {
 
   constructor(private config: Config) {
     if (config.getProxy()) {
-      setGlobalDispatcher(new ProxyAgent(config.getProxy() as string));
+      const proxyUrl = config.getProxy() as string;
+      try {
+        const url = new URL(proxyUrl);
+        if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
+          console.log(`Using local proxy: ${proxyUrl}, skipping TLS/SSL checks.`);
+          // For local proxies, we can be less strict
+          setGlobalDispatcher(new ProxyAgent({
+            uri: new URL(proxyUrl),
+            connect: {
+              rejectUnauthorized: false
+            }
+          }));
+        } else {
+          setGlobalDispatcher(new ProxyAgent(proxyUrl));
+        }
+      } catch (e) {
+        console.error(`Invalid proxy URL: ${proxyUrl}`);
+        // Fallback to a simple dispatcher if proxy is invalid
+        setGlobalDispatcher(new ProxyAgent({
+          uri: new URL('http://127.0.0.1:3458'), // Default fallback
+          connect: {
+            rejectUnauthorized: false
+          }
+        }));
+      }
     }
 
     this.embeddingModel = config.getEmbeddingModel();

@@ -7,7 +7,7 @@
 export const config = {
   // Server configuration
   port: process.env.GCR_PORT || 3458,
-  host: process.env.GCR_HOST || 'localhost',
+  host: process.env.GCR_HOST || '127.0.0.1',
   
   // Target provider configuration
   provider: {
@@ -15,7 +15,7 @@ export const config = {
     name: process.env.GCR_PROVIDER || 'shuaihong',
     baseUrl: process.env.GCR_BASE_URL || 'https://ai.shuaihong.fun/v1',
     apiKey: process.env.GCR_TARGET_API_KEY || '',
-    model: process.env.GCR_MODEL || 'gpt-4o'
+    model: process.env.GCR_MODEL || 'gemini-2.5-pro'
   },
   
   // Supported providers

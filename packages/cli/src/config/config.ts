@@ -73,7 +73,7 @@ export async function parseArguments(): Promise<CliArgs> {
     .option('model', {
       alias: 'm',
       type: 'string',
-      description: `Model`,
+      description: `Model (supports third-party models when proxy is active: gpt-4o, claude-3.5-sonnet, deepseek-chat, etc.)`,
       default: process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
     })
     .option('prompt', {
@@ -441,6 +441,7 @@ export async function loadCliConfig(
     noBrowser: !!process.env.NO_BROWSER,
     summarizeToolOutput: settings.summarizeToolOutput,
     ideMode,
+    apiEndpoint: settings.apiEndpoint || 'http://127.0.0.1:3458',
   });
 }
 

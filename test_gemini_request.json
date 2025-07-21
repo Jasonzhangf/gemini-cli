@@ -1,0 +1,16 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Hello! Please respond with just: Hi from proxy server!"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "temperature": 0.1,
+    "maxOutputTokens": 20
+  }
+}

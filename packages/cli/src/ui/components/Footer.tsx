@@ -25,6 +25,9 @@ interface FooterProps {
   showMemoryUsage?: boolean;
   promptTokenCount: number;
   nightly: boolean;
+  proxyPort?: number;
+  proxyProvider?: string;
+  thirdPartyModel?: string;
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -39,6 +42,9 @@ export const Footer: React.FC<FooterProps> = ({
   showMemoryUsage,
   promptTokenCount,
   nightly,
+  proxyPort,
+  proxyProvider,
+  thirdPartyModel,
 }) => {
   const limit = tokenLimit(model);
   const percentage = promptTokenCount / limit;
@@ -66,14 +72,32 @@ export const Footer: React.FC<FooterProps> = ({
         )}
       </Box>
 
-      {/* Middle Section: Centered Sandbox Info */}
+      {/* Middle Section: Proxy and Sandbox Info */}
       <Box
         flexGrow={1}
         alignItems="center"
         justifyContent="center"
         display="flex"
       >
-        {process.env.SANDBOX && process.env.SANDBOX !== 'sandbox-exec' ? (
+        {proxyPort && proxyProvider ? (
+          <Box>
+            <Text color={Colors.AccentGreen}>
+              🔄 Proxy:{proxyPort}
+            </Text>
+            <Text color={Colors.Gray}> | </Text>
+            <Text color={Colors.AccentBlue}>
+              {proxyProvider.toUpperCase()}
+            </Text>
+            {thirdPartyModel && (
+              <>
+                <Text color={Colors.Gray}> | </Text>
+                <Text color={Colors.AccentYellow}>
+                  {thirdPartyModel}
+                </Text>
+              </>
+            )}
+          </Box>
+        ) : process.env.SANDBOX && process.env.SANDBOX !== 'sandbox-exec' ? (
           <Text color="green">
             {process.env.SANDBOX.replace(/^gemini-(?:cli-)?/, '')}
           </Text>

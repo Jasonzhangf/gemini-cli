@@ -146,6 +146,13 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
   const [currentModel, setCurrentModel] = useState(config.getModel());
   const [shellModeActive, setShellModeActive] = useState(false);
   const [showErrorDetails, setShowErrorDetails] = useState<boolean>(false);
+  
+  // Proxy server detection state
+  const [proxyInfo, setProxyInfo] = useState<{
+    port: number | null;
+    provider: string | null;
+    thirdPartyModel: string | null;
+  }>({ port: null, provider: null, thirdPartyModel: null });
   const [showToolDescriptions, setShowToolDescriptions] =
     useState<boolean>(false);
   const [ctrlCPressedOnce, setCtrlCPressedOnce] = useState(false);
@@ -203,6 +210,50 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
       }
     }
   }, [settings.merged.selectedAuthType, openAuthDialog, setAuthError]);
+
+  // Detect proxy server and extract third-party model info
+  useEffect(() => {
+    const detectProxy = async () => {
+      try {
+        const proxyPort = 3458; // Default proxy port
+        const response = await fetch(`http://127.0.0.1:${proxyPort}/health`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          const provider = data.provider;
+          
+          // Extract third-party model from -m parameter or config
+          let thirdPartyModel = null;
+          const modelParam = process.argv.find(arg => arg.startsWith('-m') || arg === '--model');
+          if (modelParam) {
+            const modelIndex = process.argv.indexOf(modelParam);
+            thirdPartyModel = process.argv[modelIndex + 1] || null;
+          }
+          
+          // If no -m parameter, try to get from environment or config
+          if (!thirdPartyModel) {
+            thirdPartyModel = process.env.GCR_MODEL || 'default';
+          }
+          
+          setProxyInfo({
+            port: proxyPort,
+            provider,
+            thirdPartyModel
+          });
+        } else {
+          setProxyInfo({ port: null, provider: null, thirdPartyModel: null });
+        }
+      } catch (error) {
+        setProxyInfo({ port: null, provider: null, thirdPartyModel: null });
+      }
+    };
+    
+    detectProxy();
+    
+    // Re-check proxy every 30 seconds
+    const interval = setInterval(detectProxy, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Sync user tier from config when authentication changes
   useEffect(() => {
@@ -995,6 +1046,9 @@ const App = ({ config, settings, startupWarnings = [], version }: AppProps) => {
             }
             promptTokenCount={sessionStats.lastPromptTokenCount}
             nightly={nightly}
+            proxyPort={proxyInfo.port || undefined}
+            proxyProvider={proxyInfo.provider || undefined}
+            thirdPartyModel={proxyInfo.thirdPartyModel || undefined}
           />
         </Box>
       </Box>

@@ -98,6 +98,7 @@ export interface Settings {
   summarizeToolOutput?: Record<string, SummarizeToolOutputSettings>;
 
   // Add other settings here.
+  apiEndpoint?: string;
   ideMode?: boolean;
 }
 

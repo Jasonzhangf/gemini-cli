@@ -74,6 +74,9 @@ for (let i = 0; i < originalArgs.length; i++) {
   if ((originalArgs[i] === '-m' || originalArgs[i] === '--model') && i + 1 < originalArgs.length) {
     modelOverride = originalArgs[i + 1];
     i++; // Skip the next argument (model name)
+  } else if (originalArgs[i] === '--status' || originalArgs[i] === '--gcr-status') {
+    // Don't pass status commands to official gemini
+    continue;
   } else {
     filteredArgs.push(originalArgs[i]);
   }
@@ -85,7 +88,7 @@ const envConfig = loadConfig();
 // Configuration with priority: CLI args > process.env > config file > defaults
 const config = {
   proxyPort: process.env.GCR_PORT || envConfig.GCR_PORT || 3458,
-  proxyHost: process.env.GCR_HOST || envConfig.GCR_HOST || 'localhost',
+  proxyHost: process.env.GCR_HOST || envConfig.GCR_HOST || '127.0.0.1',
   apiKey: process.env.GCR_API_KEY || envConfig.GCR_API_KEY || '',
   provider: process.env.GCR_PROVIDER || envConfig.GCR_PROVIDER || 'shuaihong',
   model: modelOverride || process.env.GCR_MODEL || envConfig.GCR_MODEL || 'gpt-4o',
@@ -121,6 +124,27 @@ function error(message) {
  */
 function info(message) {
   console.log(`[GCR-Gemini] ${message}`);
+}
+
+/**
+ * Display current GCR status information
+ */
+function displayStatus() {
+  console.log('');
+  console.log('🔄 ═══════════════════════════════════════════════════════════');
+  console.log('🚀 GEMINI CLI ROUTER (GCR) - ACTIVE');
+  console.log('🔄 ═══════════════════════════════════════════════════════════');
+  console.log(`   📡 Proxy Port: ${config.proxyPort}`);
+  console.log(`   🤖 Provider: ${config.provider.toUpperCase()}`);
+  console.log(`   🧠 Model: ${config.model}`);
+  console.log(`   🔑 Auth: ${config.apiKey ? 'API Key' : 'OAuth'}`);
+  console.log(`   ⚡ Status: ROUTING TO THIRD-PARTY PROVIDER`);
+  if (config.debug) {
+    console.log(`   🐛 Debug: enabled`);
+    console.log(`   🔗 Base URL: ${config.baseUrl}`);
+  }
+  console.log('🔄 ═══════════════════════════════════════════════════════════');
+  console.log('');
 }
 
 /**
@@ -330,6 +354,26 @@ function executeGeminiCommand(args) {
 async function main() {
   const args = filteredArgs;
   
+  // Show status check if explicitly requested (check original args)
+  if (originalArgs.includes('--status') || originalArgs.includes('--gcr-status')) {
+    console.log('');
+    console.log('🔍 GCR STATUS CHECK');
+    console.log('═══════════════════════════════════════════════');
+    console.log('✅ Gemini CLI Router (GCR) is ACTIVE');
+    console.log(`📡 Proxy running on port: ${config.proxyPort}`);
+    console.log(`🤖 Routing to provider: ${config.provider.toUpperCase()}`);
+    console.log(`🧠 Using model: ${config.model}`);
+    console.log(`🔗 Target URL: ${config.baseUrl}`);
+    console.log('');
+    console.log('🚨 ALL REQUESTS ARE BEING ROUTED TO THIRD-PARTY PROVIDER');
+    console.log('🚨 NOT USING OFFICIAL GOOGLE GEMINI API');
+    console.log('');
+    console.log('To use official Gemini CLI, run: gemini (without gcr)');
+    console.log('To disable GCR, uninstall: npm uninstall -g gemini-cli-router');
+    console.log('═══════════════════════════════════════════════');
+    return;
+  }
+  
   // Show help only if explicitly requested
   if (args[0] === '--help' || args[0] === '-h') {
     console.log(`
@@ -340,6 +384,7 @@ Usage: gcr-gemini [gemini-command-args...]
 Examples:
   gcr-gemini chat "Hello, how are you?"
   gcr-gemini --help
+  gcr-gemini --status         # Check if GCR is active
   gcr-gemini config
   
 Environment Variables:
@@ -391,8 +436,15 @@ Note: Configuration loaded from ~/.gemini-cli-router/.env
       
       await startProxyService();
       info('✅ Proxy service is ready!');
+      
+      // Display status information
+      displayStatus();
     } else {
       debug('Proxy service is already running');
+      info('Using existing proxy service');
+      
+      // Display status information
+      displayStatus();
     }
     
     // Execute the gemini command

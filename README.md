@@ -1,162 +1,259 @@
-# Gemini CLI
+# 🤖 Gemini CLI Router (GCR)
 
-[![Gemini CLI CI](https://github.com/google-gemini/gemini-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/google-gemini/gemini-cli/actions/workflows/ci.yml)
+**Route your Gemini CLI requests to third-party AI providers seamlessly**
 
-![Gemini CLI Screenshot](./docs/assets/gemini-screenshot.png)
+GCR is a proxy system that intercepts Google Gemini CLI requests and routes them to alternative AI providers like SHUAIHONG, DeepSeek, OpenAI, Claude, and others. It provides a zero-modification approach - no need to touch the official Gemini CLI source code.
 
-This repository contains the Gemini CLI, a command-line AI workflow tool that connects to your
-tools, understands your code and accelerates your workflows.
+## ✨ Features
 
-With the Gemini CLI you can:
+- 🔄 **Zero Modification**: Works with official Gemini CLI without any changes
+- 🌐 **Multiple Providers**: Support for SHUAIHONG, DeepSeek, OpenAI, Claude
+- 🔑 **Flexible Auth**: Support both API key and OAuth authentication
+- 🎯 **Model Override**: Use `-m` parameter to override models on-the-fly
+- ⚡ **Fast Setup**: One-command global installation
+- 🛡️ **Privacy First**: Your API keys stay local in `~/.gemini-cli-router/.env`
 
-- Query and edit large codebases in and beyond Gemini's 1M token context window.
-- Generate new apps from PDFs or sketches, using Gemini's multimodal capabilities.
-- Automate operational tasks, like querying pull requests or handling complex rebases.
-- Use tools and MCP servers to connect new capabilities, including [media generation with Imagen,
-  Veo or Lyria](https://github.com/GoogleCloudPlatform/vertex-ai-creative-studio/tree/main/experiments/mcp-genmedia)
-- Ground your queries with the [Google Search](https://ai.google.dev/gemini-api/docs/grounding)
-  tool, built in to Gemini.
+## 🚀 Quick Start
 
-## Quickstart
+### Prerequisites
 
-1. **Prerequisites:** Ensure you have [Node.js version 20](https://nodejs.org/en/download) or higher installed.
-2. **Run the CLI:** Execute the following command in your terminal:
+**Step 1: Install Official Gemini CLI**
+```bash
+# Install the official Google Gemini CLI first
+npm install -g @google/gemini-cli
+```
 
-   ```bash
-   npx https://github.com/google-gemini/gemini-cli
-   ```
+### Installation
 
-   Or install it with:
+**Step 2: Install GCR**
 
+#### Method 1: Direct NPM Install (Recommended)
+```bash
+npm install -g gemini-cli-router
+```
+
+#### Method 2: From Source
+```bash
+# Clone the repository
+git clone https://github.com/Jasonzhangf/gemini-cli-router.git
+cd gemini-cli-router
+
+# Install globally from source
+npm install -g .
+```
+
+### Configuration
+
+**Step 3: Configure GCR**
+
+1. Edit your configuration file:
+```bash
+nano ~/.gemini-cli-router/.env
+```
+
+2. Add your provider settings:
+```env
+# Gemini API Key (optional, uses OAuth if not set)
+GCR_API_KEY=your_gemini_api_key_here
+
+# Provider Configuration
+GCR_PROVIDER=shuaihong
+GCR_TARGET_API_KEY=your_provider_api_key_here
+GCR_BASE_URL=https://ai.shuaihong.fun/v1
+GCR_MODEL=gemini-2.5-pro
+
+# Server Configuration
+GCR_PORT=3458
+GCR_HOST=localhost
+GCR_DEBUG=false
+```
+
+### Usage
+
+**Step 4: Start Using GCR**
+
+Once installed and configured, use `gcr` instead of `gemini`:
+
+```bash
+# Interactive chat
+gcr chat "Hello, how are you?"
+
+# Override model
+gcr -m gpt-4o chat "Hello"
+
+# Any gemini command works
+gcr config
+gcr --help
+```
+
+## 🔧 Supported Providers
+
+| Provider | Base URL | Models |
+|----------|----------|---------|
+| **SHUAIHONG** | `https://ai.shuaihong.fun/v1` | `gemini-2.5-pro`, `gpt-4o`, `claude-3.5-sonnet` |
+| **DeepSeek** | `https://api.deepseek.com/v1` | `deepseek-chat`, `deepseek-coder` |
+| **OpenAI** | `https://api.openai.com/v1` | `gpt-4o`, `gpt-4`, `gpt-3.5-turbo` |
+| **Claude** | `https://api.anthropic.com/v1` | `claude-3.5-sonnet`, `claude-3-opus` |
+
+## 📋 Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GCR_API_KEY` | Gemini API key (optional) | OAuth |
+| `GCR_PROVIDER` | Target provider | `shuaihong` |
+| `GCR_TARGET_API_KEY` | Provider API key | *(required)* |
+| `GCR_BASE_URL` | Provider base URL | Provider default |
+| `GCR_MODEL` | Default model | `gpt-4o` |
+| `GCR_PORT` | Proxy port | `3458` |
+| `GCR_HOST` | Proxy host | `localhost` |
+| `GCR_DEBUG` | Debug logging | `false` |
+
+## 🛠️ How It Works
+
+1. **Proxy Interception**: GCR starts a local proxy server on port 3458
+2. **Environment Override**: Sets `GEMINI_API_BASE_URL` to point to the proxy
+3. **API Translation**: Converts Gemini API calls to target provider format
+4. **Response Translation**: Converts provider responses back to Gemini format
+5. **Seamless Experience**: Your Gemini CLI works exactly as before
+
+```
+Gemini CLI → GCR Proxy → Third-Party Provider → Response Translation → Gemini CLI
+```
+
+## 🔐 Authentication
+
+GCR supports both authentication methods:
+
+### API Key (Recommended)
+Set `GCR_API_KEY` in your config file to use API key authentication and avoid OAuth prompts.
+
+### OAuth
+Leave `GCR_API_KEY` empty to use OAuth authentication (you'll be prompted to authenticate).
+
+## 📦 Complete Installation Guide
+
+### Step-by-Step Installation
+
+1. **Install Official Gemini CLI (Required)**
    ```bash
    npm install -g @google/gemini-cli
    ```
 
-   Then, run the CLI from anywhere:
-
+2. **Install GCR via NPM (Recommended)**
    ```bash
-   gemini
+   npm install -g gemini-cli-router
    ```
 
-3. **Pick a color theme**
-4. **Authenticate:** When prompted, sign in with your personal Google account. This will grant you up to 60 model requests per minute and 1,000 model requests per day using Gemini.
-
-You are now ready to use the Gemini CLI!
-
-### Use a Gemini API key:
-
-The Gemini API provides a free tier with [100 requests per day](https://ai.google.dev/gemini-api/docs/rate-limits#free-tier) using Gemini 2.5 Pro, control over which model you use, and access to higher rate limits (with a paid plan):
-
-1. Generate a key from [Google AI Studio](https://aistudio.google.com/apikey).
-2. Set it as an environment variable in your terminal. Replace `YOUR_API_KEY` with your generated key.
-
+3. **Alternative: Install from Source**
    ```bash
-   export GEMINI_API_KEY="YOUR_API_KEY"
+   git clone https://github.com/Jasonzhangf/gemini-cli-router.git
+   cd gemini-cli-router
+   npm install -g .
    ```
 
-3. (Optionally) Upgrade your Gemini API project to a paid plan on the API key page (will automatically unlock [Tier 1 rate limits](https://ai.google.dev/gemini-api/docs/rate-limits#tier-1))
-
-### Use a Vertex AI API key:
-
-The Vertex AI API provides a [free tier](https://cloud.google.com/vertex-ai/generative-ai/docs/start/express-mode/overview) using express mode for Gemini 2.5 Pro, control over which model you use, and access to higher rate limits with a billing account:
-
-1. Generate a key from [Google Cloud](https://cloud.google.com/vertex-ai/generative-ai/docs/start/api-keys).
-2. Set it as an environment variable in your terminal. Replace `YOUR_API_KEY` with your generated key and set GOOGLE_GENAI_USE_VERTEXAI to true
-
+4. **Configure Your Provider**
    ```bash
-   export GOOGLE_API_KEY="YOUR_API_KEY"
-   export GOOGLE_GENAI_USE_VERTEXAI=true
+   # Edit configuration
+   nano ~/.gemini-cli-router/.env
+   
+   # Add your settings
+   GCR_PROVIDER=shuaihong
+   GCR_TARGET_API_KEY=your_api_key_here
    ```
 
-3. (Optionally) Add a billing account on your project to get access to [higher usage limits](https://cloud.google.com/vertex-ai/generative-ai/docs/quotas)
+5. **Start Using**
+   ```bash
+   gcr chat "Hello, world!"
+   ```
 
-For other authentication methods, including Google Workspace accounts, see the [authentication](./docs/cli/authentication.md) guide.
+## 🗑️ Uninstallation
 
-## Examples
+```bash
+# Uninstall GCR
+npm uninstall -g gemini-cli-router
 
-Once the CLI is running, you can start interacting with Gemini from your shell.
-
-You can start a project from a new directory:
-
-```sh
-cd new-project/
-gemini
-> Write me a Gemini Discord bot that answers questions using a FAQ.md file I will provide
+# Optional: Uninstall Official Gemini CLI
+npm uninstall -g @google/gemini-cli
 ```
 
-Or work with an existing project:
+## 🧪 Testing
 
-```sh
-git clone https://github.com/google-gemini/gemini-cli
-cd gemini-cli
-gemini
-> Give me a summary of all of the changes that went in yesterday
+Test your setup:
+```bash
+# Test proxy functionality
+node test-proxy.js
+
+# Test with real conversation
+gcr chat "Hello, test message"
 ```
 
-### Next steps
+## 🐛 Troubleshooting
 
-- Learn how to [contribute to or build from the source](./CONTRIBUTING.md).
-- Explore the available **[CLI Commands](./docs/cli/commands.md)**.
-- If you encounter any issues, review the **[troubleshooting guide](./docs/troubleshooting.md)**.
-- For more comprehensive documentation, see the [full documentation](./docs/index.md).
-- Take a look at some [popular tasks](#popular-tasks) for more inspiration.
-- Check out our **[Official Roadmap](./ROADMAP.md)**
+### Common Issues
 
-### Troubleshooting
-
-Head over to the [troubleshooting guide](docs/troubleshooting.md) if you're
-having issues.
-
-## Popular tasks
-
-### Explore a new codebase
-
-Start by `cd`ing into an existing or newly-cloned repository and running `gemini`.
-
-```text
-> Describe the main pieces of this system's architecture.
+**Port 3458 already in use:**
+```bash
+# Kill existing processes
+lsof -ti:3458 | xargs kill -9
 ```
 
-```text
-> What security mechanisms are in place?
+**Permission errors:**
+```bash
+# Make scripts executable
+chmod +x gcr-gemini install-gcr-simple.sh uninstall-gcr.sh
 ```
 
-### Work with your existing code
+**OAuth every time:**
+- Set `GCR_API_KEY` in `~/.gemini-cli-router/.env` to avoid OAuth prompts
 
-```text
-> Implement a first draft for GitHub issue #123.
+**Official Gemini CLI not found:**
+- Make sure you installed it first: `npm install -g @google/gemini-cli`
+
+### Debug Mode
+
+Enable debug logging:
+```bash
+export GCR_DEBUG=true
+gcr chat "test"
 ```
 
-```text
-> Help me migrate this codebase to the latest version of Java. Start with a plan.
+## 📁 Project Structure
+
+```
+gemini-cli-router/
+├── gcr-gemini                 # Main executable
+├── proxy-service/            # Proxy server code
+│   ├── src/
+│   │   ├── server.js         # Express server
+│   │   ├── config.js         # Configuration
+│   │   └── gemini-translator.js
+│   └── package.json
+├── install-gcr-simple.sh     # Simple installer
+├── install-gcr.sh            # Advanced installer  
+├── uninstall-gcr.sh          # Uninstaller
+├── setup-post-install.js     # Post-install setup
+├── cleanup-pre-uninstall.js  # Cleanup script
+├── test-proxy.js             # Test utility
+└── package.json              # NPM package config
 ```
 
-### Automate your workflows
+## 🤝 Contributing
 
-Use MCP servers to integrate your local system tools with your enterprise collaboration suite.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-```text
-> Make me a slide deck showing the git history from the last 7 days, grouped by feature and team member.
-```
+## 📄 License
 
-```text
-> Make a full-screen web app for a wall display to show our most interacted-with GitHub issues.
-```
+MIT License - see LICENSE file for details.
 
-### Interact with your system
+## 👨‍💻 Author
 
-```text
-> Convert all the images in this directory to png, and rename them to use dates from the exif data.
-```
+**Jason Zhang** - [GitHub](https://github.com/Jasonzhangf)
 
-```text
-> Organize my PDF invoices by month of expenditure.
-```
+## 🔗 Related Projects
 
-### Uninstall
+- [Official Gemini CLI](https://github.com/google-gemini/gemini-cli) - The official Google Gemini CLI
+- [Claude Code](https://github.com/anthropics/claude-code) - Claude's official CLI
 
-Head over to the [Uninstall](docs/Uninstall.md) guide for uninstallation instructions.
+---
 
-## Terms of Service and Privacy Notice
-
-For details on the terms of service and privacy notice applicable to your use of Gemini CLI, see the [Terms of Service and Privacy Notice](./docs/tos-privacy.md).
+**⭐ If you find GCR useful, please star this repository!**

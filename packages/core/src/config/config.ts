@@ -168,6 +168,7 @@ export interface ConfigParameters {
   noBrowser?: boolean;
   summarizeToolOutput?: Record<string, SummarizeToolOutputSettings>;
   ideMode?: boolean;
+  apiEndpoint?: string;
 }
 
 export class Config {
@@ -223,6 +224,7 @@ export class Config {
     | Record<string, SummarizeToolOutputSettings>
     | undefined;
   private readonly experimentalAcp: boolean = false;
+  private readonly apiEndpoint: string | undefined;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -273,6 +275,7 @@ export class Config {
     this.noBrowser = params.noBrowser ?? false;
     this.summarizeToolOutput = params.summarizeToolOutput;
     this.ideMode = params.ideMode ?? false;
+    this.apiEndpoint = params.apiEndpoint;
 
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
@@ -559,6 +562,10 @@ export class Config {
 
   getIdeMode(): boolean {
     return this.ideMode;
+  }
+
+  getApiEndpoint(): string | undefined {
+    return this.apiEndpoint;
   }
 
   async getGitService(): Promise<GitService> {
