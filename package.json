@@ -5,13 +5,17 @@
   "main": "gcr-gemini",
   "type": "module",
   "bin": {
-    "gcr": "./gcr-gemini"
+    "gcr": "./gcr-gemini",
+    "gemini-local": "./bundle/gemini.js",
+    "gemini-proxy": "./bundle/gemini-proxy",
+    "start-gemini-proxy": "./bundle/start-gemini-proxy"
   },
   "scripts": {
     "postinstall": "node setup-post-install.js",
     "preuninstall": "node cleanup-pre-uninstall.js",
     "start": "./gcr-gemini",
-    "test": "node test-proxy.js"
+    "test": "node test-proxy.js",
+    "prepare": "echo \"Package prepared for installation\""
   },
   "keywords": [
     "gemini",
@@ -54,6 +58,8 @@
     "uninstall-gcr.sh",
     "setup-proxy.sh",
     "test-proxy.js",
-    "README.md"
+    "README.md",
+    "bundle/",
+    "LOCAL-VERSION-README.md"
   ]
 }
