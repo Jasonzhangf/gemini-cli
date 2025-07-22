@@ -9,6 +9,13 @@ export const config = {
   port: process.env.GCR_PORT || 3458,
   host: process.env.GCR_HOST || '127.0.0.1',
   
+  // Retry configuration
+  retry: {
+    maxRetries: parseInt(process.env.GCR_MAX_RETRIES) || 10,
+    initialDelay: parseInt(process.env.GCR_INITIAL_DELAY) || 1000, // ms
+    maxDelay: parseInt(process.env.GCR_MAX_DELAY) || 30000 // 30s max delay
+  },
+  
   // Target provider configuration
   provider: {
     // Default to SHUAIHONG, but can be configured

@@ -58,6 +58,11 @@ GCR_HOST=localhost
 
 # Debug Mode
 GCR_DEBUG=false
+
+# Retry Configuration (for handling overloaded models)
+GCR_MAX_RETRIES=10          # Maximum number of retry attempts
+GCR_INITIAL_DELAY=1000      # Initial delay in milliseconds
+GCR_MAX_DELAY=30000         # Maximum delay cap in milliseconds
 `;
 
     writeFileSync(configFile, defaultConfig);

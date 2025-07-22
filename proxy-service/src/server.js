@@ -11,6 +11,84 @@ import fetch from 'node-fetch';
 import { GeminiTranslator } from './gemini-translator.js';
 import { config } from './config.js';
 
+// Retry mechanism with exponential backoff
+async function retryWithBackoff(operation, options = {}) {
+  const maxRetries = options.maxRetries || config.retry.maxRetries;
+  const initialDelay = options.initialDelay || config.retry.initialDelay;
+  const maxDelay = options.maxDelay || config.retry.maxDelay;
+  
+  let lastError;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await operation();
+      
+      // Check if response indicates overloaded model
+      if (!result.ok) {
+        const errorText = await result.text();
+        
+        // Check for specific overload errors
+        const isRetryableError = (
+          result.status === 503 || 
+          result.status === 429 || // Rate limit
+          result.status === 502 || // Bad Gateway
+          result.status === 504 || // Gateway Timeout
+          errorText.includes('overloaded') || 
+          errorText.includes('UNAVAILABLE') ||
+          errorText.includes('rate limit') ||
+          errorText.includes('quota exceeded') ||
+          errorText.includes('timeout') ||
+          errorText.includes('temporarily unavailable')
+        );
+        
+        if (isRetryableError && attempt < maxRetries) {
+          const delay = Math.min(initialDelay * Math.pow(2, attempt), maxDelay); // Exponential backoff with cap
+          console.log(`[Retry] Model overloaded/rate limited (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms...`);
+          console.log(`[Retry] Error details: ${result.status} - ${errorText.substring(0, 200)}...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        
+        // For non-retryable errors, create a mock response to preserve the error
+        return {
+          ok: false,
+          status: result.status,
+          text: () => Promise.resolve(errorText),
+          json: () => Promise.resolve({ error: { message: errorText, code: result.status } })
+        };
+      }
+      
+      return result;
+      
+    } catch (error) {
+      lastError = error;
+      
+      // Check if it's a network error worth retrying
+      const isRetryableNetworkError = (
+        error.code === 'ECONNRESET' ||
+        error.code === 'ENOTFOUND' ||
+        error.code === 'ECONNREFUSED' ||
+        error.code === 'ETIMEDOUT' ||
+        error.message.includes('fetch failed') ||
+        error.message.includes('network error')
+      );
+      
+      if (isRetryableNetworkError && attempt < maxRetries) {
+        const delay = Math.min(initialDelay * Math.pow(2, attempt), maxDelay);
+        console.log(`[Retry] Network error (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms...`);
+        console.log(`[Retry] Error: ${error.message}`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      // Non-retryable error, break out
+      break;
+    }
+  }
+  
+  throw lastError || new Error(`Maximum retry attempts (${maxRetries}) exceeded`);
+}
+
 const app = express();
 
 // Middleware
@@ -110,11 +188,13 @@ app.all('/v1beta/*', async (req, res) => {
         console.log(`[Router] Making request to: ${targetUrl}`);
       }
       
-      // Make request to target provider
-      const response = await fetch(targetUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(translatedRequest)
+      // Make request to target provider with retry mechanism
+      const response = await retryWithBackoff(async () => {
+        return await fetch(targetUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(translatedRequest)
+        });
       });
       
       if (!response.ok) {
