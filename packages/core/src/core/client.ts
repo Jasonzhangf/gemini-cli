@@ -114,7 +114,7 @@ export class GeminiClient {
           console.log(`Using local proxy: ${proxyUrl}, skipping TLS/SSL checks.`);
           // For local proxies, we can be less strict
           setGlobalDispatcher(new ProxyAgent({
-            uri: new URL(proxyUrl),
+            uri: proxyUrl,
             connect: {
               rejectUnauthorized: false
             }
@@ -126,7 +126,7 @@ export class GeminiClient {
         console.error(`Invalid proxy URL: ${proxyUrl}`);
         // Fallback to a simple dispatcher if proxy is invalid
         setGlobalDispatcher(new ProxyAgent({
-          uri: new URL('http://127.0.0.1:3458'), // Default fallback
+          uri: 'http://127.0.0.1:3458', // Default fallback
           connect: {
             rejectUnauthorized: false
           }

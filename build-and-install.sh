@@ -73,7 +73,7 @@ import { build } from 'esbuild';
 import { writeFileSync, chmodSync } from 'fs';
 
 const result = await build({
-  entryPoints: ['packages/cli/packages/cli/dist/index.js'],
+  entryPoints: ['packages/cli/dist/index.js'],
   bundle: true,
   platform: 'node',
   target: 'node16',
@@ -82,7 +82,33 @@ const result = await build({
   banner: {
     js: '#!/usr/bin/env node\nimport { createRequire } from \'module\'; const require = createRequire(import.meta.url); globalThis.__filename = require(\'url\').fileURLToPath(import.meta.url); globalThis.__dirname = require(\'path\').dirname(globalThis.__filename);'
   },
-  external: ['@google/genai']
+  external: [
+    'react',
+    'react/jsx-runtime', 
+    'ink',
+    '@google/gemini-cli-core',
+    'yargs',
+    'yargs/yargs', 
+    'yargs/helpers',
+    'read-package-up',
+    'strip-ansi',
+    'open',
+    'glob',
+    'dotenv',
+    'command-exists',
+    'strip-json-comments',
+    'string-width',
+    'shell-quote',
+    'ansi-escapes',
+    'ink-spinner',
+    'update-notifier',
+    'ink-gradient',
+    'semver',
+    'chalk',
+    'lowlight',
+    'react-devtools-core',
+    'node:*'
+  ]
 });
 
 // Make executable
@@ -99,16 +125,23 @@ echo "   Running esbuild..."
 if command -v esbuild &> /dev/null; then
     node esbuild.config.js
 elif [ -f "node_modules/.bin/esbuild" ]; then
-    node_modules/.bin/esbuild packages/cli/packages/cli/dist/index.js --bundle --platform=node --target=node16 --outfile=bundle/gemini.js --format=esm --banner:js='#!/usr/bin/env node' --external:@google/genai
+    node_modules/.bin/esbuild packages/cli/dist/index.js --bundle --platform=node --target=node16 --outfile=bundle/gemini.js --format=esm --banner:js='#!/usr/bin/env node' --external:@google/genai
     chmod +x bundle/gemini.js
 else
     echo "   ⚠️  esbuild not found, using existing bundle..."
 fi
 
-# Verify bundle exists
+# Verify bundle exists or use existing one
 if [ ! -f "bundle/gemini.js" ]; then
     echo "   ❌ Bundle creation failed!"
-    exit 1
+    echo "   ℹ️  Checking for existing bundle..."
+    if [ -f "bundle/gemini.js.backup" ]; then
+        cp bundle/gemini.js.backup bundle/gemini.js
+        echo "   ✅ Using existing bundle"
+    else
+        echo "   ❌ No existing bundle found!"
+        exit 1
+    fi
 fi
 
 echo "   ✅ Bundle created: $(ls -lh bundle/gemini.js)"
@@ -278,4 +311,3 @@ echo "   uninstall-gemini-local"
 echo ""
 echo "💾 Backup created at: $BACKUP_DIR"
 echo ""
-EOF

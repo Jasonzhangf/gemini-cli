@@ -138,8 +138,8 @@ export async function createContentGenerator(
       vertexai: config.vertexai,
       httpOptions: {
         ...httpOptions,
-        apiEndpoint: config.apiEndpoint,
       },
+      ...(config.apiEndpoint && { apiEndpoint: config.apiEndpoint }),
     });
 
     return googleGenAI.models;

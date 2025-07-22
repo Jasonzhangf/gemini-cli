@@ -1,3 +1,9 @@
 #!/bin/bash
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve the real path, handling symlinks correctly
+if command -v readlink >/dev/null 2>&1; then
+  SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+else
+  SCRIPT_PATH="${BASH_SOURCE[0]}"
+fi
+DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 exec node "$DIR/gemini-proxy-runner.cjs" "$@"

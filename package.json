@@ -2,8 +2,12 @@
   "name": "gemini-cli-router",
   "version": "1.0.2",
   "description": "Gemini CLI Router for Third-Party AI Providers - Route Gemini CLI requests to SHUAIHONG, DeepSeek, OpenAI, Claude and other providers",
-  "main": "gcr-gemini",
+  "main": "./bundle/gemini.js",
   "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/cli"
+  ],
   "bin": {
     "gcr": "./gcr-gemini",
     "gemini-local": "./bundle/gemini.js",
@@ -34,7 +38,27 @@
   "author": "Jason Zhang",
   "license": "MIT",
   "dependencies": {
-    "node-fetch": "^3.3.2"
+    "ansi-escapes": "^7.0.0",
+    "chalk": "^5.4.1",
+    "command-exists": "^1.2.9",
+    "dotenv": "^17.2.0",
+    "glob": "^11.0.3",
+    "ink": "^6.0.1",
+    "ink-gradient": "^3.0.0",
+    "ink-spinner": "^5.0.0",
+    "lowlight": "^3.3.0",
+    "node-fetch": "^3.3.2",
+    "open": "^10.2.0",
+    "react": "^19.1.0",
+    "react-devtools-core": "^4.28.5",
+    "read-package-up": "^11.0.0",
+    "semver": "^7.7.2",
+    "shell-quote": "^1.8.3",
+    "string-width": "^7.2.0",
+    "strip-ansi": "^7.1.0",
+    "strip-json-comments": "^5.0.2",
+    "update-notifier": "^7.3.1",
+    "yargs": "^18.0.0"
   },
   "engines": {
     "node": ">=16.0.0"
@@ -61,5 +85,9 @@
     "README.md",
     "bundle/",
     "LOCAL-VERSION-README.md"
-  ]
+  ],
+  "devDependencies": {
+    "@types/mime-types": "^3.0.1",
+    "esbuild": "^0.25.8"
+  }
 }
