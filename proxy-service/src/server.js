@@ -49,6 +49,11 @@ async function retryWithBackoff(operation, options = {}) {
           continue;
         }
         
+        // If all retries exhausted for retryable errors, log final failure
+        if (isRetryableError && attempt >= maxRetries) {
+          console.error(`[Retry] All ${maxRetries} retry attempts exhausted for ${result.status} error`);
+        }
+        
         // For non-retryable errors, create a mock response to preserve the error
         return {
           ok: false,
@@ -201,11 +206,52 @@ app.all('/v1beta/*', async (req, res) => {
         const errorText = await response.text();
         console.error(`[Router] Provider error (${response.status}):`, errorText);
         
+        // Provide user-friendly error messages for common status codes
+        let userMessage;
+        switch (response.status) {
+          case 502:
+            userMessage = "Bad Gateway: The AI service is temporarily unavailable. Please try again later.";
+            break;
+          case 503:
+            userMessage = "Service Unavailable: The AI model is overloaded or under maintenance. Please try again in a few moments.";
+            break;
+          case 504:
+            userMessage = "Gateway Timeout: The request took too long to process. Please try again.";
+            break;
+          case 429:
+            userMessage = "Rate Limited: Too many requests. Please wait a moment before trying again.";
+            break;
+          case 401:
+            userMessage = "Authentication Error: Invalid or expired API key.";
+            break;
+          case 403:
+            userMessage = "Access Denied: Insufficient permissions or quota exceeded.";
+            break;
+          case 500:
+            userMessage = "Internal Server Error: The AI service encountered an error. Please try again later.";
+            break;
+          default:
+            // For other status codes, check if it contains specific error patterns
+            if (errorText.includes('overloaded') || errorText.includes('UNAVAILABLE')) {
+              userMessage = "Model Overloaded: The AI model is currently overloaded. Please try again later.";
+            } else if (errorText.includes('rate limit') || errorText.includes('quota exceeded')) {
+              userMessage = "Rate Limit Exceeded: Please wait before making another request.";
+            } else if (errorText.includes('timeout')) {
+              userMessage = "Request Timeout: The request took too long to process. Please try again.";
+            } else {
+              // Truncate very long error messages
+              userMessage = errorText.length > 200 ? 
+                `Provider error: ${errorText.substring(0, 200)}...` : 
+                `Provider error: ${errorText}`;
+            }
+        }
+        
         return res.status(response.status).json({
           error: {
-            message: `Provider error: ${errorText}`,
+            message: userMessage,
             type: 'provider_error',
-            code: response.status
+            code: response.status,
+            ...(config.debug && { details: errorText }) // Include full details only in debug mode
           }
         });
       }
